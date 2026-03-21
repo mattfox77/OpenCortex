@@ -1,0 +1,40 @@
+{
+  "name": "open-cortex",
+  "version": "0.1.0",
+  "description": "Distributed AI CLI orchestration for Open Brain — durable execution, shared context, multi-machine coordination",
+  "main": "src/worker.ts",
+  "scripts": {
+    "worker": "ts-node src/worker.ts",
+    "task": "ts-node scripts/start-task.ts",
+    "monitor": "ts-node scripts/start-task.ts --monitor",
+    "build": "tsc",
+    "clean": "rm -rf dist"
+  },
+  "keywords": [
+    "open-brain",
+    "temporal",
+    "ai-agents",
+    "distributed",
+    "orchestration",
+    "claude-code",
+    "mcp",
+    "durable-execution"
+  ],
+  "license": "MIT",
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.0",
+    "@temporalio/activity": "^1.11.0",
+    "@temporalio/client": "^1.11.0",
+    "@temporalio/worker": "^1.11.0",
+    "@temporalio/workflow": "^1.11.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=20.0.0"
+  }
+}
