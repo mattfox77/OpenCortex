@@ -143,7 +143,7 @@ export function apiRouter(
   const slack = new SlackClient(config);
 
   router.get('/health', (_req, res) => {
-    res.json({ ok: true, service: 'diwan-runtime' });
+    res.json({ ok: true, service: 'opencortex-runtime' });
   });
 
   router.get('/me', requireUser, (req, res) => {

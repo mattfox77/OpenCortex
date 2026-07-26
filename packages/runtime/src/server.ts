@@ -20,5 +20,5 @@ for (const session of prunedSessions) {
 const app = createApp(config, codeSessions, chat, undefined, jiraTracking);
 
 app.listen(config.PORT, () => {
-  console.log(`Diwan runtime listening on :${config.PORT}`);
+  console.log(`OpenCortex runtime listening on :${config.PORT}`);
 });

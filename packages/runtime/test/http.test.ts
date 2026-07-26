@@ -181,12 +181,8 @@ describe('http app', () => {
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain('<base href="/diwan/" />');
-    expect(html).toContain(
-      '<title>DIWAN — DSN Intelligent Workspace for Agentic eNgineering</title>',
-    );
-    expect(html).toContain(
-      '<h1>DSN Intelligent Workspace for Agentic eNgineering</h1>',
-    );
+    expect(html).toContain('<title>OpenCortex Runtime</title>');
+    expect(html).toContain('<h1>AI Engineering Workspace</h1>');
     expect(html).toContain('<h2>DysonCode</h2>');
     expect(html).not.toContain('<h2>OpenCode</h2>');
   });

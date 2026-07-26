@@ -53,7 +53,7 @@ export function createApp(
 
   const mounted = express.Router();
   mounted.use('/api/health', (_req, res) =>
-    res.json({ ok: true, service: 'diwan-runtime' }),
+    res.json({ ok: true, service: 'opencortex-runtime' }),
   );
   mounted.use('/api', publicRouter(config));
   mounted.use(
@@ -84,7 +84,7 @@ export function createApp(
   app.use(mountPath, mounted);
   if (mountPath !== '/') {
     app.get('/health', (_req, res) =>
-      res.json({ ok: true, service: 'diwan-runtime' }),
+      res.json({ ok: true, service: 'opencortex-runtime' }),
     );
   }
 
