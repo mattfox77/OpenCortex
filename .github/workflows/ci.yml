@@ -25,6 +25,14 @@ jobs:
         run: npm ci --include=dev
         working-directory: packages/orchestrator
 
+      - name: Install workbench dependencies
+        run: npm install --include=dev --package-lock=false --workspaces=false
+        working-directory: packages/workbench
+
+      - name: Install runtime dependencies
+        run: npm install --include=dev --package-lock=false --workspaces=false
+        working-directory: packages/runtime
+
       - name: Type check and config inventory
         run: npm run check
 
