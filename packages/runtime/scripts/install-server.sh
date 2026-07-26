@@ -294,8 +294,7 @@ provision_persisted_session_users() {
 
 # Stage the OpenCortex skill bundle so provision-diwan-user.sh can seed it into
 # every user's ~/.opencode/skills and ~/.codex/skills. The bundle is maintained
-# out-of-band and supplied as a local tarball or HTTPS URL. Optional legacy PAI
-# content is unpacked only when the bundle carries it explicitly.
+# out-of-band and supplied as a local tarball or HTTPS URL.
 #
 # Best-effort: a missing or unreachable bundle must NOT fail the install. If a
 # fetch fails but the staged skills directory already exists, the existing copy
@@ -334,10 +333,6 @@ ensure_skills() {
       mkdir -p "$dest"
       rm -rf "${dest}/skills"
       mv "${tmp}/skills" "${dest}/skills"
-      if [ -d "${tmp}/PAI" ]; then
-        rm -rf "${dest}/PAI"
-        mv "${tmp}/PAI" "${dest}/PAI"
-      fi
       echo "ensure_skills: staged skills to ${dest} ($(ls "${dest}/skills" | wc -l) packs)"
     else
       echo "ensure_skills: bundle malformed; leaving existing ${dest}/skills in place." >&2

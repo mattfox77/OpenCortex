@@ -116,17 +116,4 @@ seed_skills() {
 seed_skills "$skills_source" "$home/.opencode/skills"
 seed_skills "$skills_source" "$home/.codex/skills"
 
-legacy_pai_source="${OPENCORTEX_LEGACY_PAI_DIR:-${DIWAN_BRAIN_PAI_SOURCE:-}}"
-
-if [ -d "$legacy_pai_source" ]; then
-  seed_skills "$legacy_pai_source" "$home/.opencode/skills/PAI"
-  seed_skills "$legacy_pai_source" "$home/.codex/skills/PAI"
-  if [ -f "$home/.opencode/skills/PAI/SKILL.md" ]; then
-    sed -i '1{/^<!-- PAI SKILL.md/d;}' "$home/.opencode/skills/PAI/SKILL.md"
-  fi
-  if [ -f "$home/.codex/skills/PAI/SKILL.md" ]; then
-    sed -i '1{/^<!-- PAI SKILL.md/d;}' "$home/.codex/skills/PAI/SKILL.md"
-  fi
-fi
-
 echo "provisioned $user"

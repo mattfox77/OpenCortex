@@ -11,7 +11,7 @@ export interface SkillBundleManifest {
   description: string;
   files: SkillBundleFile[];
   targets: SkillInstallTarget[];
-  legacySource?: LegacySkillSource;
+  deferredImport?: DeferredSkillImport;
 }
 
 export interface SkillBundleFile {
@@ -22,10 +22,11 @@ export interface SkillBundleFile {
 
 export type SkillInstallTarget = "codex" | "opencode";
 
-export interface LegacySkillSource {
-  system: "braintrust";
-  importDeferred: true;
+export interface DeferredSkillImport {
+  sourceSystem: "braintrust";
+  migrationDeferred: true;
   reference?: string;
+  reason?: string;
 }
 
 export interface SkillBundleIntegrity {
@@ -60,9 +61,9 @@ export function validateSkillBundleManifest(input: unknown): SkillBundleManifest
     description,
     files: input.files.map(validateSkillBundleFile),
     targets: input.targets.map(validateSkillInstallTarget),
-    ...(input.legacySource === undefined
+    ...(input.deferredImport === undefined
       ? {}
-      : { legacySource: validateLegacySkillSource(input.legacySource) }),
+      : { deferredImport: validateDeferredSkillImport(input.deferredImport) }),
   };
 }
 
@@ -105,18 +106,21 @@ function validateSkillInstallTarget(input: unknown): SkillInstallTarget {
   throw new TypeError("Skill bundle target must be codex or opencode");
 }
 
-function validateLegacySkillSource(input: unknown): LegacySkillSource {
+function validateDeferredSkillImport(input: unknown): DeferredSkillImport {
   if (!isRecord(input)) {
-    throw new TypeError("legacySource must be an object");
+    throw new TypeError("deferredImport must be an object");
   }
-  assertEqual(input.system, "braintrust", "legacySource.system");
-  assertEqual(input.importDeferred, true, "legacySource.importDeferred");
+  assertEqual(input.sourceSystem, "braintrust", "deferredImport.sourceSystem");
+  assertEqual(input.migrationDeferred, true, "deferredImport.migrationDeferred");
   return {
-    system: "braintrust",
-    importDeferred: true,
+    sourceSystem: "braintrust",
+    migrationDeferred: true,
     ...(input.reference === undefined
       ? {}
-      : { reference: requiredString(input.reference, "legacySource.reference") }),
+      : { reference: requiredString(input.reference, "deferredImport.reference") }),
+    ...(input.reason === undefined
+      ? {}
+      : { reason: requiredString(input.reason, "deferredImport.reason") }),
   };
 }
 

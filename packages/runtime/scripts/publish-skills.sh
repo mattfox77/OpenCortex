@@ -6,8 +6,7 @@ set -euo pipefail
 #
 # The bundle is a tar.gz with a top-level `skills/` directory. Write it to a
 # local path, then publish that archive through the deployment channel for the
-# target environment. Optional legacy PAI content is included only when
-# explicitly configured.
+# target environment.
 #
 # Usage:
 #   OPENCORTEX_SKILLS_SOURCE=./skills \
@@ -17,11 +16,9 @@ set -euo pipefail
 # Env:
 #   OPENCORTEX_SKILLS_SOURCE      (required) dir with skill packs
 #   OPENCORTEX_SKILLS_BUNDLE_PATH (default: ./opencortex-skills.tar.gz)
-#   OPENCORTEX_LEGACY_PAI_SOURCE  (optional) legacy PAI dir
 
 skills_src="${OPENCORTEX_SKILLS_SOURCE:-${DIWAN_SKILLS_SOURCE:-}}"
 bundle_path="${OPENCORTEX_SKILLS_BUNDLE_PATH:-${DIWAN_SKILLS_BUNDLE_PATH:-./opencortex-skills.tar.gz}}"
-pai_src="${OPENCORTEX_LEGACY_PAI_SOURCE:-${DIWAN_PAI_SOURCE:-}}"
 
 if [ -z "$skills_src" ]; then
   echo "OPENCORTEX_SKILLS_SOURCE is required" >&2
@@ -44,18 +41,8 @@ else
   find "$tmp/bundle/skills" -name '._*' -delete
 fi
 
-if [ -d "$pai_src" ]; then
-  mkdir -p "$tmp/bundle/PAI"
-  if command -v rsync >/dev/null 2>&1; then
-    rsync -a --exclude='._*' "$pai_src"/ "$tmp/bundle/PAI"/
-  else
-    cp -a "$pai_src"/. "$tmp/bundle/PAI"/
-    find "$tmp/bundle/PAI" -name '._*' -delete
-  fi
-fi
-
 mkdir -p "$(dirname "$bundle_path")"
-tar -czf "$bundle_path" -C "$tmp/bundle" skills $( [ -d "$tmp/bundle/PAI" ] && echo PAI )
+tar -czf "$bundle_path" -C "$tmp/bundle" skills
 
 packs="$(ls "$tmp/bundle/skills" | wc -l | tr -d ' ')"
-echo "wrote ${packs} skill packs$( [ -d "$tmp/bundle/PAI" ] && echo ' + PAI') to ${bundle_path}"
+echo "wrote ${packs} skill packs to ${bundle_path}"
