@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenCortex internal PostgREST memory API
+After=opencortex-memory-db.service
+Requires=opencortex-memory-db.service
+
+[Container]
+ContainerName=opencortex-memory-api
+Image=docker.io/postgrest/postgrest:v12.2.3
+Network=opencortex.network
+Secret=opencortex_memory_db_uri,type=env,target=PGRST_DB_URI
+Environment=PGRST_DB_SCHEMAS=public
+Environment=PGRST_DB_ANON_ROLE=braintrust_api
+Secret=opencortex_memory_jwt_secret,type=env,target=PGRST_JWT_SECRET
+Environment=PGRST_DB_EXTRA_SEARCH_PATH=public
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target
