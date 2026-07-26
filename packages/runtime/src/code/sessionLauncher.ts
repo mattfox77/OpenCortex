@@ -10,6 +10,11 @@ import { promisify } from 'node:util';
 import net from 'node:net';
 import { dirname, join } from 'node:path';
 import { nanoid } from 'nanoid';
+import {
+  OpenCodeWorkbenchProvider,
+  opencodeRuntimeEnvironment as workbenchOpencodeRuntimeEnvironment,
+  type WorkbenchLaunchPlan,
+} from '@opencortex/workbench';
 import type { AuthenticatedUser } from '../auth/types.js';
 import type { AppConfig } from '../config/config.js';
 import { createOpenCodeSession } from './openCodePromptClient.js';
@@ -53,19 +58,25 @@ export interface AwsSessionManagerDetails {
 }
 
 export class SessionLauncher {
-  constructor(private readonly config: AppConfig) {}
+  constructor(
+    private readonly config: AppConfig,
+    private readonly workbenchProvider = new OpenCodeWorkbenchProvider(),
+  ) {}
 
   async launch(user: AuthenticatedUser): Promise<CodeSession> {
     const id = codeWorkspaceId(user);
     const port =
       this.config.DIWAN_OPENCODE_PORT_BASE + Math.floor(Math.random() * 1000);
-    // The embedded session opens into the user's git-root "repos" folder under
-    // their home. This is the landing place for repos they ask to pull, and
-    // OpenCode treats the git root as the project (a fresh chat, no specific
-    // repo preselected). Created + git-init'd lazily here so a session can
-    // launch even if provision-diwan-user.sh has not run for this user yet.
-    const userHome = `/home/${user.linuxUser}`;
-    const workspaceDir = `${userHome}/repos`;
+    const launchPlan = this.workbenchProvider.planLaunch({
+      user,
+      sessionId: id,
+      port,
+      basePath: this.config.DIWAN_BASE_PATH,
+      dataDir: this.config.DIWAN_DATA_DIR,
+      binaryPath: this.config.DIWAN_OPENCODE_BIN,
+      mode: this.config.DIWAN_EXEC_MODE,
+    });
+    const workspaceDir = launchPlan.workspaceDir;
     const logPath = join(
       this.config.DIWAN_DATA_DIR,
       'code-session-logs',
@@ -77,26 +88,12 @@ export class SessionLauncher {
       });
     }
 
-    const opencodeCommand = [
-      this.config.DIWAN_OPENCODE_BIN,
-      'web',
-      '--hostname',
-      '127.0.0.1',
-      '--port',
-      String(port),
-    ];
+    const opencodeCommand = launchPlan.command;
 
     // Ensure the repos git root exists and is initialized as the user, then run
     // opencode web from it. Done inside the sudo shell so the dirs/files are
     // owned by the target user (the diwan service user cannot write into homes).
-    const prepareUserRuntime = [
-      ...opencodeRuntimeEnvironment(userHome).map(
-        ([key, value]) => `export ${key}=${shellQuote(value)}`,
-      ),
-      `mkdir -p ${opencodeRuntimeDirs(userHome).map(shellQuote).join(' ')}`,
-      `mkdir -p ${shellQuote(workspaceDir)}`,
-      `[ -d ${shellQuote(`${workspaceDir}/.git`)} ] || git -C ${shellQuote(workspaceDir)} init -q`,
-    ].join(' && ');
+    const prepareUserRuntime = prepareWorkbenchRuntime(launchPlan);
 
     const command =
       this.config.DIWAN_EXEC_MODE === 'sudo'
@@ -179,7 +176,7 @@ export class SessionLauncher {
       linuxUser: user.linuxUser,
       workspaceDir,
       port,
-      urlPath: `${this.config.DIWAN_BASE_PATH.replace(/\/$/, '')}/code/session/${id}/`,
+      urlPath: launchPlan.urlPath,
       command,
       mode: this.config.DIWAN_EXEC_MODE,
     });
@@ -404,13 +401,7 @@ export function awsRemoteLaunchCommand(
 export function opencodeRuntimeEnvironment(
   homeDir: string,
 ): [string, string][] {
-  return [
-    ['HOME', homeDir],
-    ['XDG_CONFIG_HOME', `${homeDir}/.config`],
-    ['XDG_DATA_HOME', `${homeDir}/.local/share`],
-    ['XDG_STATE_HOME', `${homeDir}/.local/state`],
-    ['XDG_CACHE_HOME', `${homeDir}/.cache`],
-  ];
+  return Object.entries(workbenchOpencodeRuntimeEnvironment(homeDir));
 }
 
 export async function provisionLocalUser(
@@ -440,13 +431,15 @@ export function localProvisionCommand(
   ];
 }
 
-function opencodeRuntimeDirs(homeDir: string): string[] {
+function prepareWorkbenchRuntime(launchPlan: WorkbenchLaunchPlan): string {
   return [
-    `${homeDir}/.config/opencode`,
-    `${homeDir}/.local/share/opencode`,
-    `${homeDir}/.local/state/opencode`,
-    `${homeDir}/.cache/opencode`,
-  ];
+    ...Object.entries(launchPlan.environment).map(
+      ([key, value]) => `export ${key}=${shellQuote(value)}`,
+    ),
+    `mkdir -p ${launchPlan.runtimeDirs.map(shellQuote).join(' ')}`,
+    `mkdir -p ${shellQuote(launchPlan.workspaceDir)}`,
+    `[ -d ${shellQuote(`${launchPlan.workspaceDir}/.git`)} ] || git -C ${shellQuote(launchPlan.workspaceDir)} init -q`,
+  ].join(' && ');
 }
 
 function errorMessage(error: unknown): string {

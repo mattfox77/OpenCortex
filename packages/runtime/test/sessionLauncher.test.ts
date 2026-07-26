@@ -97,6 +97,7 @@ describe('AWS Session Manager sessions', () => {
       ['XDG_DATA_HOME', '/home/mfox/.local/share'],
       ['XDG_STATE_HOME', '/home/mfox/.local/state'],
       ['XDG_CACHE_HOME', '/home/mfox/.cache'],
+      ['OPENCODE_CONFIG', '/home/mfox/.config/opencode/opencode.json'],
     ]);
   });
 

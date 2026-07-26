@@ -32,6 +32,15 @@ import {
   type JiraSessionLinkSource,
 } from '../jira/jiraTrackingStore.js';
 
+const tokenExchangeResponseSchema = z.object({
+  id_token: z.string().optional(),
+  access_token: z.string().optional(),
+  expires_in: z.number().optional(),
+  token_type: z.string().optional(),
+  error: z.string().optional(),
+  error_description: z.string().optional(),
+});
+
 export function publicRouter(config: AppConfig): express.Router {
   const router = express.Router();
 
@@ -80,7 +89,9 @@ export function publicRouter(config: AppConfig): express.Router {
           body: tokenBody,
         },
       );
-      const tokenPayload = await tokenResponse.json();
+      const tokenPayload = tokenExchangeResponseSchema.parse(
+        await tokenResponse.json(),
+      );
 
       if (!tokenResponse.ok) {
         return res.status(400).json({
