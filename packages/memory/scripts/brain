@@ -15,49 +15,59 @@ if [ -z "${OPENCORTEX_MEMORY_CONFIG:-}" ] \
   BT_DIR="${HOME}/.braintrust"
   BT_CONF="${BT_DIR}/config"
 fi
-DYSONCODE_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/dysoncode"
-DYSONCODE_AUTH_JSON="${DYSONCODE_CONFIG_DIR}/auth.json"
+OPENCORTEX_AUTH_CONFIG_DIR_OVERRIDE="${OPENCORTEX_AUTH_CONFIG_DIR:-}"
+OPENCORTEX_AUTH_JSON_OVERRIDE="${OPENCORTEX_AUTH_JSON:-}"
+OPENCORTEX_AUTH_CONFIG_DIR="${OPENCORTEX_AUTH_CONFIG_DIR_OVERRIDE:-${XDG_CONFIG_HOME:-${HOME}/.config}/opencortex}"
+OPENCORTEX_AUTH_JSON="${OPENCORTEX_AUTH_JSON_OVERRIDE:-${OPENCORTEX_AUTH_CONFIG_DIR}/auth.json}"
+LEGACY_AUTH_JSON="${XDG_CONFIG_HOME:-${HOME}/.config}/dysoncode/auth.json"
+if [ -z "$OPENCORTEX_AUTH_CONFIG_DIR_OVERRIDE" ] \
+  && [ -z "$OPENCORTEX_AUTH_JSON_OVERRIDE" ] \
+  && [ ! -f "$OPENCORTEX_AUTH_JSON" ] \
+  && [ -f "$LEGACY_AUTH_JSON" ]; then
+  OPENCORTEX_AUTH_CONFIG_DIR="$(dirname "$LEGACY_AUTH_JSON")"
+  OPENCORTEX_AUTH_JSON="$LEGACY_AUTH_JSON"
+fi
 
 now_utc() {
   date -u +"%Y-%m-%dT%H:%M:%SZ"
 }
 
-write_dysoncode_auth_json() {
+write_opencortex_auth_json() {
   local brain_json="$1"
-  mkdir -p "$DYSONCODE_CONFIG_DIR"
+  mkdir -p "$OPENCORTEX_AUTH_CONFIG_DIR"
   local existing="{}"
-  if [ -f "$DYSONCODE_AUTH_JSON" ] && jq -e 'type == "object"' "$DYSONCODE_AUTH_JSON" >/dev/null 2>&1; then
-    existing=$(cat "$DYSONCODE_AUTH_JSON")
+  if [ -f "$OPENCORTEX_AUTH_JSON" ] && jq -e 'type == "object"' "$OPENCORTEX_AUTH_JSON" >/dev/null 2>&1; then
+    existing=$(cat "$OPENCORTEX_AUTH_JSON")
   fi
-  local tmp="${DYSONCODE_AUTH_JSON}.tmp.$$"
+  local tmp="${OPENCORTEX_AUTH_JSON}.tmp.$$"
   jq -n --argjson existing "$existing" --argjson brain "$brain_json" --arg updated_at "$(now_utc)" \
     '$existing + {schemaVersion:1, updatedAt:$updated_at, source:"brain-cli", brain:$brain}' > "$tmp"
   chmod 600 "$tmp"
-  mv "$tmp" "$DYSONCODE_AUTH_JSON"
+  mv "$tmp" "$OPENCORTEX_AUTH_JSON"
 }
 
-patch_dysoncode_auth_json() {
+patch_opencortex_auth_json() {
   local patch_json="$1"
-  mkdir -p "$DYSONCODE_CONFIG_DIR"
+  mkdir -p "$OPENCORTEX_AUTH_CONFIG_DIR"
   local existing="{}"
-  if [ -f "$DYSONCODE_AUTH_JSON" ] && jq -e 'type == "object"' "$DYSONCODE_AUTH_JSON" >/dev/null 2>&1; then
-    existing=$(cat "$DYSONCODE_AUTH_JSON")
+  if [ -f "$OPENCORTEX_AUTH_JSON" ] && jq -e 'type == "object"' "$OPENCORTEX_AUTH_JSON" >/dev/null 2>&1; then
+    existing=$(cat "$OPENCORTEX_AUTH_JSON")
   fi
-  local tmp="${DYSONCODE_AUTH_JSON}.tmp.$$"
+  local tmp="${OPENCORTEX_AUTH_JSON}.tmp.$$"
   jq -n --argjson existing "$existing" --argjson patch "$patch_json" --arg updated_at "$(now_utc)" \
     '$existing + $patch + {schemaVersion:1, updatedAt:$updated_at, source:"brain-cli"}' > "$tmp"
   chmod 600 "$tmp"
-  mv "$tmp" "$DYSONCODE_AUTH_JSON"
+  mv "$tmp" "$OPENCORTEX_AUTH_JSON"
 }
 
-patch_dysoncode_brain_broker_status() {
+patch_opencortex_brain_broker_status() {
   local status_json="$1"
-  mkdir -p "$DYSONCODE_CONFIG_DIR"
+  mkdir -p "$OPENCORTEX_AUTH_CONFIG_DIR"
   local existing="{}"
-  if [ -f "$DYSONCODE_AUTH_JSON" ] && jq -e 'type == "object"' "$DYSONCODE_AUTH_JSON" >/dev/null 2>&1; then
-    existing=$(cat "$DYSONCODE_AUTH_JSON")
+  if [ -f "$OPENCORTEX_AUTH_JSON" ] && jq -e 'type == "object"' "$OPENCORTEX_AUTH_JSON" >/dev/null 2>&1; then
+    existing=$(cat "$OPENCORTEX_AUTH_JSON")
   fi
-  local tmp="${DYSONCODE_AUTH_JSON}.tmp.$$"
+  local tmp="${OPENCORTEX_AUTH_JSON}.tmp.$$"
   jq -n \
     --argjson existing "$existing" \
     --argjson status "$status_json" \
@@ -101,7 +111,7 @@ patch_dysoncode_brain_broker_status() {
       })
     }' > "$tmp"
   chmod 600 "$tmp"
-  mv "$tmp" "$DYSONCODE_AUTH_JSON"
+  mv "$tmp" "$OPENCORTEX_AUTH_JSON"
 }
 
 load_config_soft() {
@@ -1260,12 +1270,12 @@ cmd_auth_status() {
     esac
   done
   load_config_soft
-  refresh_dysoncode_auth_metadata >/dev/null 2>&1 || true
+  refresh_opencortex_auth_metadata >/dev/null 2>&1 || true
   if [ "$json" = "1" ]; then
-    if [ -f "$DYSONCODE_AUTH_JSON" ]; then
-      jq '.' "$DYSONCODE_AUTH_JSON"
+    if [ -f "$OPENCORTEX_AUTH_JSON" ]; then
+      jq '.' "$OPENCORTEX_AUTH_JSON"
     else
-      jq -n --arg path "$DYSONCODE_AUTH_JSON" '{authJson:$path, error:"auth_json_missing"}'
+      jq -n --arg path "$OPENCORTEX_AUTH_JSON" '{authJson:$path, error:"auth_json_missing"}'
       return 1
     fi
     return 0
@@ -1274,8 +1284,8 @@ cmd_auth_status() {
   echo "  config: ${BT_CONF}"
   if [ ! -f "$BT_CONF" ]; then
     echo "  status: missing"
-    echo "  auth json: ${DYSONCODE_AUTH_JSON}"
-    [ -f "$DYSONCODE_AUTH_JSON" ] && echo "  auth json status: present" || echo "  auth json status: missing"
+    echo "  auth json: ${OPENCORTEX_AUTH_JSON}"
+    [ -f "$OPENCORTEX_AUTH_JSON" ] && echo "  auth json status: present" || echo "  auth json status: missing"
     return 1
   fi
   echo "  status: configured"
@@ -1294,12 +1304,12 @@ cmd_auth_status() {
   fi
   echo "  provisioned by: ${AUTH_PROVISIONED_BY:-}"
   echo "  identity provider: ${AUTH_IDENTITY_PROVIDER:-}"
-  echo "  auth json: ${DYSONCODE_AUTH_JSON}"
-  if [ -f "$DYSONCODE_AUTH_JSON" ]; then
+  echo "  auth json: ${OPENCORTEX_AUTH_JSON}"
+  if [ -f "$OPENCORTEX_AUTH_JSON" ]; then
     local auth_key_prefix auth_verified auth_write
-    auth_key_prefix=$(jq -r '.brain.keyPrefix // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
-    auth_verified=$(jq -r '.brain.lastVerifiedAt // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
-    auth_write=$(jq -r '.brain.lastConfigWriteAt // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    auth_key_prefix=$(jq -r '.brain.keyPrefix // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
+    auth_verified=$(jq -r '.brain.lastVerifiedAt // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
+    auth_write=$(jq -r '.brain.lastConfigWriteAt // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
     echo "  auth json status: present"
     echo "  auth json key: ${auth_key_prefix:-}"
     echo "  auth json verified: ${auth_verified:-}"
@@ -1317,18 +1327,18 @@ cmd_auth_refresh_metadata() {
       *) echo "Usage: brain auth refresh-metadata [--json]" >&2; return 1 ;;
     esac
   done
-  refresh_dysoncode_auth_metadata
+  refresh_opencortex_auth_metadata
   if [ "$json" = "1" ]; then
-    jq '.' "$DYSONCODE_AUTH_JSON"
+    jq '.' "$OPENCORTEX_AUTH_JSON"
     return 0
   fi
-  echo "Updated ${DYSONCODE_AUTH_JSON} metadata"
+  echo "Updated ${OPENCORTEX_AUTH_JSON} metadata"
 }
 
 auth_health_payload() {
-  refresh_dysoncode_auth_metadata >/dev/null 2>&1 || true
-  if [ ! -f "$DYSONCODE_AUTH_JSON" ]; then
-    jq -n --arg checked_at "$(now_utc)" --arg path "$DYSONCODE_AUTH_JSON" '{
+  refresh_opencortex_auth_metadata >/dev/null 2>&1 || true
+  if [ ! -f "$OPENCORTEX_AUTH_JSON" ]; then
+    jq -n --arg checked_at "$(now_utc)" --arg path "$OPENCORTEX_AUTH_JSON" '{
       checkedAt:$checked_at,
       overall:"critical",
       authJson:$path,
@@ -1337,7 +1347,7 @@ auth_health_payload() {
     return 0
   fi
 
-  jq --arg checked_at "$(now_utc)" --arg auth_json "$DYSONCODE_AUTH_JSON" --argjson now_epoch "$(date -u +%s)" '
+  jq --arg checked_at "$(now_utc)" --arg auth_json "$OPENCORTEX_AUTH_JSON" --argjson now_epoch "$(date -u +%s)" '
     def epoch($v): try ($v | fromdateiso8601) catch null;
     def stale($v; $seconds):
       (epoch($v)) as $t
@@ -1367,16 +1377,16 @@ auth_health_payload() {
     def brainActions($brain):
       if $brain.reason == "ready" then []
       elif $brain.reason == "brain_config_missing" then [
-        {id:"brain.repair", label:"Repair Brain config", command:"brain auth repair", run:"diwan"}
+        {id:"brain.repair", label:"Repair Memory config", command:"brain auth repair", run:"opencortex"}
       ]
       elif $brain.reason == "brain_key_prefix_missing" then [
-        {id:"brain.repair", label:"Repair Brain config", command:"brain auth repair", run:"diwan"}
+        {id:"brain.repair", label:"Repair Memory config", command:"brain auth repair", run:"opencortex"}
       ]
       elif $brain.reason == "identity_disabled" then [
-        {id:"brain.request-access", label:"Request Diwan access", command:"open admin portal", run:"admin-portal"}
+        {id:"brain.request-access", label:"Request OpenCortex access", command:"open admin portal", run:"admin-portal"}
       ]
       elif $brain.reason == "brain_key_revoked" then [
-        {id:"brain.repair", label:"Repair Brain config", command:"brain auth repair", run:"diwan"}
+        {id:"brain.repair", label:"Repair Memory config", command:"brain auth repair", run:"opencortex"}
       ]
       elif $brain.reason == "broker_status_missing" then [
         {id:"brain.refresh-broker-status", label:"Refresh broker status", command:"brain auth broker-status --json", run:"local-if-broker-token"}
@@ -1442,7 +1452,7 @@ auth_health_payload() {
           })
         }
       }
-  ' "$DYSONCODE_AUTH_JSON"
+  ' "$OPENCORTEX_AUTH_JSON"
 }
 
 cmd_auth_health() {
@@ -1535,20 +1545,20 @@ cmd_auth_broker_status() {
   done
 
   auth_url="${auth_url:-${BRAIN_AUTH_URL:-}}"
-  token="${token:-${BRAIN_AUTH_TOKEN:-${DIWAN_BRAIN_AUTH_TOKEN:-}}}"
+  token="${token:-${BRAIN_AUTH_TOKEN:-${OPENCORTEX_MEMORY_AUTH_TOKEN:-${DIWAN_BRAIN_AUTH_TOKEN:-}}}}"
 
-  if [ -f "$DYSONCODE_AUTH_JSON" ] && jq -e '.brain' "$DYSONCODE_AUTH_JSON" >/dev/null 2>&1; then
-    subject="${subject:-$(jq -r '.brain.subject // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)}"
-    email="${email:-$(jq -r '.brain.email // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)}"
-    owner="${owner:-$(jq -r '.brain.ownerId // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)}"
-    provider="${provider:-$(jq -r '.brain.provider // "entra"' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)}"
+  if [ -f "$OPENCORTEX_AUTH_JSON" ] && jq -e '.brain' "$OPENCORTEX_AUTH_JSON" >/dev/null 2>&1; then
+    subject="${subject:-$(jq -r '.brain.subject // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)}"
+    email="${email:-$(jq -r '.brain.email // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)}"
+    owner="${owner:-$(jq -r '.brain.ownerId // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)}"
+    provider="${provider:-$(jq -r '.brain.provider // "entra"' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)}"
   fi
   owner="${owner:-${OWNER_ID:-}}"
 
   [ -z "$auth_url" ] && { echo "brain: set BRAIN_AUTH_URL or pass --auth-url" >&2; return 1; }
-  [ -z "$token" ] && { echo "brain: set BRAIN_AUTH_TOKEN/DIWAN_BRAIN_AUTH_TOKEN or pass --token" >&2; return 1; }
+  [ -z "$token" ] && { echo "brain: set BRAIN_AUTH_TOKEN/OPENCORTEX_MEMORY_AUTH_TOKEN or pass --token" >&2; return 1; }
   [ -z "$subject" ] && [ -z "$email" ] && [ -z "$owner" ] && {
-    echo "brain: pass --subject, --email, or --owner, or refresh ${DYSONCODE_AUTH_JSON}" >&2
+    echo "brain: pass --subject, --email, or --owner, or refresh ${OPENCORTEX_AUTH_JSON}" >&2
     return 1
   }
 
@@ -1564,7 +1574,7 @@ cmd_auth_broker_status() {
     echo "brain: broker credential status request failed" >&2
     return 1
   fi
-  patch_dysoncode_brain_broker_status "$response"
+  patch_opencortex_brain_broker_status "$response"
 
   if [ "$json" = "1" ]; then
     printf '%s\n' "$response" | jq '.'
@@ -1638,7 +1648,7 @@ broker_config_written_payload() {
     }'
 }
 
-dysoncode_brain_auth_payload() {
+opencortex_brain_auth_payload() {
   local subject="$1" email="$2" owner_id="$3" bt_url="$4" key_prefix="$5" auth_mode="$6" provisioned_by="$7" identity_provider="$8" rotation_due_at="$9"
   jq -n \
     --argjson managed true \
@@ -1681,16 +1691,16 @@ current_brain_auth_metadata() {
   fi
 
   local existing_subject="" existing_email="" existing_provider="" existing_provisioned_by="" existing_identity_provider="" existing_rotation_due_at="" existing_config_write_at="" existing_broker_verified_at="" existing_broker_status="null"
-  if [ -f "$DYSONCODE_AUTH_JSON" ] && jq -e '.brain' "$DYSONCODE_AUTH_JSON" >/dev/null 2>&1; then
-    existing_subject=$(jq -r '.brain.subject // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
-    existing_email=$(jq -r '.brain.email // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
-    existing_provider=$(jq -r '.brain.provider // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
-    existing_provisioned_by=$(jq -r '.brain.provisionedBy // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
-    existing_identity_provider=$(jq -r '.brain.identityProvider // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
-    existing_rotation_due_at=$(jq -r '.brain.rotationDueAt // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
-    existing_config_write_at=$(jq -r '.brain.lastConfigWriteAt // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
-    existing_broker_verified_at=$(jq -r '.brain.brokerVerifiedAt // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
-    existing_broker_status=$(jq -c '.brain.brokerStatus // null' "$DYSONCODE_AUTH_JSON" 2>/dev/null || printf 'null')
+  if [ -f "$OPENCORTEX_AUTH_JSON" ] && jq -e '.brain' "$OPENCORTEX_AUTH_JSON" >/dev/null 2>&1; then
+    existing_subject=$(jq -r '.brain.subject // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
+    existing_email=$(jq -r '.brain.email // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
+    existing_provider=$(jq -r '.brain.provider // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
+    existing_provisioned_by=$(jq -r '.brain.provisionedBy // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
+    existing_identity_provider=$(jq -r '.brain.identityProvider // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
+    existing_rotation_due_at=$(jq -r '.brain.rotationDueAt // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
+    existing_config_write_at=$(jq -r '.brain.lastConfigWriteAt // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
+    existing_broker_verified_at=$(jq -r '.brain.brokerVerifiedAt // empty' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || true)
+    existing_broker_status=$(jq -c '.brain.brokerStatus // null' "$OPENCORTEX_AUTH_JSON" 2>/dev/null || printf 'null')
   fi
 
   local key_prefix=""
@@ -1816,12 +1826,12 @@ atlassian_auth_metadata() {
     }'
 }
 
-refresh_dysoncode_auth_metadata() {
+refresh_opencortex_auth_metadata() {
   local brain github atlassian
   brain=$(current_brain_auth_metadata)
   github=$(github_auth_metadata)
   atlassian=$(atlassian_auth_metadata)
-  patch_dysoncode_auth_json "$(jq -n \
+  patch_opencortex_auth_json "$(jq -n \
     --argjson brain "$brain" \
     --argjson github "$github" \
     --argjson atlassian "$atlassian" \
@@ -1850,7 +1860,7 @@ write_broker_config() {
   key_prefix=$(printf '%s' "$response" | jq -r '.brain.key_prefix // empty')
   rotation_due_at=$(printf '%s' "$response" | jq -r '.brain.rotation_due_at // empty')
   [ -z "$bt_key" ] || [ -z "$bt_raw_key" ] || [ -z "$owner_id" ] && {
-    echo "brain: broker response did not include a newly issued secret; ask Diwan to repair with forceRotate=true" >&2
+    echo "brain: broker response did not include a newly issued secret; ask OpenCortex to repair with forceRotate=true" >&2
     return 1
   }
   [ -n "$key_prefix" ] || key_prefix="$(brain_key_prefix "$bt_raw_key")"
@@ -1881,11 +1891,11 @@ OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-opencortex-memory}
 CONF
   chmod 600 "$tmp"
   mv "$tmp" "$BT_CONF"
-  write_dysoncode_auth_json "$(dysoncode_brain_auth_payload \
+  write_opencortex_auth_json "$(opencortex_brain_auth_payload \
     "$subject" "$email" "$owner_id" "${bt_url:-${BT_URL:-}}" "$key_prefix" \
     "entra-provisioned-key" "${AUTH_PROVISIONED_BY:-$requested_by}" "entra" "$rotation_due_at")"
   echo "Updated ${BT_CONF} for owner ${owner_id}"
-  echo "Updated ${DYSONCODE_AUTH_JSON} metadata for OpenCortex Memory"
+  echo "Updated ${OPENCORTEX_AUTH_JSON} metadata for OpenCortex Memory"
 }
 
 cmd_auth_repair_or_rotate() {
@@ -1893,7 +1903,7 @@ cmd_auth_repair_or_rotate() {
   load_config_soft
   local auth_url token subject email name owner role requested_by
   auth_url="$(broker_arg_value --auth-url "$@")"; auth_url="${auth_url:-${BRAIN_AUTH_URL:-}}"
-  token="$(broker_arg_value --token "$@")"; token="${token:-${BRAIN_AUTH_TOKEN:-${DIWAN_BRAIN_AUTH_TOKEN:-}}}"
+  token="$(broker_arg_value --token "$@")"; token="${token:-${BRAIN_AUTH_TOKEN:-${OPENCORTEX_MEMORY_AUTH_TOKEN:-${DIWAN_BRAIN_AUTH_TOKEN:-}}}}"
   subject="$(broker_arg_value --subject "$@")"; subject="${subject:-${ENTRA_SUBJECT:-${ENTRA_OID:-}}}"
   email="$(broker_arg_value --email "$@")"; email="${email:-${ENTRA_EMAIL:-${USER_EMAIL:-}}}"
   name="$(broker_arg_value --name "$@")"; name="${name:-${ENTRA_NAME:-}}"
@@ -1901,7 +1911,7 @@ cmd_auth_repair_or_rotate() {
   role="$(broker_arg_value --role "$@")"; role="${role:-member}"
   requested_by="${AUTH_PROVISIONED_BY:-brain-cli}"
   [ -z "$auth_url" ] && { echo "brain: set BRAIN_AUTH_URL or pass --auth-url" >&2; return 1; }
-  [ -z "$token" ] && { echo "brain: set BRAIN_AUTH_TOKEN/DIWAN_BRAIN_AUTH_TOKEN or pass --token" >&2; return 1; }
+  [ -z "$token" ] && { echo "brain: set BRAIN_AUTH_TOKEN/OPENCORTEX_MEMORY_AUTH_TOKEN or pass --token" >&2; return 1; }
   [ -z "$subject" ] && { echo "brain: set ENTRA_SUBJECT/ENTRA_OID or pass --subject" >&2; return 1; }
   [ -z "$email" ] && { echo "brain: set ENTRA_EMAIL/USER_EMAIL or pass --email" >&2; return 1; }
 
@@ -2102,9 +2112,9 @@ PHELP
   fi
   if [ -z "$summary" ]; then
     if [ -n "$text_snippet" ]; then
-      summary="Reusable ${artifact_type} artifact published from ${file}. It is indexed for team search and preserved in the BrainTrust artifact repository."
+      summary="Reusable ${artifact_type} artifact published from ${file}. It is indexed for team search and preserved in the OpenCortex artifact repository."
     else
-      summary="Reusable ${artifact_type} artifact published from ${file}. Original binary/non-text content is preserved in the BrainTrust artifact repository."
+      summary="Reusable ${artifact_type} artifact published from ${file}. Original binary/non-text content is preserved in the OpenCortex artifact repository."
     fi
   fi
 
