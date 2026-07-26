@@ -7,7 +7,7 @@ import {
 
 describe("linux user mapping", () => {
   it("maps configured email addresses to deterministic OpenCortex Linux users", () => {
-    expect(emailToLinuxUser("Matt.Fox@acme.test", { DIWAN_LINUX_USER_PREFIX: "" })).toBe("matt-fox");
+    expect(emailToLinuxUser("Matt.Fox@acme.test", { OPENCORTEX_LINUX_USER_PREFIX: "" })).toBe("matt-fox");
   });
 
   it("rejects domains outside the configured allowlist", () => {

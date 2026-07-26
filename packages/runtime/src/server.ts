@@ -5,9 +5,9 @@ import { ChatStore } from './chat/chatStore.js';
 import { JiraTrackingStore } from './jira/jiraTrackingStore.js';
 
 const config = loadConfig();
-const codeSessions = new SessionStore(config.DIWAN_DATA_DIR);
+const codeSessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
 const chat = new ChatStore(config);
-const jiraTracking = new JiraTrackingStore(config.DIWAN_DATA_DIR);
+const jiraTracking = new JiraTrackingStore(config.OPENCORTEX_DATA_DIR);
 
 // Reload sessions that survived a restart before serving requests. Sessions
 // whose OpenCode process is no longer listening are kept so request handlers can

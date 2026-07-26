@@ -104,18 +104,18 @@ export class ChatStore {
   constructor(
     private readonly config: Pick<
       AppConfig,
-      | 'DIWAN_DATA_DIR'
-      | 'DIWAN_ALLOWED_EMAIL_DOMAINS'
-      | 'DIWAN_LINUX_USER_PREFIX'
+      | 'OPENCORTEX_DATA_DIR'
+      | 'OPENCORTEX_ALLOWED_EMAIL_DOMAINS'
+      | 'OPENCORTEX_LINUX_USER_PREFIX'
     >,
   ) {
-    this.legacyFilePath = join(config.DIWAN_DATA_DIR, 'chat.jsonl');
+    this.legacyFilePath = join(config.OPENCORTEX_DATA_DIR, 'chat.jsonl');
     this.channelsFilePath = join(
-      config.DIWAN_DATA_DIR,
+      config.OPENCORTEX_DATA_DIR,
       'chat',
       'channels.json',
     );
-    this.messagesDir = join(config.DIWAN_DATA_DIR, 'chat', 'messages');
+    this.messagesDir = join(config.OPENCORTEX_DATA_DIR, 'chat', 'messages');
     mkdirSync(dirname(this.channelsFilePath), { recursive: true });
     mkdirSync(this.messagesDir, { recursive: true });
     this.loadChannels();
@@ -318,7 +318,7 @@ export class ChatStore {
     const normalizedEmail = email.trim().toLowerCase();
     assertAllowedEmailDomains(
       normalizedEmail,
-      this.config.DIWAN_ALLOWED_EMAIL_DOMAINS,
+      this.config.OPENCORTEX_ALLOWED_EMAIL_DOMAINS,
     );
     if (!this.isMember(channel, normalizedEmail)) {
       const now = new Date().toISOString();
@@ -706,12 +706,12 @@ function safeChannelFileName(channelId: string): string {
 }
 
 function generalSystemUser(
-  config: Pick<AppConfig, 'DIWAN_LINUX_USER_PREFIX'>,
+  config: Pick<AppConfig, 'OPENCORTEX_LINUX_USER_PREFIX'>,
 ): AuthenticatedUser {
   return {
     sub: 'system:general',
     email: 'system',
     groups: [],
-    linuxUser: `${config.DIWAN_LINUX_USER_PREFIX}system`.slice(0, 31),
+    linuxUser: `${config.OPENCORTEX_LINUX_USER_PREFIX}system`.slice(0, 31),
   };
 }

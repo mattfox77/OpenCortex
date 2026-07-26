@@ -18,20 +18,20 @@ import { JiraTrackingStore } from '../jira/jiraTrackingStore.js';
 
 export function createApp(
   config: AppConfig,
-  codeSessions: SessionStore = new SessionStore(config.DIWAN_DATA_DIR),
+  codeSessions: SessionStore = new SessionStore(config.OPENCORTEX_DATA_DIR),
   chat: ChatStore = new ChatStore(config),
-  pairPrompts: PairPromptStore = new PairPromptStore(config.DIWAN_DATA_DIR),
+  pairPrompts: PairPromptStore = new PairPromptStore(config.OPENCORTEX_DATA_DIR),
   jiraTracking: JiraTrackingStore = new JiraTrackingStore(
-    config.DIWAN_DATA_DIR,
+    config.OPENCORTEX_DATA_DIR,
   ),
 ): express.Express {
   const app = express();
-  const mountPath = config.DIWAN_BASE_PATH || '/';
+  const mountPath = config.OPENCORTEX_BASE_PATH || '/';
   const publicDir = new URL('../ui/public', import.meta.url).pathname;
   const indexPath = new URL('../ui/public/index.html', import.meta.url)
     .pathname;
   const indexHtml = readFileSync(indexPath, 'utf8').replace(
-    '%DIWAN_BASE_HREF%',
+    '%OPENCORTEX_BASE_HREF%',
     baseHref(mountPath),
   );
 

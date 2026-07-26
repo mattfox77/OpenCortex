@@ -4,8 +4,8 @@ import { provisioningCommands } from '../src/system/provisioning.js';
 import type { AppConfig } from '../src/config/config.js';
 
 const config = {
-  DIWAN_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
-  DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
+  OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
+  OPENCORTEX_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
 } as AppConfig;
 
 describe('provisioning', () => {

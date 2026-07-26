@@ -34,7 +34,7 @@ export class SlackClient {
       | 'SLACK_API_BASE_URL'
       | 'SLACK_WORKSPACE_URL'
       | 'SLACK_SESSION_CHANNEL_PREFIX'
-      | 'DIWAN_PUBLIC_BASE_URL'
+      | 'OPENCORTEX_PUBLIC_BASE_URL'
     >,
   ) {}
 
@@ -78,7 +78,7 @@ export class SlackClient {
       result.channelId,
       [
         `OpenCortex Workbench session started for ${session.ownerEmail}.`,
-        `Session: ${new URL(session.urlPath, this.config.DIWAN_PUBLIC_BASE_URL).toString()}`,
+        `Session: ${new URL(session.urlPath, this.config.OPENCORTEX_PUBLIC_BASE_URL).toString()}`,
         `Workspace: ${session.workspaceDir}`,
       ].join('\n'),
     );

@@ -24,7 +24,7 @@ const reserved = new Set([
 
 export function emailToLinuxUser(
   email: string,
-  config: Pick<AppConfig, 'DIWAN_LINUX_USER_PREFIX'>,
+  config: Pick<AppConfig, 'OPENCORTEX_LINUX_USER_PREFIX'>,
 ): string {
   const localPart = email.split('@')[0] ?? '';
   const safeLocal = localPart
@@ -37,7 +37,7 @@ export function emailToLinuxUser(
     throw new Error('Email cannot be mapped to a safe Linux user');
   }
 
-  return `${config.DIWAN_LINUX_USER_PREFIX}${safeLocal}`.slice(0, 31);
+  return `${config.OPENCORTEX_LINUX_USER_PREFIX}${safeLocal}`.slice(0, 31);
 }
 
 export function assertAllowedEmailDomain(email: string, domain: string): void {

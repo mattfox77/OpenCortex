@@ -13,7 +13,7 @@ import {
 import type { AppConfig } from '../src/config/config.js';
 
 const config = {
-  DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
+  OPENCORTEX_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
 } as AppConfig;
 
 describe('SessionLauncher', () => {

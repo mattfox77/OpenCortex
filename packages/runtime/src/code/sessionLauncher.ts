@@ -55,24 +55,24 @@ export class SessionLauncher {
   async launch(user: AuthenticatedUser): Promise<CodeSession> {
     const id = codeWorkspaceId(user);
     const port =
-      this.config.DIWAN_OPENCODE_PORT_BASE + Math.floor(Math.random() * 1000);
+      this.config.OPENCORTEX_WORKBENCH_PORT_BASE + Math.floor(Math.random() * 1000);
     const launchPlan = this.workbenchProvider.planLaunch({
       user,
       sessionId: id,
       port,
-      basePath: this.config.DIWAN_BASE_PATH,
-      dataDir: this.config.DIWAN_DATA_DIR,
-      binaryPath: this.config.DIWAN_OPENCODE_BIN,
-      mode: this.config.DIWAN_EXEC_MODE,
+      basePath: this.config.OPENCORTEX_BASE_PATH,
+      dataDir: this.config.OPENCORTEX_DATA_DIR,
+      binaryPath: this.config.OPENCORTEX_WORKBENCH_BIN,
+      mode: this.config.OPENCORTEX_EXEC_MODE,
     });
     const workspaceDir = launchPlan.workspaceDir;
     const logPath = join(
-      this.config.DIWAN_DATA_DIR,
+      this.config.OPENCORTEX_DATA_DIR,
       'code-session-logs',
       `${id}.log`,
     );
-    if (this.config.DIWAN_EXEC_MODE !== 'dry-run') {
-      mkdirSync(join(this.config.DIWAN_DATA_DIR, 'code-session-logs'), {
+    if (this.config.OPENCORTEX_EXEC_MODE !== 'dry-run') {
+      mkdirSync(join(this.config.OPENCORTEX_DATA_DIR, 'code-session-logs'), {
         recursive: true,
       });
     }
@@ -85,7 +85,7 @@ export class SessionLauncher {
     const prepareUserRuntime = prepareWorkbenchRuntime(launchPlan);
 
     const command =
-      this.config.DIWAN_EXEC_MODE === 'sudo'
+      this.config.OPENCORTEX_EXEC_MODE === 'sudo'
         ? [
             'sudo',
             '-n',
@@ -98,12 +98,12 @@ export class SessionLauncher {
           ]
         : opencodeCommand;
 
-    if (this.config.DIWAN_EXEC_MODE === 'sudo') {
+    if (this.config.OPENCORTEX_EXEC_MODE === 'sudo') {
       await provisionLocalUser(this.config, user);
     }
 
     let openCodeSessionId: string | undefined;
-    if (this.config.DIWAN_EXEC_MODE === 'sudo') {
+    if (this.config.OPENCORTEX_EXEC_MODE === 'sudo') {
       writeFileSync(logPath, '', { encoding: 'utf8' });
       const logFd = openSync(logPath, 'a');
       const child = spawn(command[0], command.slice(1), {
@@ -142,7 +142,7 @@ export class SessionLauncher {
       port,
       urlPath: launchPlan.urlPath,
       command,
-      mode: this.config.DIWAN_EXEC_MODE,
+      mode: this.config.OPENCORTEX_EXEC_MODE,
     });
   }
 
@@ -219,7 +219,7 @@ export function opencodeRuntimeEnvironment(
 }
 
 export async function provisionLocalUser(
-  config: Pick<AppConfig, 'DIWAN_PROVISION_USER_SCRIPT'>,
+  config: Pick<AppConfig, 'OPENCORTEX_PROVISION_USER_SCRIPT'>,
   user: Pick<AuthenticatedUser, 'linuxUser'>,
 ): Promise<void> {
   try {
@@ -233,14 +233,14 @@ export async function provisionLocalUser(
 }
 
 export function localProvisionCommand(
-  config: Pick<AppConfig, 'DIWAN_PROVISION_USER_SCRIPT'>,
+  config: Pick<AppConfig, 'OPENCORTEX_PROVISION_USER_SCRIPT'>,
   user: Pick<AuthenticatedUser, 'linuxUser'>,
 ): string[] {
   return [
     'sudo',
     '-n',
     '/usr/bin/bash',
-    config.DIWAN_PROVISION_USER_SCRIPT,
+    config.OPENCORTEX_PROVISION_USER_SCRIPT,
     user.linuxUser,
   ];
 }

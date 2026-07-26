@@ -22,15 +22,15 @@ describe('runtime config compatibility', () => {
       OPENCORTEX_SUPER_ADMIN_EMAILS: 'admin@example.com',
     });
 
-    expect(config.DIWAN_PUBLIC_BASE_URL).toBe('https://runtime.example.com/');
-    expect(config.DIWAN_WORKSPACE_ROOT).toBe('/srv/opencortex/workspaces');
+    expect(config.OPENCORTEX_PUBLIC_BASE_URL).toBe('https://runtime.example.com/');
+    expect(config.OPENCORTEX_WORKSPACE_ROOT).toBe('/srv/opencortex/workspaces');
     expect(config.OIDC_ISSUER).toBe('https://accounts.google.com');
     expect(config.OIDC_CLIENT_ID).toBe('google-client');
-    expect(config.DIWAN_ALLOWED_EMAIL_DOMAINS).toEqual([
+    expect(config.OPENCORTEX_ALLOWED_EMAIL_DOMAINS).toEqual([
       'example.com',
       'contractor.example.com',
     ]);
-    expect(config.DIWAN_SUPER_ADMIN_EMAILS).toEqual(['admin@example.com']);
+    expect(config.OPENCORTEX_SUPER_ADMIN_EMAILS).toEqual(['admin@example.com']);
   });
 
   it('keeps legacy env names as a deprecated fallback', () => {
@@ -42,8 +42,8 @@ describe('runtime config compatibility', () => {
       DIWAN_ALLOWED_EMAIL_DOMAIN: 'legacy.example.com',
     });
 
-    expect(config.DIWAN_PUBLIC_BASE_URL).toBe('https://legacy.example.com/');
-    expect(config.DIWAN_ALLOWED_EMAIL_DOMAINS).toEqual(['legacy.example.com']);
+    expect(config.OPENCORTEX_PUBLIC_BASE_URL).toBe('https://legacy.example.com/');
+    expect(config.OPENCORTEX_ALLOWED_EMAIL_DOMAINS).toEqual(['legacy.example.com']);
     expect(warn).toHaveBeenCalledWith(
       'DIWAN_PUBLIC_BASE_URL is deprecated; use OPENCORTEX_PUBLIC_BASE_URL instead.',
     );
@@ -55,7 +55,7 @@ describe('runtime config compatibility', () => {
       OIDC_ISSUER: 'https://issuer.example.com',
       COGNITO_APP_CLIENT_ID: 'client',
       COGNITO_DOMAIN: 'https://example.auth.us-east-1.amazoncognito.com',
-      DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-config-')),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-config-')),
     });
 
     expect(config.OIDC_ISSUER).toBe('https://issuer.example.com');
@@ -77,7 +77,7 @@ describe('runtime config compatibility', () => {
         COGNITO_REGION: 'us-east-1',
         COGNITO_USER_POOL_ID: 'us-east-1_example',
         COGNITO_APP_CLIENT_ID: 'client',
-        DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-config-')),
+        OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-config-')),
       }),
     ).toThrow(
       'COGNITO_USER_POOL_ID no longer derives OIDC_ISSUER; set OPENCORTEX_OIDC_ISSUER instead.',
@@ -90,7 +90,7 @@ describe('runtime config compatibility', () => {
       OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
     });
 
-    expect(config.DIWAN_ALLOWED_EMAIL_DOMAINS).toEqual([]);
+    expect(config.OPENCORTEX_ALLOWED_EMAIL_DOMAINS).toEqual([]);
   });
 
   it('does not bake tenant-specific Jira or Slack workspace defaults into config', () => {
@@ -99,7 +99,7 @@ describe('runtime config compatibility', () => {
       OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
     });
 
-    expect(config.DIWAN_JIRA_BASE_URL).toBe('');
+    expect(config.OPENCORTEX_JIRA_BASE_URL).toBe('');
     expect(config.SLACK_WORKSPACE_URL).toBe('');
     expect(config.SLACK_SESSION_CHANNEL_PREFIX).toBe('opencortex');
   });

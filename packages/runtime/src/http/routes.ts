@@ -50,19 +50,19 @@ export function publicRouter(config: AppConfig): express.Router {
       const logoutUrl = metadata.end_session_endpoint
         ? `${metadata.end_session_endpoint}?${new URLSearchParams({
             client_id: config.OIDC_CLIENT_ID,
-            post_logout_redirect_uri: config.DIWAN_PUBLIC_BASE_URL,
+            post_logout_redirect_uri: config.OPENCORTEX_PUBLIC_BASE_URL,
           }).toString()}`
-        : config.DIWAN_PUBLIC_BASE_URL;
+        : config.OPENCORTEX_PUBLIC_BASE_URL;
 
       res.json({
         authorizationEndpoint: metadata.authorization_endpoint,
         clientId: config.OIDC_CLIENT_ID,
         redirectUri: new URL(
           config.OIDC_REDIRECT_PATH.replace(/^\//, ''),
-          config.DIWAN_PUBLIC_BASE_URL,
+          config.OPENCORTEX_PUBLIC_BASE_URL,
         ).toString(),
         logoutUrl,
-        basePath: config.DIWAN_BASE_PATH,
+        basePath: config.OPENCORTEX_BASE_PATH,
         scope: config.OIDC_SCOPES.join(' '),
       });
     } catch (error) {
@@ -84,7 +84,7 @@ export function publicRouter(config: AppConfig): express.Router {
         client_id: config.OIDC_CLIENT_ID,
         redirect_uri: new URL(
           config.OIDC_REDIRECT_PATH.replace(/^\//, ''),
-          config.DIWAN_PUBLIC_BASE_URL,
+          config.OPENCORTEX_PUBLIC_BASE_URL,
         ).toString(),
         code: body.code,
         code_verifier: body.codeVerifier,

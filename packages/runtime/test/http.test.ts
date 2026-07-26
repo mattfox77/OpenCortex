@@ -18,9 +18,9 @@ function testConfig(): AppConfig {
   return {
     NODE_ENV: 'test',
     PORT: 0,
-    DIWAN_PUBLIC_BASE_URL: 'https://runtime.example.com/diwan/',
-    DIWAN_BASE_PATH: '/diwan',
-    DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-test-')),
+    OPENCORTEX_PUBLIC_BASE_URL: 'https://runtime.example.com/diwan/',
+    OPENCORTEX_BASE_PATH: '/diwan',
+    OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-test-')),
     OIDC_ISSUER: 'https://accounts.google.com',
     OIDC_CLIENT_ID: 'client',
     OIDC_CLIENT_SECRET: '',
@@ -39,15 +39,15 @@ function testConfig(): AppConfig {
     COGNITO_REDIRECT_PATH: '/auth/callback',
     COGNITO_REQUIRED_GROUPS: ['TeamChatUsers', 'OpenCodeUsers'],
     DIWAN_ALLOWED_EMAIL_DOMAIN: 'acme.test',
-    DIWAN_ALLOWED_EMAIL_DOMAINS: ['acme.test'],
-    DIWAN_SUPER_ADMIN_EMAILS: ['mfox@acme.test'],
-    DIWAN_LINUX_USER_PREFIX: '',
-    DIWAN_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
-    DIWAN_EXEC_MODE: 'dry-run',
-    DIWAN_OPENCODE_PORT_BASE: 4100,
-    DIWAN_OPENCODE_BIN: '/usr/local/bin/opencode',
-    DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
-    DIWAN_JIRA_BASE_URL: 'https://jira.example.test',
+    OPENCORTEX_ALLOWED_EMAIL_DOMAINS: ['acme.test'],
+    OPENCORTEX_SUPER_ADMIN_EMAILS: ['mfox@acme.test'],
+    OPENCORTEX_LINUX_USER_PREFIX: '',
+    OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
+    OPENCORTEX_EXEC_MODE: 'dry-run',
+    OPENCORTEX_WORKBENCH_PORT_BASE: 4100,
+    OPENCORTEX_WORKBENCH_BIN: '/usr/local/bin/opencode',
+    OPENCORTEX_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
+    OPENCORTEX_JIRA_BASE_URL: 'https://jira.example.test',
     SLACK_BOT_TOKEN: '',
     SLACK_API_BASE_URL: 'https://slack.com/api',
     SLACK_WORKSPACE_URL: 'https://workspace.example.com',
@@ -327,7 +327,7 @@ describe('http app', () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const livePort = await listenOnEphemeralPort();
     const session = codeSession({ id: 'live', port: livePort });
-    const initialSessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const initialSessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const initialChat = new ChatStore(config);
     const channel = initialChat.ensureSessionChannel(
       session,
@@ -335,7 +335,7 @@ describe('http app', () => {
     );
     initialSessions.set(session.id, session);
 
-    const restartedSessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const restartedSessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     await restartedSessions.init();
     const restartedChat = new ChatStore(config);
     const app = createApp(config, restartedSessions, restartedChat);
@@ -369,7 +369,7 @@ describe('http app', () => {
       mode: 'sudo',
       createdAt: '2026-01-01T00:00:00.000Z',
     });
-    const sessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const chat = new ChatStore(config);
     const channel = chat.ensureSessionChannel(
       session,
@@ -542,7 +542,7 @@ describe('http app', () => {
       activeThreadId: liveThread.id,
       threads: [liveThread],
     });
-    const sessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const chat = new ChatStore(config);
     const owner = authUser('owner@acme.test');
     sessions.set(session.id, session);
@@ -644,7 +644,7 @@ describe('http app', () => {
       openCodeSessionId: 'ses_live',
       port: backendPort,
     });
-    const sessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const chat = new ChatStore(config);
     sessions.set(session.id, session);
     const channel = chat.ensureSessionChannel(
@@ -705,7 +705,7 @@ describe('http app', () => {
       openCodeSessionId: 'ses_generated',
       port: backendPort,
     });
-    const sessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const chat = new ChatStore(config);
     const owner = authUser('owner@acme.test');
     sessions.set(session.id, session);
@@ -782,7 +782,7 @@ describe('http app', () => {
       openCodeSessionId: 'ses_generated',
       port: backendPort,
     });
-    const sessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const chat = new ChatStore(config);
     sessions.set(session.id, session);
     const channel = chat.ensureSessionChannel(
@@ -860,7 +860,7 @@ describe('http app', () => {
       res.writeHead(404, { 'content-type': 'application/json' });
       res.end('{}');
     });
-    const sessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const chat = new ChatStore(config);
     const owner = authUser('owner@acme.test');
     const createdAt = new Date().toISOString();
@@ -938,7 +938,7 @@ describe('http app', () => {
 
   it('redirects raw OpenCortex Workbench thread URLs back into the managed session proxy', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
-    const sessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const chat = new ChatStore(config);
     const owner = authUser('owner@acme.test');
     const workspaceDir = '/home/owner/repos/payments-core';
@@ -994,7 +994,7 @@ describe('http app', () => {
       res.writeHead(200, { 'content-type': 'text/html' });
       res.end(`<html><head></head><body>${req.url}</body></html>`);
     });
-    const sessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const chat = new ChatStore(config);
     const owner = authUser('owner@acme.test');
     const createdAt = new Date().toISOString();
@@ -1251,7 +1251,7 @@ describe('http app', () => {
       );
     });
     const session = codeSession({ id: 'live', port: backendPort });
-    const sessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const chat = new ChatStore(config);
     sessions.set(session.id, session);
     const channel = chat.ensureSessionChannel(
@@ -1369,7 +1369,7 @@ describe('http app', () => {
       res.end('{}');
     });
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
-    const sessions = new SessionStore(config.DIWAN_DATA_DIR);
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     const chat = new ChatStore(config);
     const owner = authUser('owner@acme.test');
     const session = codeSession({

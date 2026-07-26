@@ -9,12 +9,12 @@ import type { AppConfig } from "../src/config/config.js";
 
 function config(): Pick<
   AppConfig,
-  "DIWAN_DATA_DIR" | "DIWAN_ALLOWED_EMAIL_DOMAINS" | "DIWAN_LINUX_USER_PREFIX"
+  "OPENCORTEX_DATA_DIR" | "OPENCORTEX_ALLOWED_EMAIL_DOMAINS" | "OPENCORTEX_LINUX_USER_PREFIX"
 > {
   return {
-    DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), "diwan-chat-")),
-    DIWAN_ALLOWED_EMAIL_DOMAINS: ["acme.test"],
-    DIWAN_LINUX_USER_PREFIX: "diwan-"
+    OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), "diwan-chat-")),
+    OPENCORTEX_ALLOWED_EMAIL_DOMAINS: ["acme.test"],
+    OPENCORTEX_LINUX_USER_PREFIX: "diwan-"
   };
 }
 
@@ -47,7 +47,7 @@ describe("ChatStore", () => {
   it("bootstraps general and keeps legacy messages available there", async () => {
     const cfg = config();
     writeFileSync(
-      join(cfg.DIWAN_DATA_DIR, "chat.jsonl"),
+      join(cfg.OPENCORTEX_DATA_DIR, "chat.jsonl"),
       `${JSON.stringify({
         id: "legacy-1",
         createdAt: "2026-01-01T00:00:00.000Z",

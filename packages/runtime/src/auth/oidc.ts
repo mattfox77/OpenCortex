@@ -69,7 +69,7 @@ export function oidcAuth(config: AppConfig): RequestHandler {
         const devMatch = /^Dev\s+(.+@.+)$/i.exec(devCredential);
         if (devMatch) {
           const email = devMatch[1].toLowerCase();
-          assertAllowedEmailDomains(email, config.DIWAN_ALLOWED_EMAIL_DOMAINS);
+          assertAllowedEmailDomains(email, config.OPENCORTEX_ALLOWED_EMAIL_DOMAINS);
           req.user = {
             sub: `dev:${email}`,
             email,
@@ -97,7 +97,7 @@ export function oidcAuth(config: AppConfig): RequestHandler {
         return res.status(403).json({ error: 'missing_email_claim' });
       }
 
-      assertAllowedEmailDomains(email, config.DIWAN_ALLOWED_EMAIL_DOMAINS);
+      assertAllowedEmailDomains(email, config.OPENCORTEX_ALLOWED_EMAIL_DOMAINS);
 
       const groups = groupsFrom(result.payload, config.OIDC_GROUPS_CLAIM);
       if (!hasAnyRequiredGroup(groups, config.OIDC_REQUIRED_GROUPS)) {
@@ -189,9 +189,9 @@ export const requireUser: RequestHandler = (req, res, next) => {
 
 function isSuperAdminEmail(
   email: string,
-  config: Pick<AppConfig, 'DIWAN_SUPER_ADMIN_EMAILS'>,
+  config: Pick<AppConfig, 'OPENCORTEX_SUPER_ADMIN_EMAILS'>,
 ): boolean {
-  return config.DIWAN_SUPER_ADMIN_EMAILS.some(
+  return config.OPENCORTEX_SUPER_ADMIN_EMAILS.some(
     superAdminEmail => superAdminEmail.toLowerCase() === email.toLowerCase(),
   );
 }
