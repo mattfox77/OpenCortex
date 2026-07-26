@@ -286,7 +286,7 @@ install_nginx_site() {
 
 provision_persisted_session_users() {
   local sessions_file="${DATA_DIR}/code-sessions.json"
-  local provision_script="${APP_DIR}/scripts/provision-diwan-user.sh"
+  local provision_script="${APP_DIR}/scripts/provision-opencortex-user.sh"
   if [ ! -s "$sessions_file" ] || [ ! -x "$provision_script" ] || ! command -v jq >/dev/null 2>&1; then
     return 0
   fi
@@ -299,7 +299,7 @@ provision_persisted_session_users() {
       done
 }
 
-# Stage the OpenCortex skill bundle so provision-diwan-user.sh can seed it into
+# Stage the OpenCortex skill bundle so provision-opencortex-user.sh can seed it into
 # every user's ~/.opencode/skills and ~/.codex/skills. The bundle is maintained
 # out-of-band and supplied as a local tarball or HTTPS URL.
 #

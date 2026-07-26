@@ -5,7 +5,7 @@ import type { AppConfig } from '../src/config/config.js';
 
 const config = {
   DIWAN_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
-  DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-diwan-user.sh',
+  DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
 } as AppConfig;
 
 describe('provisioning', () => {
@@ -31,7 +31,7 @@ describe('provisioning', () => {
     expect(commands.join('\n')).toContain('/home/mfox/.codex/skills');
     expect(commands.join('\n')).toContain('/home/mfox/.braintrust');
     expect(commands.join('\n')).toContain(
-      '/opt/opencortex/scripts/provision-diwan-user.sh mfox',
+      '/opt/opencortex/scripts/provision-opencortex-user.sh mfox',
     );
     expect(commands.join('\n')).not.toContain('/home/mfox-dev/.claude/skills');
     expect(commands.join('\n')).not.toContain('/home/mfox/.aws');
@@ -70,7 +70,7 @@ describe('server installer', () => {
 
 describe('user provisioner', () => {
   it('serializes and retries Linux user creation', () => {
-    const provisioner = readFileSync('scripts/provision-diwan-user.sh', 'utf8');
+    const provisioner = readFileSync('scripts/provision-opencortex-user.sh', 'utf8');
 
     expect(provisioner).toContain('flock -w 120');
     expect(provisioner).toContain('create_linux_user_with_retry');

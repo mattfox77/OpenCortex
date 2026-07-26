@@ -50,7 +50,7 @@ const schema = z.object({
   DIWAN_OPENCODE_BIN: z.string().default('/usr/local/bin/opencode'),
   DIWAN_PROVISION_USER_SCRIPT: z
     .string()
-    .default('/opt/opencortex/scripts/provision-diwan-user.sh'),
+    .default('/opt/opencortex/scripts/provision-opencortex-user.sh'),
   DIWAN_JIRA_BASE_URL: optionalUrl.default(''),
   SLACK_BOT_TOKEN: z.string().default(''),
   SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api'),

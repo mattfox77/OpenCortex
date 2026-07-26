@@ -13,7 +13,7 @@ import {
 import type { AppConfig } from '../src/config/config.js';
 
 const config = {
-  DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-diwan-user.sh',
+  DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
 } as AppConfig;
 
 describe('SessionLauncher', () => {
@@ -26,7 +26,7 @@ describe('SessionLauncher', () => {
       'sudo',
       '-n',
       '/usr/bin/bash',
-      '/opt/opencortex/scripts/provision-diwan-user.sh',
+      '/opt/opencortex/scripts/provision-opencortex-user.sh',
       'grathke',
     ]);
   });

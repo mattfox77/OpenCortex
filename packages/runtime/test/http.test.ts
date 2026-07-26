@@ -46,7 +46,7 @@ function testConfig(): AppConfig {
     DIWAN_EXEC_MODE: 'dry-run',
     DIWAN_OPENCODE_PORT_BASE: 4100,
     DIWAN_OPENCODE_BIN: '/usr/local/bin/opencode',
-    DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-diwan-user.sh',
+    DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
     DIWAN_JIRA_BASE_URL: 'https://jira.example.test',
     SLACK_BOT_TOKEN: '',
     SLACK_API_BASE_URL: 'https://slack.com/api',
