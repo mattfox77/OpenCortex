@@ -29,6 +29,10 @@ jobs:
         run: npm install --include=dev --package-lock=false --workspaces=false
         working-directory: packages/workbench
 
+      - name: Install skills dependencies
+        run: npm install --include=dev --package-lock=false --workspaces=false
+        working-directory: packages/skills
+
       - name: Install runtime dependencies
         run: npm install --include=dev --package-lock=false --workspaces=false
         working-directory: packages/runtime
