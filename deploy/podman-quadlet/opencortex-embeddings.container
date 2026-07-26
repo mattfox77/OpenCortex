@@ -1,0 +1,19 @@
+[Unit]
+Description=OpenCortex CPU embeddings service
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=opencortex-embeddings
+Image=docker.io/michaelf34/infinity:latest-cpu
+Network=opencortex.network
+Volume=opencortex-embeddings-cache.volume:/app/.cache:Z
+Environment=INFINITY_ANONYMOUS_USAGE_STATS=0
+Exec=v2 --model-id nomic-ai/nomic-embed-text-v1.5 --port 7997
+PublishPort=127.0.0.1:7997:7997
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

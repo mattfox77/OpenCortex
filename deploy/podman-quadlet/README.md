@@ -26,6 +26,7 @@ systemctl --user start opencortex-dex.service
 systemctl --user start opencortex-memory-db.service
 systemctl --user start opencortex-memory-api.service
 systemctl --user start opencortex-objects.service
+systemctl --user start opencortex-embeddings.service
 systemctl --user start opencortex-temporal.service
 systemctl --user start opencortex-temporal-ui.service
 ```
@@ -38,6 +39,11 @@ memory access must go through the OpenCortex API layer.
 runtime uses the same OIDC implementation for Dex and external compliant issuers
 such as Google; configure `OPENCORTEX_OIDC_ISSUER` and client settings per
 profile. Dex publishes only `127.0.0.1:5556` by default.
+
+`opencortex-embeddings` runs Infinity's CPU image with
+`nomic-ai/nomic-embed-text-v1.5` and publishes only `127.0.0.1:7997` for local
+development. In-container callers use
+`http://opencortex-embeddings:7997/v1/embeddings`.
 
 TLS is intentionally not represented here. The staging host terminates HTTPS
 with `tailscale serve` outside the container stack.
