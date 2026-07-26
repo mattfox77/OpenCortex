@@ -2,10 +2,17 @@ import type { RequestHandler } from 'express';
 import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { JWTPayload } from 'jose';
 import type { AppConfig } from '../config/config.js';
-import { cognitoIssuer } from '../config/config.js';
 import { assertAllowedEmailDomains, emailToLinuxUser } from './linuxUser.js';
 
 const authCookieName = 'diwan.idToken';
+
+interface OidcProviderMetadata {
+  issuer: string;
+  jwks_uri: string;
+  authorization_endpoint: string;
+  token_endpoint: string;
+  end_session_endpoint?: string;
+}
 
 function bearerToken(header: string | undefined): string | null {
   if (!header) {
@@ -24,8 +31,8 @@ function tokenFromRequest(req: Parameters<RequestHandler>[0]): string | null {
   return cookies?.[authCookieName] ?? null;
 }
 
-function groupsFrom(payload: JWTPayload): string[] {
-  const value = payload['cognito:groups'];
+function groupsFrom(payload: JWTPayload, groupsClaim: string): string[] {
+  const value = payload[groupsClaim] ?? payload['cognito:groups'];
   if (Array.isArray(value)) {
     return value.filter((item): item is string => typeof item === 'string');
   }
@@ -45,9 +52,8 @@ function hasAnyRequiredGroup(
   return requiredGroups.some(group => userGroups.includes(group));
 }
 
-export function cognitoAuth(config: AppConfig): RequestHandler {
-  const issuer = cognitoIssuer(config);
-  const jwks = createRemoteJWKSet(new URL(`${issuer}/.well-known/jwks.json`));
+export function oidcAuth(config: AppConfig): RequestHandler {
+  let jwks: ReturnType<typeof createRemoteJWKSet> | null = null;
 
   return async (req, res, next) => {
     try {
@@ -67,7 +73,7 @@ export function cognitoAuth(config: AppConfig): RequestHandler {
           req.user = {
             sub: `dev:${email}`,
             email,
-            groups: config.COGNITO_REQUIRED_GROUPS,
+            groups: config.OIDC_REQUIRED_GROUPS,
             linuxUser: emailToLinuxUser(email, config),
             isSuperAdmin: isSuperAdminEmail(email, config),
           };
@@ -79,9 +85,11 @@ export function cognitoAuth(config: AppConfig): RequestHandler {
         return res.status(401).json({ error: 'missing_bearer_token' });
       }
 
+      const metadata = await oidcProviderMetadata(config);
+      jwks ??= createRemoteJWKSet(new URL(metadata.jwks_uri));
       const result = await jwtVerify(token, jwks, {
-        issuer,
-        audience: config.COGNITO_APP_CLIENT_ID,
+        issuer: metadata.issuer,
+        audience: config.OIDC_CLIENT_ID,
       });
 
       const email = String(result.payload.email ?? '').toLowerCase();
@@ -91,8 +99,8 @@ export function cognitoAuth(config: AppConfig): RequestHandler {
 
       assertAllowedEmailDomains(email, config.DIWAN_ALLOWED_EMAIL_DOMAINS);
 
-      const groups = groupsFrom(result.payload);
-      if (!hasAnyRequiredGroup(groups, config.COGNITO_REQUIRED_GROUPS)) {
+      const groups = groupsFrom(result.payload, config.OIDC_GROUPS_CLAIM);
+      if (!hasAnyRequiredGroup(groups, config.OIDC_REQUIRED_GROUPS)) {
         return res.status(403).json({ error: 'missing_required_group' });
       }
 
@@ -114,6 +122,61 @@ export function cognitoAuth(config: AppConfig): RequestHandler {
         message: error instanceof Error ? error.message : 'Unknown auth error',
       });
     }
+  };
+}
+
+const metadataPromises = new Map<string, Promise<OidcProviderMetadata>>();
+
+export async function oidcProviderMetadata(
+  config: AppConfig,
+): Promise<OidcProviderMetadata> {
+  const configured = configuredOidcMetadata(config);
+  if (configured) {
+    return configured;
+  }
+
+  const discoveryUrl = `${config.OIDC_ISSUER}/.well-known/openid-configuration`;
+  const cached = metadataPromises.get(discoveryUrl);
+  if (cached) {
+    return cached;
+  }
+
+  const promise = fetch(discoveryUrl).then(async response => {
+    if (!response.ok) {
+      throw new Error(`OIDC metadata discovery failed: ${response.status}`);
+    }
+    const metadata = await response.json() as Partial<OidcProviderMetadata>;
+    if (
+      metadata.issuer !== config.OIDC_ISSUER ||
+      !metadata.jwks_uri ||
+      !metadata.authorization_endpoint ||
+      !metadata.token_endpoint
+    ) {
+      throw new Error('OIDC metadata discovery returned incomplete metadata');
+    }
+    return metadata as OidcProviderMetadata;
+  });
+  metadataPromises.set(discoveryUrl, promise);
+  return promise;
+}
+
+function configuredOidcMetadata(config: AppConfig): OidcProviderMetadata | null {
+  if (
+    !config.OIDC_JWKS_URI ||
+    !config.OIDC_AUTHORIZATION_ENDPOINT ||
+    !config.OIDC_TOKEN_ENDPOINT
+  ) {
+    return null;
+  }
+
+  return {
+    issuer: config.OIDC_ISSUER,
+    jwks_uri: config.OIDC_JWKS_URI,
+    authorization_endpoint: config.OIDC_AUTHORIZATION_ENDPOINT,
+    token_endpoint: config.OIDC_TOKEN_ENDPOINT,
+    ...(config.OIDC_END_SESSION_ENDPOINT
+      ? { end_session_endpoint: config.OIDC_END_SESSION_ENDPOINT }
+      : {}),
   };
 }
 

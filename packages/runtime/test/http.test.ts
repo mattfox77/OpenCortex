@@ -21,6 +21,17 @@ function testConfig(): AppConfig {
     DIWAN_PUBLIC_BASE_URL: 'https://dev.dsnscript.com/diwan/',
     DIWAN_BASE_PATH: '/diwan',
     DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-test-')),
+    OIDC_ISSUER: 'https://accounts.google.com',
+    OIDC_CLIENT_ID: 'client',
+    OIDC_CLIENT_SECRET: '',
+    OIDC_REDIRECT_PATH: '/auth/callback',
+    OIDC_REQUIRED_GROUPS: ['TeamChatUsers', 'OpenCodeUsers'],
+    OIDC_GROUPS_CLAIM: 'groups',
+    OIDC_SCOPES: ['openid', 'email', 'profile'],
+    OIDC_AUTHORIZATION_ENDPOINT: 'https://accounts.google.com/o/oauth2/v2/auth',
+    OIDC_TOKEN_ENDPOINT: 'https://oauth2.googleapis.com/token',
+    OIDC_JWKS_URI: 'https://www.googleapis.com/oauth2/v3/certs',
+    OIDC_END_SESSION_ENDPOINT: '',
     COGNITO_REGION: 'us-east-1',
     COGNITO_USER_POOL_ID: 'us-east-1_test',
     COGNITO_APP_CLIENT_ID: 'client',
@@ -164,7 +175,7 @@ afterEach(() => {
 });
 
 describe('http app', () => {
-  it('serves the UI on the Cognito callback path', async () => {
+  it('serves the UI on the OIDC callback path', async () => {
     const response = await request('/diwan/auth/callback?code=test-code');
 
     expect(response.status).toBe(200);
@@ -205,11 +216,56 @@ describe('http app', () => {
 
     expect(response.status).toBe(200);
     await expect(response.json()).resolves.toMatchObject({
+      authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
+      clientId: 'client',
       redirectUri: 'https://dev.dsnscript.com/diwan/auth/callback',
-      logoutUrl:
-        'https://example.auth.us-east-1.amazoncognito.com/logout?client_id=client&logout_uri=https%3A%2F%2Fdev.dsnscript.com%2Fdiwan%2F',
+      logoutUrl: 'https://dev.dsnscript.com/diwan/',
       basePath: '/diwan',
+      scope: 'openid email profile',
     });
+  });
+
+  it('exchanges OIDC auth codes with the configured token endpoint', async () => {
+    const tokenBackend = await fakeDyson((_req, res) => {
+      res.setHeader('Content-Type', 'application/json');
+      res.end(JSON.stringify({
+        id_token: 'id-token',
+        access_token: 'access-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+      }));
+    });
+    const config: AppConfig = {
+      ...testConfig(),
+      OIDC_CLIENT_SECRET: 'client-secret',
+      OIDC_TOKEN_ENDPOINT: `http://127.0.0.1:${tokenBackend.port}/token`,
+    };
+    const { listener, base } = startApp(config);
+    server = listener;
+
+    const response = await fetch(`${base}/diwan/api/auth/token`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ code: 'auth-code', codeVerifier: 'pkce-verifier' }),
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      idToken: 'id-token',
+      accessToken: 'access-token',
+      expiresIn: 3600,
+      tokenType: 'Bearer',
+    });
+    expect(tokenBackend.requests).toHaveLength(1);
+    const form = new URLSearchParams(tokenBackend.requests[0].body);
+    expect(form.get('grant_type')).toBe('authorization_code');
+    expect(form.get('client_id')).toBe('client');
+    expect(form.get('client_secret')).toBe('client-secret');
+    expect(form.get('redirect_uri')).toBe(
+      'https://dev.dsnscript.com/diwan/auth/callback',
+    );
+    expect(form.get('code')).toBe('auth-code');
+    expect(form.get('code_verifier')).toBe('pkce-verifier');
   });
 
   it('requires auth to list code sessions', async () => {

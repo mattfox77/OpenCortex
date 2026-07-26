@@ -4,7 +4,7 @@ import helmet from 'helmet';
 import cookieParser from 'cookie-parser';
 import { pinoHttp } from 'pino-http';
 import type { AppConfig } from '../config/config.js';
-import { cognitoAuth } from '../auth/cognito.js';
+import { oidcAuth } from '../auth/oidc.js';
 import {
   apiRouter,
   codeSessionProxy,
@@ -58,17 +58,17 @@ export function createApp(
   mounted.use('/api', publicRouter(config));
   mounted.use(
     '/api',
-    cognitoAuth(config),
+    oidcAuth(config),
     apiRouter(config, codeSessions, chat, pairPrompts, jiraTracking),
   );
   mounted.use(
     '/code/session',
-    cognitoAuth(config),
+    oidcAuth(config),
     codeSessionProxy(config, codeSessions, chat),
   );
   mounted.get(
     '/:workspace/session/:openCodeSessionId',
-    cognitoAuth(config),
+    oidcAuth(config),
     rawOpenCodeSessionRedirect(codeSessions, chat),
   );
   mounted.get('/', (_req, res) => res.type('html').send(indexHtml));
@@ -76,7 +76,7 @@ export function createApp(
   mounted.get('/code/sessions/:id', (_req, res) =>
     res.type('html').send(indexHtml),
   );
-  mounted.get(config.COGNITO_REDIRECT_PATH, (_req, res) =>
+  mounted.get(config.OIDC_REDIRECT_PATH, (_req, res) =>
     res.type('html').send(indexHtml),
   );
   mounted.use(express.static(publicDir));

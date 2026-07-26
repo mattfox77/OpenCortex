@@ -19,7 +19,7 @@ import {
   HttpOpenCodePromptClient,
   type OpenCodePromptClient,
 } from '../code/openCodePromptClient.js';
-import { requireUser } from '../auth/cognito.js';
+import { oidcProviderMetadata, requireUser } from '../auth/oidc.js';
 import type { AuthenticatedUser } from '../auth/types.js';
 import { provisioningCommands } from '../system/provisioning.js';
 import {
@@ -44,22 +44,30 @@ const tokenExchangeResponseSchema = z.object({
 export function publicRouter(config: AppConfig): express.Router {
   const router = express.Router();
 
-  router.get('/auth/config', (_req, res) => {
-    res.json({
-      cognitoDomain: config.COGNITO_DOMAIN,
-      clientId: config.COGNITO_APP_CLIENT_ID,
-      redirectUri: new URL(
-        config.COGNITO_REDIRECT_PATH.replace(/^\//, ''),
-        config.DIWAN_PUBLIC_BASE_URL,
-      ).toString(),
-      logoutUrl: `${config.COGNITO_DOMAIN}/logout?${new URLSearchParams({
-        client_id: config.COGNITO_APP_CLIENT_ID,
-        logout_uri: config.DIWAN_PUBLIC_BASE_URL,
-      }).toString()}`,
-      basePath: config.DIWAN_BASE_PATH,
-      scope: 'openid email profile',
-      identityProvider: 'MicrosoftEntraID',
-    });
+  router.get('/auth/config', async (_req, res, next) => {
+    try {
+      const metadata = await oidcProviderMetadata(config);
+      const logoutUrl = metadata.end_session_endpoint
+        ? `${metadata.end_session_endpoint}?${new URLSearchParams({
+            client_id: config.OIDC_CLIENT_ID,
+            post_logout_redirect_uri: config.DIWAN_PUBLIC_BASE_URL,
+          }).toString()}`
+        : config.DIWAN_PUBLIC_BASE_URL;
+
+      res.json({
+        authorizationEndpoint: metadata.authorization_endpoint,
+        clientId: config.OIDC_CLIENT_ID,
+        redirectUri: new URL(
+          config.OIDC_REDIRECT_PATH.replace(/^\//, ''),
+          config.DIWAN_PUBLIC_BASE_URL,
+        ).toString(),
+        logoutUrl,
+        basePath: config.DIWAN_BASE_PATH,
+        scope: config.OIDC_SCOPES.join(' '),
+      });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   router.post('/auth/token', async (req, res, next) => {
@@ -70,19 +78,23 @@ export function publicRouter(config: AppConfig): express.Router {
           codeVerifier: z.string().min(1),
         })
         .parse(req.body);
+      const metadata = await oidcProviderMetadata(config);
       const tokenBody = new URLSearchParams({
         grant_type: 'authorization_code',
-        client_id: config.COGNITO_APP_CLIENT_ID,
+        client_id: config.OIDC_CLIENT_ID,
         redirect_uri: new URL(
-          config.COGNITO_REDIRECT_PATH.replace(/^\//, ''),
+          config.OIDC_REDIRECT_PATH.replace(/^\//, ''),
           config.DIWAN_PUBLIC_BASE_URL,
         ).toString(),
         code: body.code,
         code_verifier: body.codeVerifier,
       });
+      if (config.OIDC_CLIENT_SECRET) {
+        tokenBody.set('client_secret', config.OIDC_CLIENT_SECRET);
+      }
 
       const tokenResponse = await fetch(
-        `${config.COGNITO_DOMAIN}/oauth2/token`,
+        metadata.token_endpoint,
         {
           method: 'POST',
           headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
@@ -99,7 +111,7 @@ export function publicRouter(config: AppConfig): express.Router {
           message:
             tokenPayload.error_description ??
             tokenPayload.error ??
-            'Cognito token exchange failed',
+            'OIDC token exchange failed',
         });
       }
 

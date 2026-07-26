@@ -1,0 +1,21 @@
+issuer: http://opencortex-dex:5556/dex
+
+storage:
+  type: sqlite3
+  config:
+    file: /var/dex/dex.db
+
+web:
+  http: 0.0.0.0:5556
+
+oauth2:
+  skipApprovalScreen: true
+
+staticClients:
+  - id: opencortex-runtime
+    name: OpenCortex Runtime
+    redirectURIs:
+      - http://localhost:8080/auth/callback
+    secretEnv: OPENCORTEX_DEX_CLIENT_SECRET
+
+enablePasswordDB: false

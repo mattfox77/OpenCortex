@@ -77,13 +77,13 @@ async function login() {
     response_type: 'code',
     scope: config.scope,
     redirect_uri: config.redirectUri,
-    identity_provider: config.identityProvider,
     code_challenge_method: 'S256',
     code_challenge: challenge,
   });
-  window.location.assign(
-    config.cognitoDomain + '/oauth2/authorize?' + params.toString(),
-  );
+  if (config.identityProvider) {
+    params.set('identity_provider', config.identityProvider);
+  }
+  window.location.assign(config.authorizationEndpoint + '?' + params.toString());
 }
 
 async function handleCallback() {

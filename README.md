@@ -31,6 +31,7 @@ Phase 0/1 guardrails are being established:
 - `@opencortex/orchestrator` as the first extracted package
 - Node/npm boundary for the Temporal worker
 - warning-mode config inventory for DSN/AWS/secret patterns
+- single OIDC implementation, Dex bundled, tested against Google as a second compliant issuer
 - root scripts that run package checks from a clean checkout
 
 The target deployment profile is one self-hosted Linux host under Podman

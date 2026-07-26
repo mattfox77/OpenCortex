@@ -16,12 +16,16 @@ describe('runtime config compatibility', () => {
       DIWAN_PUBLIC_BASE_URL: 'https://legacy.example.com/',
       OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
       OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
+      OPENCORTEX_OIDC_ISSUER: 'https://accounts.google.com',
+      OPENCORTEX_OIDC_CLIENT_ID: 'google-client',
       OPENCORTEX_ALLOWED_EMAIL_DOMAINS: 'example.com, contractor.example.com',
       OPENCORTEX_SUPER_ADMIN_EMAILS: 'admin@example.com',
     });
 
     expect(config.DIWAN_PUBLIC_BASE_URL).toBe('https://runtime.example.com/');
     expect(config.DIWAN_WORKSPACE_ROOT).toBe('/srv/opencortex/workspaces');
+    expect(config.OIDC_ISSUER).toBe('https://accounts.google.com');
+    expect(config.OIDC_CLIENT_ID).toBe('google-client');
     expect(config.DIWAN_ALLOWED_EMAIL_DOMAINS).toEqual([
       'example.com',
       'contractor.example.com',
@@ -45,6 +49,31 @@ describe('runtime config compatibility', () => {
     );
   });
 
+  it('derives generic OIDC config from legacy Cognito env names', () => {
+    const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
+    const config = loadConfig({
+      COGNITO_REGION: 'us-east-1',
+      COGNITO_USER_POOL_ID: 'us-east-1_example',
+      COGNITO_APP_CLIENT_ID: 'client',
+      COGNITO_DOMAIN: 'https://example.auth.us-east-1.amazoncognito.com',
+      DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-config-')),
+    });
+
+    expect(config.OIDC_ISSUER).toBe(
+      'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example',
+    );
+    expect(config.OIDC_CLIENT_ID).toBe('client');
+    expect(config.OIDC_AUTHORIZATION_ENDPOINT).toBe(
+      'https://example.auth.us-east-1.amazoncognito.com/oauth2/authorize',
+    );
+    expect(config.OIDC_TOKEN_ENDPOINT).toBe(
+      'https://example.auth.us-east-1.amazoncognito.com/oauth2/token',
+    );
+    expect(warn).toHaveBeenCalledWith(
+      'COGNITO_USER_POOL_ID is deprecated; use OIDC_ISSUER instead.',
+    );
+  });
+
   it('leaves email domains unrestricted when no allowlist is configured', () => {
     const config = loadConfig({
       ...requiredAuthEnv(),
@@ -57,8 +86,10 @@ describe('runtime config compatibility', () => {
 
 function requiredAuthEnv(): NodeJS.ProcessEnv {
   return {
-    COGNITO_USER_POOL_ID: 'us-east-1_example',
-    COGNITO_APP_CLIENT_ID: 'client',
-    COGNITO_DOMAIN: 'https://oidc.example.com',
+    OPENCORTEX_OIDC_ISSUER: 'https://dex.example.com',
+    OPENCORTEX_OIDC_CLIENT_ID: 'client',
+    OPENCORTEX_OIDC_AUTHORIZATION_ENDPOINT: 'https://dex.example.com/auth',
+    OPENCORTEX_OIDC_TOKEN_ENDPOINT: 'https://dex.example.com/token',
+    OPENCORTEX_OIDC_JWKS_URI: 'https://dex.example.com/keys',
   };
 }
