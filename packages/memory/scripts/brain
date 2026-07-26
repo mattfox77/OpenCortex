@@ -169,11 +169,11 @@ C
 # ---- helpers ----
 
 embed() {
-  local provider="${EMBED_PROVIDER:-openai}"
+  local provider="${EMBED_PROVIDER:-server}"
   local vec=""
 
   case "$provider" in
-    openai|openrouter|server|*)
+    server|openai|*)
       local url="${EMBED_URL:-http://opencortex-embeddings:7997/v1/embeddings}"
       local model="${EMBED_MODEL:-nomic-ai/nomic-embed-text-v1.5}"
       local dimensions="${EMBED_DIMENSIONS:-768}"
