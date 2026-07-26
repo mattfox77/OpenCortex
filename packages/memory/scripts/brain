@@ -146,7 +146,7 @@ embed() {
   case "$provider" in
     bedrock)
       command -v aws >/dev/null 2>&1 || { echo "Install AWS CLI for EMBED_PROVIDER=bedrock" >&2; exit 1; }
-      local region="${EMBED_REGION:-${AWS_REGION:-us-east-1}}"
+      local region="${EMBED_REGION:-${EMBED_AWS_REGION:-us-east-1}}"
       local model="${EMBED_MODEL:-amazon.titan-embed-text-v1}"
       local aws_profile="${EMBED_AWS_PROFILE:-${AWS_PROFILE:-}}"
       local payload; payload=$(jq -n --arg t "$1" '{inputText:$t}')
@@ -854,7 +854,7 @@ _jira_recall() {
 _jira_search_json() {  # echoes acli search JSON for a project/jql
   local project="" jql="" n=200
   while [[ $# -gt 0 ]]; do case "$1" in --project) project="$2"; shift 2;; --jql) jql="$2"; shift 2;; -n) n="$2"; shift 2;; *) shift;; esac; done
-  [ -z "$jql" ] && jql="project = ${project:-DSNPAYMVP}"
+  [ -z "$jql" ] && jql="project = ${project:-OPENCORTEX}"
   "${ACLI_BIN:-acli}" jira workitem search --jql "$jql" --limit "$n" --json 2>/dev/null
 }
 
@@ -2690,7 +2690,7 @@ detect_repo_from_path() {
   local file="$1" source="$2"
   case "$source" in
     pai)
-      # PAI project dirs: -Users-Matthew-DSN-GitHub-RepoName
+      # PAI project dirs: -Users-Matthew-Org-GitHub-RepoName
       local dir
       dir=$(echo "$file" | grep -oE '\.claude/projects/[^/]+' | head -1)
       if [ -n "$dir" ]; then
@@ -2705,7 +2705,7 @@ detect_repo_from_path() {
       fi
       ;;
     cursor)
-      # Cursor project dirs: Users-Matthew-DSN-GitHub-RepoName
+      # Cursor project dirs: Users-Matthew-Org-GitHub-RepoName
       local dir
       dir=$(echo "$file" | grep -oE '\.cursor/projects/[^/]+' | head -1)
       if [ -n "$dir" ]; then
