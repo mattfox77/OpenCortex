@@ -99,7 +99,17 @@ patch_dysoncode_brain_broker_status() {
 
 load_config_soft() {
   [ -f "$BT_CONF" ] && source "$BT_CONF"
+  apply_opencortex_config_aliases
   return 0
+}
+
+apply_opencortex_config_aliases() {
+  [ -n "${BT_URL:-}" ] || BT_URL="${OPENCORTEX_MEMORY_API_URL:-}"
+  [ -n "${EMBED_URL:-}" ] || EMBED_URL="${OPENCORTEX_EMBEDDINGS_URL:-}"
+  [ -n "${EMBED_MODEL:-}" ] || EMBED_MODEL="${OPENCORTEX_EMBEDDINGS_MODEL:-}"
+  [ -n "${EMBED_DIMENSIONS:-}" ] || EMBED_DIMENSIONS="${OPENCORTEX_EMBEDDINGS_DIMENSIONS:-}"
+  [ -n "${OBJECT_STORE_ENDPOINT_URL:-}" ] || OBJECT_STORE_ENDPOINT_URL="${OPENCORTEX_OBJECTS_ENDPOINT:-}"
+  [ -n "${OBJECT_STORE_BUCKET:-}" ] || OBJECT_STORE_BUCKET="${OPENCORTEX_OBJECTS_BUCKET:-}"
 }
 
 init() {
@@ -128,6 +138,7 @@ C
     echo "Edit ${BT_CONF}" >&2; exit 1
   fi
   source "$BT_CONF"
+  apply_opencortex_config_aliases
   for v in BT_URL BT_KEY OWNER_ID; do
     [ -z "${!v:-}" ] && { echo "Set $v in $BT_CONF" >&2; exit 1; }
   done
