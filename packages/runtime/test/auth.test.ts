@@ -6,12 +6,12 @@ import {
 } from "../src/auth/linuxUser.js";
 
 describe("linux user mapping", () => {
-  it("maps DSN email addresses to deterministic Diwan Linux users", () => {
-    expect(emailToLinuxUser("Matt.Fox@dsn.com", { DIWAN_LINUX_USER_PREFIX: "" })).toBe("matt-fox");
+  it("maps configured email addresses to deterministic Diwan Linux users", () => {
+    expect(emailToLinuxUser("Matt.Fox@acme.test", { DIWAN_LINUX_USER_PREFIX: "" })).toBe("matt-fox");
   });
 
-  it("rejects non-DSN domains", () => {
-    expect(() => assertAllowedEmailDomain("person@example.com", "dsn.com")).toThrow(/not allowed/);
+  it("rejects domains outside the configured allowlist", () => {
+    expect(() => assertAllowedEmailDomain("person@example.com", "acme.test")).toThrow(/not allowed/);
   });
 
   it("allows any domain when no allowlist is configured", () => {

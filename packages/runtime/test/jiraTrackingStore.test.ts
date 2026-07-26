@@ -8,7 +8,7 @@ import type { CodeSession } from '../src/code/sessionLauncher.js';
 import { parseJiraReferences } from '../src/jira/jiraParser.js';
 import { JiraTrackingStore } from '../src/jira/jiraTrackingStore.js';
 
-function user(email = 'owner@dsn.com'): AuthenticatedUser {
+function user(email = 'owner@acme.test'): AuthenticatedUser {
   return {
     sub: `dev:${email}`,
     email,
@@ -21,7 +21,7 @@ function session(overrides: Partial<CodeSession> = {}): CodeSession {
   return {
     id: 'sess-1',
     createdAt: '2026-06-10T00:00:00.000Z',
-    ownerEmail: 'owner@dsn.com',
+    ownerEmail: 'owner@acme.test',
     linuxUser: 'owner',
     workspaceDir: '/home/owner/repos',
     port: 4100,
@@ -38,23 +38,23 @@ function channel(overrides: Partial<ChatChannel> = {}): ChatChannel {
     type: 'session',
     name: 'owner / repos',
     createdAt: '2026-06-10T00:00:00.000Z',
-    createdByEmail: 'owner@dsn.com',
+    createdByEmail: 'owner@acme.test',
     visibility: 'private',
     members: [
       {
-        email: 'owner@dsn.com',
+        email: 'owner@acme.test',
         linuxUser: 'owner',
         role: 'owner',
         addedAt: '2026-06-10T00:00:00.000Z',
-        addedByEmail: 'owner@dsn.com',
+        addedByEmail: 'owner@acme.test',
       },
     ],
     session: {
       sessionId: 'sess-1',
-      ownerEmail: 'owner@dsn.com',
+      ownerEmail: 'owner@acme.test',
       ownerLinuxUser: 'owner',
       workspaceDir: '/home/owner/repos',
-      threadKey: 'session:owner@dsn.com:sess-1',
+      threadKey: 'session:owner@acme.test:sess-1',
       urlPath: '/diwan/code/session/sess-1/',
     },
     ...overrides,
@@ -65,12 +65,12 @@ describe('jira parser', () => {
   it('extracts unique Jira keys and URLs', () => {
     expect(
       parseJiraReferences(
-        'See https://dsnsoft-dev.atlassian.net/browse/DSN-123 and dsn-123 plus OPS-9',
+        'See https://jira.example.test/browse/OC-123 and oc-123 plus OPS-9',
       ),
     ).toEqual([
       {
-        key: 'DSN-123',
-        url: 'https://dsnsoft-dev.atlassian.net/browse/DSN-123',
+        key: 'OC-123',
+        url: 'https://jira.example.test/browse/OC-123',
       },
       { key: 'OPS-9', url: undefined },
     ]);
@@ -87,7 +87,7 @@ describe('JiraTrackingStore', () => {
       actor: user(),
       source: 'chat-message',
       confidence: 'explicit',
-      evidenceText: 'Working DSN-123 with team:Platform',
+      evidenceText: 'Working OC-123 with team:Platform',
       evidenceRef: { type: 'chat-message', id: 'msg-1' },
     });
 
@@ -98,7 +98,7 @@ describe('JiraTrackingStore', () => {
       actor: user(),
       source: 'chat-message',
       confidence: 'explicit',
-      evidenceText: 'Working DSN-123 with team:Platform',
+      evidenceText: 'Working OC-123 with team:Platform',
       evidenceRef: { type: 'chat-message', id: 'msg-1' },
     });
     expect(store.listForSession('sess-1')).toHaveLength(2);
@@ -115,11 +115,11 @@ describe('JiraTrackingStore', () => {
       actor: user(),
       source: 'manual',
       confidence: 'manual',
-      evidenceText: 'DSN-456 team:Revenue',
+      evidenceText: 'OC-456 team:Revenue',
     });
 
     const byIssue = store.searchSessions([session()], () => channel(), {
-      jiraKey: 'DSN-456',
+      jiraKey: 'OC-456',
     });
     expect(byIssue.map(result => result.session.id)).toEqual(['sess-1']);
 
@@ -137,17 +137,17 @@ describe('JiraTrackingStore', () => {
       actor: user(),
       source: 'chat-message',
       confidence: 'explicit',
-      evidenceText: 'Implementing DSN-456 with the payment thread',
+      evidenceText: 'Implementing OC-456 with the payment thread',
       evidenceRef: { type: 'chat-message', id: 'msg-1' },
     });
 
-    const detail = store.getJiraItemDetail('dsn-456');
+    const detail = store.getJiraItemDetail('oc-456');
 
     expect(detail).toMatchObject({
-      key: 'DSN-456',
+      key: 'OC-456',
       item: {
-        key: 'DSN-456',
-        projectKey: 'DSN',
+        key: 'OC-456',
+        projectKey: 'OC',
       },
       sessionIds: ['sess-1'],
       sourceCounts: {
@@ -167,10 +167,10 @@ describe('JiraTrackingStore', () => {
       actor: user(),
       source: 'manual',
       confidence: 'manual',
-      evidenceText: 'DSN-789',
+      evidenceText: 'OC-789',
     });
 
-    store.remove(link.id, user('other@dsn.com'));
+    store.remove(link.id, user('other@acme.test'));
     expect(store.listForSession('sess-1')).toEqual([]);
   });
 });

@@ -13,7 +13,7 @@ function config(): Pick<
 > {
   return {
     DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), "diwan-chat-")),
-    DIWAN_ALLOWED_EMAIL_DOMAINS: ["dsn.com"],
+    DIWAN_ALLOWED_EMAIL_DOMAINS: ["acme.test"],
     DIWAN_LINUX_USER_PREFIX: "diwan-"
   };
 }
@@ -32,7 +32,7 @@ function session(overrides: Partial<CodeSession> = {}): CodeSession {
   return {
     id: "sess-1",
     createdAt: new Date().toISOString(),
-    ownerEmail: "owner@dsn.com",
+    ownerEmail: "owner@acme.test",
     linuxUser: "diwan-owner",
     workspaceDir: "/home/diwan-owner/repos",
     port: 4100,
@@ -51,19 +51,19 @@ describe("ChatStore", () => {
       `${JSON.stringify({
         id: "legacy-1",
         createdAt: "2026-01-01T00:00:00.000Z",
-        authorEmail: "owner@dsn.com",
+        authorEmail: "owner@acme.test",
         authorLinuxUser: "diwan-owner",
         body: "hello"
       })}\n`
     );
 
     const store = new ChatStore(cfg);
-    const channels = store.listChannelsForUser(user("owner@dsn.com"));
+    const channels = store.listChannelsForUser(user("owner@acme.test"));
     expect(channels.map((channel) => channel.id)).toContain("general");
 
     const messages = await store.listMessages(
       "general",
-      user("owner@dsn.com")
+      user("owner@acme.test")
     );
     expect(messages).toMatchObject([
       { id: "legacy-1", channelId: "general", body: "hello", kind: "user" }
@@ -72,7 +72,7 @@ describe("ChatStore", () => {
 
   it("creates private session channels visible only to the owner", () => {
     const store = new ChatStore(config());
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const channel = store.ensureSessionChannel(session(), owner);
 
     expect(channel.name).toBe("New session");
@@ -81,13 +81,13 @@ describe("ChatStore", () => {
       channel.id
     );
     expect(
-      store.listChannelsForUser(user("other@dsn.com")).map((item) => item.id)
+      store.listChannelsForUser(user("other@acme.test")).map((item) => item.id)
     ).not.toContain(channel.id);
   });
 
   it("can return all retained messages for a session channel", async () => {
     const store = new ChatStore(config());
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const channel = store.ensureSessionChannel(session(), owner);
 
     await store.appendMessage(channel.id, owner, "first");
@@ -100,7 +100,7 @@ describe("ChatStore", () => {
 
   it("renames a session channel when OpenCode provides a session name", () => {
     const store = new ChatStore(config());
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const channel = store.ensureSessionChannel(session(), owner);
 
     const changed = store.updateSessionChannelName(
@@ -114,24 +114,24 @@ describe("ChatStore", () => {
 
   it("shares a session channel with another user", async () => {
     const store = new ChatStore(config());
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const channel = store.ensureSessionChannel(session(), owner);
 
-    const shared = store.shareChannel(channel.id, "other@dsn.com", owner);
+    const shared = store.shareChannel(channel.id, "other@acme.test", owner);
 
     expect(shared.visibility).toBe("shared");
     expect(
-      store.listChannelsForUser(user("other@dsn.com")).map((item) => item.id)
+      store.listChannelsForUser(user("other@acme.test")).map((item) => item.id)
     ).toContain(channel.id);
 
     await expect(
-      store.appendMessage(channel.id, user("other@dsn.com"), "joined")
+      store.appendMessage(channel.id, user("other@acme.test"), "joined")
     ).resolves.toMatchObject({ body: "joined", channelId: channel.id });
   });
 
   it("returns the same channel for the same live session id", () => {
     const store = new ChatStore(config());
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const first = session({ id: "sess-1" });
     const channel = store.ensureSessionChannel(first, owner);
 
@@ -143,10 +143,10 @@ describe("ChatStore", () => {
 
   it("creates a new channel for a new session in the same workspace", () => {
     const store = new ChatStore(config());
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const first = session({ id: "sess-1" });
     const channel = store.ensureSessionChannel(first, owner);
-    store.shareChannel(channel.id, "other@dsn.com", owner);
+    store.shareChannel(channel.id, "other@acme.test", owner);
     store.archiveSessionChannel(first);
 
     const second = store.ensureSessionChannel(
@@ -158,14 +158,14 @@ describe("ChatStore", () => {
     expect(second.archivedAt).toBeUndefined();
     expect(second.session?.sessionId).toBe("sess-2");
     expect(second.members.map((member) => member.email)).not.toContain(
-      "other@dsn.com"
+      "other@acme.test"
     );
     expect(channel.archivedAt).toBeTruthy();
   });
 
   it("archives live session channels whose threads are no longer persisted", () => {
     const store = new ChatStore(config());
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const createdAt = new Date().toISOString();
     const oldThread = {
       id: "thread-old",
@@ -204,7 +204,7 @@ describe("ChatStore", () => {
 
   it("archives legacy unthreaded session channels once threads are known", () => {
     const store = new ChatStore(config());
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const legacy = store.ensureSessionChannel(session(), owner);
     const createdAt = new Date().toISOString();
     const thread = {

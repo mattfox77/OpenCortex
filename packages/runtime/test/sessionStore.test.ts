@@ -28,7 +28,7 @@ function makeSession(overrides: Partial<CodeSession>): CodeSession {
   return {
     id: 'sess-1',
     createdAt: new Date().toISOString(),
-    ownerEmail: 'tester@dsn.com',
+    ownerEmail: 'tester@acme.test',
     linuxUser: 'tester',
     workspaceDir: '/home/tester/repos',
     port: 4100,
@@ -128,7 +128,7 @@ describe('SessionStore', () => {
       'old',
       makeSession({
         id: 'old',
-        ownerEmail: 'tester@dsn.com',
+        ownerEmail: 'tester@acme.test',
         createdAt: '2026-01-01T00:00:00.000Z',
       }),
     );
@@ -136,16 +136,16 @@ describe('SessionStore', () => {
       'new',
       makeSession({
         id: 'new',
-        ownerEmail: 'tester@dsn.com',
+        ownerEmail: 'tester@acme.test',
         createdAt: '2026-01-02T00:00:00.000Z',
       }),
     );
     store.set(
       'other',
-      makeSession({ id: 'other', ownerEmail: 'other@dsn.com' }),
+      makeSession({ id: 'other', ownerEmail: 'other@acme.test' }),
     );
 
-    expect(store.findByOwnerEmail('tester@dsn.com')?.id).toBe('new');
+    expect(store.findByOwnerEmail('tester@acme.test')?.id).toBe('new');
   });
 
   it('reports persistent for a writable dir', () => {

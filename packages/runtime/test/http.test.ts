@@ -38,9 +38,9 @@ function testConfig(): AppConfig {
     COGNITO_DOMAIN: 'https://example.auth.us-east-1.amazoncognito.com',
     COGNITO_REDIRECT_PATH: '/auth/callback',
     COGNITO_REQUIRED_GROUPS: ['TeamChatUsers', 'OpenCodeUsers'],
-    DIWAN_ALLOWED_EMAIL_DOMAIN: 'dsn.com',
-    DIWAN_ALLOWED_EMAIL_DOMAINS: ['dsn.com'],
-    DIWAN_SUPER_ADMIN_EMAILS: ['mfox@dsn.com'],
+    DIWAN_ALLOWED_EMAIL_DOMAIN: 'acme.test',
+    DIWAN_ALLOWED_EMAIL_DOMAINS: ['acme.test'],
+    DIWAN_SUPER_ADMIN_EMAILS: ['mfox@acme.test'],
     DIWAN_LINUX_USER_PREFIX: '',
     DIWAN_WORKSPACE_ROOT: '/srv/diwan/workspaces',
     DIWAN_EXEC_MODE: 'dry-run',
@@ -51,7 +51,7 @@ function testConfig(): AppConfig {
     DIWAN_SSM_TARGET_INSTANCE_ID: '',
     DIWAN_SSM_LOCAL_PORT_BASE: 5100,
     DIWAN_AWS_BIN: '/usr/local/bin/aws',
-    DIWAN_JIRA_BASE_URL: 'https://dsnsoft-dev.atlassian.net',
+    DIWAN_JIRA_BASE_URL: 'https://jira.example.test',
     SLACK_BOT_TOKEN: '',
     SLACK_API_BASE_URL: 'https://slack.com/api',
     SLACK_WORKSPACE_URL: 'https://workspace.example.com',
@@ -126,7 +126,7 @@ function codeSession(overrides: Partial<CodeSession>): CodeSession {
   return {
     id: 'live',
     createdAt: new Date().toISOString(),
-    ownerEmail: 'owner@dsn.com',
+    ownerEmail: 'owner@acme.test',
     linuxUser: 'owner',
     workspaceDir: '/home/owner/repos',
     port: 4100,
@@ -274,7 +274,7 @@ describe('http app', () => {
     const { listener, base } = startApp(config);
     server = listener;
 
-    const devAuth = { Authorization: 'Dev tester@dsn.com' };
+    const devAuth = { Authorization: 'Dev tester@acme.test' };
 
     const created = await fetch(`${base}/diwan/api/code/sessions`, {
       method: 'POST',
@@ -283,7 +283,7 @@ describe('http app', () => {
     expect(created.status).toBe(201);
     const createdBody = await created.json();
     expect(createdBody.session.id).toBeTruthy();
-    expect(createdBody.session.ownerEmail).toBe('tester@dsn.com');
+    expect(createdBody.session.ownerEmail).toBe('tester@acme.test');
 
     // A fresh request (simulating a page refresh) sees the same session.
     const listed = await fetch(`${base}/diwan/api/code/sessions`, {
@@ -300,7 +300,7 @@ describe('http app', () => {
     const { listener, base } = startApp(config);
     server = listener;
 
-    const devAuth = { Authorization: 'Dev tester@dsn.com' };
+    const devAuth = { Authorization: 'Dev tester@acme.test' };
 
     const first = await fetch(`${base}/diwan/api/code/sessions`, {
       method: 'POST',
@@ -335,7 +335,7 @@ describe('http app', () => {
     const initialChat = new ChatStore(config);
     const channel = initialChat.ensureSessionChannel(
       session,
-      authUser('owner@dsn.com'),
+      authUser('owner@acme.test'),
     );
     initialSessions.set(session.id, session);
 
@@ -351,7 +351,7 @@ describe('http app', () => {
 
     const listed = await fetch(
       `http://127.0.0.1:${address.port}/diwan/api/code/sessions`,
-      { headers: { Authorization: 'Dev owner@dsn.com' } },
+      { headers: { Authorization: 'Dev owner@acme.test' } },
     );
 
     expect(listed.status).toBe(200);
@@ -377,7 +377,7 @@ describe('http app', () => {
     const chat = new ChatStore(config);
     const channel = chat.ensureSessionChannel(
       session,
-      authUser('owner@dsn.com'),
+      authUser('owner@acme.test'),
     );
     sessions.set(session.id, session);
 
@@ -390,7 +390,7 @@ describe('http app', () => {
 
     const listed = await fetch(
       `http://127.0.0.1:${address.port}/diwan/api/code/sessions`,
-      { headers: { Authorization: 'Dev owner@dsn.com' } },
+      { headers: { Authorization: 'Dev owner@acme.test' } },
     );
 
     expect(listed.status).toBe(200);
@@ -404,7 +404,7 @@ describe('http app', () => {
     });
     expect(sessions.get('workspace-owner')?.mode).toBe('dry-run');
     expect(
-      chat.getChannelForUser(channel.id, authUser('owner@dsn.com'))?.archivedAt,
+      chat.getChannelForUser(channel.id, authUser('owner@acme.test'))?.archivedAt,
     ).toBeUndefined();
   });
 
@@ -415,11 +415,11 @@ describe('http app', () => {
 
     await fetch(`${base}/diwan/api/code/sessions`, {
       method: 'POST',
-      headers: { Authorization: 'Dev owner@dsn.com' },
+      headers: { Authorization: 'Dev owner@acme.test' },
     });
 
     const other = await fetch(`${base}/diwan/api/code/sessions`, {
-      headers: { Authorization: 'Dev someone-else@dsn.com' },
+      headers: { Authorization: 'Dev someone-else@acme.test' },
     });
     expect(other.status).toBe(200);
     const body = await other.json();
@@ -431,8 +431,8 @@ describe('http app', () => {
     const { listener, base } = startApp(config);
     server = listener;
 
-    const ownerAuth = { Authorization: 'Dev grathke@dsn.com' };
-    const superAdminAuth = { Authorization: 'Dev mfox@dsn.com' };
+    const ownerAuth = { Authorization: 'Dev grathke@acme.test' };
+    const superAdminAuth = { Authorization: 'Dev mfox@acme.test' };
 
     const created = await fetch(`${base}/diwan/api/code/sessions`, {
       method: 'POST',
@@ -449,7 +449,7 @@ describe('http app', () => {
     expect(listedBody.sessions).toMatchObject([
       {
         id: createdBody.session.id,
-        ownerEmail: 'grathke@dsn.com',
+        ownerEmail: 'grathke@acme.test',
       },
     ]);
 
@@ -461,7 +461,7 @@ describe('http app', () => {
     expect(activityBody.sessions).toMatchObject([
       {
         id: createdBody.session.id,
-        ownerEmail: 'grathke@dsn.com',
+        ownerEmail: 'grathke@acme.test',
       },
     ]);
   });
@@ -472,10 +472,10 @@ describe('http app', () => {
     server = listener;
 
     const ownerAuth = {
-      Authorization: 'Dev owner@dsn.com',
+      Authorization: 'Dev owner@acme.test',
       'Content-Type': 'application/json',
     };
-    const otherAuth = { Authorization: 'Dev other@dsn.com' };
+    const otherAuth = { Authorization: 'Dev other@acme.test' };
 
     const created = await fetch(`${base}/diwan/api/code/sessions`, {
       method: 'POST',
@@ -498,7 +498,7 @@ describe('http app', () => {
       {
         method: 'POST',
         headers: ownerAuth,
-        body: JSON.stringify({ email: 'other@dsn.com' }),
+        body: JSON.stringify({ email: 'other@acme.test' }),
       },
     );
     expect(shared.status).toBe(200);
@@ -516,7 +516,7 @@ describe('http app', () => {
       {
         method: 'POST',
         headers: {
-          Authorization: 'Dev other@dsn.com',
+          Authorization: 'Dev other@acme.test',
           'Content-Type': 'application/json',
         },
         body: JSON.stringify({ body: 'I can collaborate here' }),
@@ -548,7 +548,7 @@ describe('http app', () => {
     });
     const sessions = new SessionStore(config.DIWAN_DATA_DIR);
     const chat = new ChatStore(config);
-    const owner = authUser('owner@dsn.com');
+    const owner = authUser('owner@acme.test');
     sessions.set(session.id, session);
     const stale = chat.ensureSessionChannel(
       {
@@ -570,7 +570,7 @@ describe('http app', () => {
 
     const response = await fetch(
       `http://127.0.0.1:${address.port}/diwan/api/chat/channels`,
-      { headers: { Authorization: 'Dev owner@dsn.com' } },
+      { headers: { Authorization: 'Dev owner@acme.test' } },
     );
 
     expect(response.status).toBe(200);
@@ -616,7 +616,7 @@ describe('http app', () => {
 
     const created = await fetch(`${base}/diwan/api/code/sessions`, {
       method: 'POST',
-      headers: { Authorization: 'Dev owner@dsn.com' },
+      headers: { Authorization: 'Dev owner@acme.test' },
     });
 
     expect(created.status).toBe(201);
@@ -653,7 +653,7 @@ describe('http app', () => {
     sessions.set(session.id, session);
     const channel = chat.ensureSessionChannel(
       session,
-      authUser('owner@dsn.com'),
+      authUser('owner@acme.test'),
     );
     expect(channel.name).toBe('New session');
 
@@ -666,7 +666,7 @@ describe('http app', () => {
 
     const response = await fetch(
       `http://127.0.0.1:${address.port}/diwan/api/chat/channels`,
-      { headers: { Authorization: 'Dev owner@dsn.com' } },
+      { headers: { Authorization: 'Dev owner@acme.test' } },
     );
 
     expect(response.status).toBe(200);
@@ -687,13 +687,13 @@ describe('http app', () => {
               sessions: [
                 {
                   id: 'ses_pull',
-                  title: 'Pull dsn-dsnpay-core',
-                  project: { path: '/home/owner/repos/dsn-dsnpay-core' },
+                  title: 'Pull payments-core',
+                  project: { path: '/home/owner/repos/payments-core' },
                 },
                 {
                   id: 'ses_clone',
-                  title: 'Clone DSN-dev/dsn-dsnpay-core',
-                  cwd: '/home/owner/repos/dsn-dsnpay-core',
+                  title: 'Clone ExampleOrg/payments-core',
+                  cwd: '/home/owner/repos/payments-core',
                 },
               ],
             },
@@ -711,7 +711,7 @@ describe('http app', () => {
     });
     const sessions = new SessionStore(config.DIWAN_DATA_DIR);
     const chat = new ChatStore(config);
-    const owner = authUser('owner@dsn.com');
+    const owner = authUser('owner@acme.test');
     sessions.set(session.id, session);
     const staleChannel = chat.ensureSessionChannel(session, owner);
 
@@ -724,7 +724,7 @@ describe('http app', () => {
 
     const response = await fetch(
       `http://127.0.0.1:${address.port}/diwan/api/code/sessions`,
-      { headers: { Authorization: 'Dev owner@dsn.com' } },
+      { headers: { Authorization: 'Dev owner@acme.test' } },
     );
 
     expect(response.status).toBe(200);
@@ -743,14 +743,14 @@ describe('http app', () => {
     expect(syncedSessions).toEqual(
       expect.arrayContaining([
         {
-          name: 'Pull dsn-dsnpay-core',
+          name: 'Pull payments-core',
           openCodeSessionId: 'ses_pull',
-          workspaceDir: '/home/owner/repos/dsn-dsnpay-core',
+          workspaceDir: '/home/owner/repos/payments-core',
         },
         {
-          name: 'Clone DSN-dev/dsn-dsnpay-core',
+          name: 'Clone ExampleOrg/payments-core',
           openCodeSessionId: 'ses_clone',
-          workspaceDir: '/home/owner/repos/dsn-dsnpay-core',
+          workspaceDir: '/home/owner/repos/payments-core',
         },
       ]),
     );
@@ -791,7 +791,7 @@ describe('http app', () => {
     sessions.set(session.id, session);
     const channel = chat.ensureSessionChannel(
       session,
-      authUser('owner@dsn.com'),
+      authUser('owner@acme.test'),
     );
     expect(channel.name).toBe('New session');
 
@@ -803,9 +803,9 @@ describe('http app', () => {
     }
     const base = `http://127.0.0.1:${address.port}`;
     const cookie = {
-      Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@dsn.com')}`,
+      Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
     };
-    const projectPath = '/home/owner/repos/dsn-dsnpay-core';
+    const projectPath = '/home/owner/repos/payments-core';
     const encodedProjectPath = Buffer.from(projectPath)
       .toString('base64')
       .replaceAll('+', '-')
@@ -829,7 +829,7 @@ describe('http app', () => {
     );
 
     const listed = await fetch(`${base}/diwan/api/code/sessions`, {
-      headers: { Authorization: 'Dev owner@dsn.com' },
+      headers: { Authorization: 'Dev owner@acme.test' },
     });
     const listedBody = await listed.json();
     const selected = listedBody.sessions.find(
@@ -866,7 +866,7 @@ describe('http app', () => {
     });
     const sessions = new SessionStore(config.DIWAN_DATA_DIR);
     const chat = new ChatStore(config);
-    const owner = authUser('owner@dsn.com');
+    const owner = authUser('owner@acme.test');
     const createdAt = new Date().toISOString();
     const baseSession = codeSession({
       id: 'live',
@@ -908,7 +908,7 @@ describe('http app', () => {
 
     const listed = await fetch(
       `http://127.0.0.1:${address.port}/diwan/api/code/sessions`,
-      { headers: { Authorization: 'Dev owner@dsn.com' } },
+      { headers: { Authorization: 'Dev owner@acme.test' } },
     );
 
     expect(listed.status).toBe(200);
@@ -944,8 +944,8 @@ describe('http app', () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const sessions = new SessionStore(config.DIWAN_DATA_DIR);
     const chat = new ChatStore(config);
-    const owner = authUser('owner@dsn.com');
-    const workspaceDir = '/home/owner/repos/dsn-dsnpay-core';
+    const owner = authUser('owner@acme.test');
+    const workspaceDir = '/home/owner/repos/payments-core';
     const createdAt = new Date().toISOString();
     const session = codeSession({
       id: 'live',
@@ -980,7 +980,7 @@ describe('http app', () => {
       `${base}/diwan/${workspaceToken}/session/ses_existing`,
       {
         headers: {
-          Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@dsn.com')}`,
+          Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
         },
         redirect: 'manual',
       },
@@ -1000,7 +1000,7 @@ describe('http app', () => {
     });
     const sessions = new SessionStore(config.DIWAN_DATA_DIR);
     const chat = new ChatStore(config);
-    const owner = authUser('owner@dsn.com');
+    const owner = authUser('owner@acme.test');
     const createdAt = new Date().toISOString();
     const workspaceOne = '/home/owner/repos/one';
     const workspaceTwo = '/home/owner/repos/two';
@@ -1047,7 +1047,7 @@ describe('http app', () => {
     }
     const base = `http://127.0.0.1:${address.port}`;
     const cookie = {
-      Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@dsn.com')}`,
+      Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
     };
 
     const first = await fetch(
@@ -1079,7 +1079,7 @@ describe('http app', () => {
     server = listener;
 
     const ownerAuth = {
-      Authorization: 'Dev owner@dsn.com',
+      Authorization: 'Dev owner@acme.test',
       'Content-Type': 'application/json',
     };
     const created = await fetch(`${base}/diwan/api/code/sessions`, {
@@ -1093,7 +1093,7 @@ describe('http app', () => {
       {
         method: 'POST',
         headers: ownerAuth,
-        body: JSON.stringify({ body: 'Starting DSN-321 now' }),
+        body: JSON.stringify({ body: 'Starting OC-321 now' }),
       },
     );
     expect(posted.status).toBe(201);
@@ -1105,11 +1105,11 @@ describe('http app', () => {
     expect(links.status).toBe(200);
     const linksBody = await links.json();
     expect(linksBody.links).toMatchObject([
-      { kind: 'issue', targetKey: 'DSN-321', source: 'chat-message' },
+      { kind: 'issue', targetKey: 'OC-321', source: 'chat-message' },
     ]);
 
     const searched = await fetch(
-      `${base}/diwan/api/work-tracking/sessions?jiraKey=DSN-321`,
+      `${base}/diwan/api/work-tracking/sessions?jiraKey=OC-321`,
       { headers: ownerAuth },
     );
     expect(searched.status).toBe(200);
@@ -1118,16 +1118,16 @@ describe('http app', () => {
     expect(searchedBody.sessions[0].id).toBe(createdBody.session.id);
 
     const detail = await fetch(
-      `${base}/diwan/api/work-tracking/jira-items/DSN-321`,
+      `${base}/diwan/api/work-tracking/jira-items/OC-321`,
       { headers: ownerAuth },
     );
     expect(detail.status).toBe(200);
     const detailBody = await detail.json();
     expect(detailBody).toMatchObject({
-      key: 'DSN-321',
+      key: 'OC-321',
       item: {
-        key: 'DSN-321',
-        projectKey: 'DSN',
+        key: 'OC-321',
+        projectKey: 'OC',
       },
       sourceCounts: {
         'chat-message': 1,
@@ -1146,11 +1146,11 @@ describe('http app', () => {
     server = listener;
 
     const ownerAuth = {
-      Authorization: 'Dev owner@dsn.com',
+      Authorization: 'Dev owner@acme.test',
       'Content-Type': 'application/json',
     };
     const memberAuth = {
-      Authorization: 'Dev member@dsn.com',
+      Authorization: 'Dev member@acme.test',
       'Content-Type': 'application/json',
     };
     const created = await fetch(`${base}/diwan/api/code/sessions`, {
@@ -1163,7 +1163,7 @@ describe('http app', () => {
       {
         method: 'POST',
         headers: ownerAuth,
-        body: JSON.stringify({ email: 'member@dsn.com' }),
+        body: JSON.stringify({ email: 'member@acme.test' }),
       },
     );
 
@@ -1181,7 +1181,7 @@ describe('http app', () => {
       {
         kind: 'team',
         teamName: 'Platform Team',
-        createdByEmail: 'member@dsn.com',
+        createdByEmail: 'member@acme.test',
       },
     ]);
 
@@ -1202,7 +1202,7 @@ describe('http app', () => {
     server = listener;
 
     const ownerAuth = {
-      Authorization: 'Dev owner@dsn.com',
+      Authorization: 'Dev owner@acme.test',
       'Content-Type': 'application/json',
     };
     const created = await fetch(`${base}/diwan/api/code/sessions`, {
@@ -1214,7 +1214,7 @@ describe('http app', () => {
 
     const unrelated = await fetch(sessionPath, {
       headers: {
-        Cookie: `diwan.idToken=${encodeURIComponent('Dev unrelated@dsn.com')}`,
+        Cookie: `diwan.idToken=${encodeURIComponent('Dev unrelated@acme.test')}`,
       },
     });
     expect(unrelated.status).toBe(404);
@@ -1224,13 +1224,13 @@ describe('http app', () => {
       {
         method: 'POST',
         headers: ownerAuth,
-        body: JSON.stringify({ email: 'other@dsn.com' }),
+        body: JSON.stringify({ email: 'other@acme.test' }),
       },
     );
 
     const shared = await fetch(sessionPath, {
       headers: {
-        Cookie: `diwan.idToken=${encodeURIComponent('Dev other@dsn.com')}`,
+        Cookie: `diwan.idToken=${encodeURIComponent('Dev other@acme.test')}`,
       },
     });
     // dry-run mode does not start an OpenCode backend, so an authorized proxy
@@ -1260,7 +1260,7 @@ describe('http app', () => {
     sessions.set(session.id, session);
     const channel = chat.ensureSessionChannel(
       session,
-      authUser('owner@dsn.com'),
+      authUser('owner@acme.test'),
     );
     chat.attachSlackChannel(channel.id, {
       channelId: 'CSESSION',
@@ -1275,7 +1275,7 @@ describe('http app', () => {
     }
     const base = `http://127.0.0.1:${address.port}`;
     const cookie = {
-      Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@dsn.com')}`,
+      Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
     };
 
     const html = await fetch(`${base}/diwan/code/session/live/`, {
@@ -1307,11 +1307,11 @@ describe('http app', () => {
     server = listener;
 
     const ownerAuth = {
-      Authorization: 'Dev owner@dsn.com',
+      Authorization: 'Dev owner@acme.test',
       'Content-Type': 'application/json',
     };
     const reviewerAuth = {
-      Authorization: 'Dev reviewer@dsn.com',
+      Authorization: 'Dev reviewer@acme.test',
       'Content-Type': 'application/json',
     };
 
@@ -1325,7 +1325,7 @@ describe('http app', () => {
       {
         method: 'POST',
         headers: ownerAuth,
-        body: JSON.stringify({ email: 'reviewer@dsn.com' }),
+        body: JSON.stringify({ email: 'reviewer@acme.test' }),
       },
     );
 
@@ -1375,7 +1375,7 @@ describe('http app', () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const sessions = new SessionStore(config.DIWAN_DATA_DIR);
     const chat = new ChatStore(config);
-    const owner = authUser('owner@dsn.com');
+    const owner = authUser('owner@acme.test');
     const session = codeSession({
       id: 'session-with-opencode-id',
       openCodeSessionId: 'ses_dyson',
@@ -1384,7 +1384,7 @@ describe('http app', () => {
     });
     sessions.set(session.id, session);
     const channel = chat.ensureSessionChannel(session, owner);
-    chat.shareChannel(channel.id, 'reviewer@dsn.com', owner);
+    chat.shareChannel(channel.id, 'reviewer@acme.test', owner);
 
     const app = createApp(config, sessions, chat);
     const listener = app.listen(0);
@@ -1394,11 +1394,11 @@ describe('http app', () => {
       throw new Error('Expected TCP listener');
     const base = `http://127.0.0.1:${address.port}`;
     const ownerAuth = {
-      Authorization: 'Dev owner@dsn.com',
+      Authorization: 'Dev owner@acme.test',
       'Content-Type': 'application/json',
     };
     const reviewerAuth = {
-      Authorization: 'Dev reviewer@dsn.com',
+      Authorization: 'Dev reviewer@acme.test',
       'Content-Type': 'application/json',
     };
 

@@ -37,7 +37,7 @@ function session(port: number): CodeSession {
     id: 'diwan-session',
     openCodeSessionId: 'ses_test',
     createdAt: '2026-06-10T00:00:00.000Z',
-    ownerEmail: 'owner@dsn.com',
+    ownerEmail: 'owner@acme.test',
     linuxUser: 'owner',
     workspaceDir: '/home/owner/repos',
     port,
@@ -87,7 +87,7 @@ describe('OpenCode prompt client', () => {
         opencodeSessionId: 'ses_test',
         promptText: 'approved',
         draftId: 'draft',
-        approvedByEmail: 'reviewer@dsn.com',
+        approvedByEmail: 'reviewer@acme.test',
       }),
     ).resolves.toEqual({});
     expect(requests).toEqual(['POST /api/session/ses_test/prompt_async']);
@@ -120,12 +120,12 @@ describe('OpenCode prompt client', () => {
               sessions: [
                 {
                   id: 'ses_pull',
-                  title: 'Pull dsn-dsnpay-core',
-                  project: { path: '/home/owner/repos/dsn-dsnpay-core' },
+                  title: 'Pull payments-core',
+                  project: { path: '/home/owner/repos/payments-core' },
                 },
                 {
                   sessionID: 'ses_clone',
-                  name: 'Clone DSN-dev/repo',
+                  name: 'Clone ExampleOrg/repo',
                   cwd: '/home/owner/repos/repo',
                 },
               ],
@@ -141,12 +141,12 @@ describe('OpenCode prompt client', () => {
     await expect(fetchOpenCodeSessions(session(port))).resolves.toEqual([
       {
         id: 'ses_pull',
-        name: 'Pull dsn-dsnpay-core',
-        workspaceDir: '/home/owner/repos/dsn-dsnpay-core',
+        name: 'Pull payments-core',
+        workspaceDir: '/home/owner/repos/payments-core',
       },
       {
         id: 'ses_clone',
-        name: 'Clone DSN-dev/repo',
+        name: 'Clone ExampleOrg/repo',
         workspaceDir: '/home/owner/repos/repo',
       },
     ]);

@@ -19,7 +19,7 @@ function session(overrides: Partial<CodeSession> = {}): CodeSession {
   return {
     id: "sess-1",
     createdAt: "2026-06-10T00:00:00.000Z",
-    ownerEmail: "owner@dsn.com",
+    ownerEmail: "owner@acme.test",
     linuxUser: "owner",
     workspaceDir: "/home/owner/repos",
     port: 4100,
@@ -37,7 +37,7 @@ function store(): PairPromptStore {
 describe("PairPromptStore", () => {
   it("freezes a ready snapshot and blocks edits while under review", () => {
     const prompts = store();
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const draft = prompts.create({
       session: session(),
       channelId: "session-channel",
@@ -58,7 +58,7 @@ describe("PairPromptStore", () => {
 
   it("requires a different reviewer to reject or send a ready snapshot", () => {
     const prompts = store();
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const draft = prompts.create({
       session: session(),
       channelId: "session-channel",
@@ -70,14 +70,14 @@ describe("PairPromptStore", () => {
 
     expect(() => prompts.reject(draft.id, owner)).toThrow(/requester/);
     expect(() => prompts.startSending(draft.id, owner)).toThrow(/requester/);
-    expect(prompts.reject(draft.id, user("reviewer@dsn.com")).status).toBe(
+    expect(prompts.reject(draft.id, user("reviewer@acme.test")).status).toBe(
       "rejected"
     );
   });
 
   it("persists lifecycle events across store instances", () => {
     const dir = mkdtempSync(join(tmpdir(), "diwan-pair-"));
-    const owner = user("owner@dsn.com");
+    const owner = user("owner@acme.test");
     const first = new PairPromptStore(dir);
     const draft = first.create({
       session: session(),

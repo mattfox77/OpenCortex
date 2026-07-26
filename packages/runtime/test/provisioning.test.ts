@@ -13,7 +13,7 @@ describe('provisioning', () => {
     const commands = provisioningCommands(
       {
         sub: 'sub',
-        email: 'mfox@dsn.com',
+        email: 'mfox@acme.test',
         groups: ['OpenCodeUsers'],
         linuxUser: 'mfox',
       },
@@ -33,7 +33,7 @@ describe('provisioning', () => {
     expect(commands.join('\n')).toContain(
       '/opt/opencortex/scripts/provision-diwan-user.sh mfox',
     );
-    expect(commands.join('\n')).not.toContain('/home/mfox-dsn/.claude/skills');
+    expect(commands.join('\n')).not.toContain('/home/mfox-dev/.claude/skills');
     expect(commands.join('\n')).toContain('/home/mfox/.aws');
   });
 });
