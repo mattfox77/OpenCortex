@@ -1044,7 +1044,7 @@ function renderSession(session) {
   toolbar.className = 'code-toolbar';
 
   const status = document.createElement('div');
-  status.textContent = `DysonCode workspace for ${session.linuxUser}`;
+  status.textContent = `OpenCortex Workbench for ${session.linuxUser}`;
 
   toolbar.append(status);
 
@@ -1075,7 +1075,7 @@ function renderSession(session) {
   const frame = document.createElement('iframe');
   frame.className = 'code-frame';
   frame.src = openCodeFrameUrl(session);
-  frame.title = 'DysonCode workspace';
+  frame.title = 'OpenCortex Workbench';
   frame.allow = 'clipboard-read; clipboard-write';
 
   target.append(toolbar, frame, workspace);
@@ -1342,7 +1342,7 @@ bindUiAction('#start-code', 'click', async event => {
   const target = document.querySelector('#code-output');
   target.className = 'code-session loading';
   target.innerHTML = '';
-  target.textContent = 'Opening DysonCode workspace...';
+  target.textContent = 'Opening OpenCortex Workbench...';
 
   try {
     const data = await api('/code/sessions', { method: 'POST' });
@@ -1360,7 +1360,7 @@ bindUiAction('#start-code', 'click', async event => {
     target.textContent = error.message;
   } finally {
     button.disabled = false;
-    button.textContent = 'Open DysonCode';
+    button.textContent = 'Open Workbench';
   }
 });
 

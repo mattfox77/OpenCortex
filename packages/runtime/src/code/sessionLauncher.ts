@@ -124,7 +124,7 @@ export class SessionLauncher {
       try {
         openCodeSessionId = await createOpenCodeSession(port);
       } catch {
-        // DysonCode can still be opened in the iframe. Pair-prompt delivery
+        // OpenCortex Workbench can still be opened in the iframe. Pair-prompt delivery
         // will report a missing internal session id until OpenCode exposes one.
       } finally {
         closeSync(logFd);

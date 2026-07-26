@@ -133,7 +133,7 @@ function codeSession(overrides: Partial<CodeSession>): CodeSession {
   };
 }
 
-function fakeDyson(
+function fakeOpenCode(
   handler: http.RequestListener,
 ): Promise<{ port: number; requests: Array<{ url?: string; body: string }> }> {
   const requests: Array<{ url?: string; body: string }> = [];
@@ -179,18 +179,18 @@ describe('http app', () => {
     expect(html).toContain('<base href="/diwan/" />');
     expect(html).toContain('<title>OpenCortex Runtime</title>');
     expect(html).toContain('<h1>AI Engineering Workspace</h1>');
-    expect(html).toContain('<h2>DysonCode</h2>');
+    expect(html).toContain('<h2>Workbench</h2>');
     expect(html).not.toContain('<h2>OpenCode</h2>');
   });
 
-  it('serves the TeamChat shell for standalone DysonCode session tabs', async () => {
+  it('serves the TeamChat shell for standalone OpenCortex Workbench session tabs', async () => {
     const response = await request('/diwan/code/sessions/live');
 
     expect(response.status).toBe(200);
     const html = await response.text();
     expect(html).toContain('<base href="/diwan/" />');
     expect(html).toContain('<h2 id="channel-title">TeamChat</h2>');
-    expect(html).toContain('<h2>DysonCode</h2>');
+    expect(html).toContain('<h2>Workbench</h2>');
   });
 
   it('serves the profile page through the app shell', async () => {
@@ -218,7 +218,7 @@ describe('http app', () => {
   });
 
   it('exchanges OIDC auth codes with the configured token endpoint', async () => {
-    const tokenBackend = await fakeDyson((_req, res) => {
+    const tokenBackend = await fakeOpenCode((_req, res) => {
       res.setHeader('Content-Type', 'application/json');
       res.end(JSON.stringify({
         id_token: 'id-token',
@@ -584,7 +584,7 @@ describe('http app', () => {
   });
 
   it('creates a Slack channel for new sessions when Slack is configured', async () => {
-    const slack = await fakeDyson((req, res) => {
+    const slack = await fakeOpenCode((req, res) => {
       res.writeHead(200, { 'content-type': 'application/json' });
       if (req.url === '/conversations.create') {
         res.end(
@@ -628,7 +628,7 @@ describe('http app', () => {
     ]);
   });
 
-  it('updates session channel names from dyson-opencode session metadata', async () => {
+  it('updates session channel names from OpenCode session metadata', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const backendPort = await listenOnHttpBackend((req, res) => {
       if (req.url === '/api/session/ses_live') {
@@ -672,7 +672,7 @@ describe('http app', () => {
     ).toBe('Greeting');
   });
 
-  it('syncs TeamChat session channels from the dyson-opencode session inventory', async () => {
+  it('syncs TeamChat session channels from the OpenCode session inventory', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const backendPort = await listenOnHttpBackend((req, res) => {
       if (req.url === '/api/session') {
@@ -764,7 +764,7 @@ describe('http app', () => {
     ).toBeTruthy();
   });
 
-  it('tracks a selected DysonCode thread from proxied navigation without changing the active thread', async () => {
+  it('tracks a selected OpenCortex Workbench thread from proxied navigation without changing the active thread', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const backendPort = await listenOnHttpBackend((req, res) => {
       if (req.url === '/api/session/ses_existing') {
@@ -844,7 +844,7 @@ describe('http app', () => {
     expect(selected.channel.id).not.toBe(channel.id);
   });
 
-  it('lists every live DysonCode thread channel with a runnable workspace URL', async () => {
+  it('lists every live OpenCortex Workbench thread channel with a runnable workspace URL', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const backendPort = await listenOnHttpBackend((req, res) => {
       if (req.url === '/api/session/ses_one') {
@@ -936,7 +936,7 @@ describe('http app', () => {
     ).toContain(first.id);
   });
 
-  it('redirects raw DysonCode thread URLs back into the managed session proxy', async () => {
+  it('redirects raw OpenCortex Workbench thread URLs back into the managed session proxy', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const sessions = new SessionStore(config.DIWAN_DATA_DIR);
     const chat = new ChatStore(config);
@@ -988,7 +988,7 @@ describe('http app', () => {
     );
   });
 
-  it('opens different DysonCode session links without changing the active thread globally', async () => {
+  it('opens different OpenCortex Workbench session links without changing the active thread globally', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const backendPort = await listenOnHttpBackend((req, res) => {
       res.writeHead(200, { 'content-type': 'text/html' });
@@ -1234,7 +1234,7 @@ describe('http app', () => {
     expect(shared.status).toBe(502);
   });
 
-  it('rebrands proxied OpenCode browser assets to DysonCode', async () => {
+  it('rebrands proxied OpenCode browser assets to OpenCortex Workbench', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const backendPort = await listenOnHttpBackend((req, res) => {
       if (req.url === '/assets/app.js') {
@@ -1280,7 +1280,7 @@ describe('http app', () => {
     expect(html.status).toBe(200);
     expect(html.headers.get('etag')).toBeNull();
     const htmlBody = await html.text();
-    expect(htmlBody).toContain('DysonCode');
+    expect(htmlBody).toContain('OpenCortex Workbench');
     expect(htmlBody).toContain('data-diwan-session-addon');
     expect(htmlBody).toContain('data-channel-id="');
     expect(htmlBody).toContain('data-diwan-url="/diwan/code/sessions/live"');
@@ -1294,7 +1294,7 @@ describe('http app', () => {
     });
     expect(js.status).toBe(200);
     expect(js.headers.get('etag')).toBeNull();
-    await expect(js.text()).resolves.toBe('document.title = "DysonCode";');
+    await expect(js.text()).resolves.toBe('document.title = "OpenCortex Workbench";');
   });
 
   it('runs pair prompt review lifecycle for shared session members', async () => {
@@ -1358,9 +1358,9 @@ describe('http app', () => {
     expect(approvalBody.draft.failureCode).toBe('missing_opencode_session_id');
   });
 
-  it('sends an approved pair prompt to the stored dyson-opencode session', async () => {
-    const dyson = await fakeDyson((req, res) => {
-      if (req.url === '/api/session/ses_dyson/prompt_async') {
+  it('sends an approved pair prompt to the stored OpenCode session', async () => {
+    const openCode = await fakeOpenCode((req, res) => {
+      if (req.url === '/api/session/ses_opencode/prompt_async') {
         res.statusCode = 204;
         res.end();
         return;
@@ -1374,8 +1374,8 @@ describe('http app', () => {
     const owner = authUser('owner@acme.test');
     const session = codeSession({
       id: 'session-with-opencode-id',
-      openCodeSessionId: 'ses_dyson',
-      port: dyson.port,
+      openCodeSessionId: 'ses_opencode',
+      port: openCode.port,
       urlPath: '/diwan/code/session/session-with-opencode-id/',
     });
     sessions.set(session.id, session);
@@ -1420,10 +1420,10 @@ describe('http app', () => {
     expect(approved.status).toBe(200);
     const approvedBody = await approved.json();
     expect(approvedBody.draft.status).toBe('sent');
-    expect(dyson.requests.map(request => request.url)).toContain(
-      '/api/session/ses_dyson/prompt_async',
+    expect(openCode.requests.map(request => request.url)).toContain(
+      '/api/session/ses_opencode/prompt_async',
     );
-    expect(JSON.parse(dyson.requests[0].body)).toEqual({
+    expect(JSON.parse(openCode.requests[0].body)).toEqual({
       parts: [{ type: 'text', text: 'approved exact prompt' }],
     });
   });

@@ -77,7 +77,7 @@ export class SlackClient {
     await this.postMessage(
       result.channelId,
       [
-        `DysonCode session started for ${session.ownerEmail}.`,
+        `OpenCortex Workbench session started for ${session.ownerEmail}.`,
         `Session: ${new URL(session.urlPath, this.config.DIWAN_PUBLIC_BASE_URL).toString()}`,
         `Workspace: ${session.workspaceDir}`,
       ].join('\n'),

@@ -109,12 +109,12 @@ function sessionIdFromUrl(value) {
   }
 }
 
-function ensureDysonSessionAgeStyles() {
-  if (document.querySelector('style[data-diwan-dyson-session-age]')) return
+function ensureWorkbenchSessionAgeStyles() {
+  if (document.querySelector('style[data-diwan-workbench-session-age]')) return
   const styles = createEl('style')
-  styles.dataset.diwanDysonSessionAge = 'true'
+  styles.dataset.diwanWorkbenchSessionAge = 'true'
   styles.textContent = `
-    .diwan-dyson-session-age {
+    .diwan-workbench-session-age {
       color: rgb(113 113 122);
       flex: 0 0 auto;
       font-size: 0.875rem;
@@ -127,7 +127,7 @@ function ensureDysonSessionAgeStyles() {
   document.head.append(styles)
 }
 
-async function dysonSessionTimeMap() {
+async function workbenchSessionTimeMap() {
   const data = await jsonFetch(new URL('api/session', document.baseURI).toString())
   const map = new Map()
   for (const record of sessionRecords(data)) {
@@ -141,25 +141,25 @@ async function dysonSessionTimeMap() {
   return map
 }
 
-function annotateDysonSessionRows(sessionTimes) {
-  ensureDysonSessionAgeStyles()
+function annotateWorkbenchSessionRows(sessionTimes) {
+  ensureWorkbenchSessionAgeStyles()
   for (const link of document.querySelectorAll('a[href*="/session/"]')) {
     const id = sessionIdFromUrl(link.getAttribute('href') || '')
     const timestamp = id ? sessionTimes.get(id) : undefined
     const label = compactRelativeTime(timestamp)
-    const existing = link.querySelector(':scope > .diwan-dyson-session-age')
+    const existing = link.querySelector(':scope > .diwan-workbench-session-age')
     if (!label) {
       existing?.remove()
       continue
     }
-    const age = existing || createEl('span', 'diwan-dyson-session-age')
+    const age = existing || createEl('span', 'diwan-workbench-session-age')
     age.textContent = label
     age.title = new Date(timestamp).toLocaleString()
     if (!existing) link.append(age)
   }
 }
 
-function initDysonSessionAges() {
+function initWorkbenchSessionAges() {
   let latest = new Map()
   let refreshInFlight = false
 
@@ -167,8 +167,8 @@ function initDysonSessionAges() {
     if (refreshInFlight) return
     refreshInFlight = true
     try {
-      latest = await dysonSessionTimeMap()
-      annotateDysonSessionRows(latest)
+      latest = await workbenchSessionTimeMap()
+      annotateWorkbenchSessionRows(latest)
     } catch {
       // The upstream OpenCode API differs across versions; leave the UI alone
       // when this version does not expose session timestamps.
@@ -178,7 +178,7 @@ function initDysonSessionAges() {
   }
 
   const observer = new window.MutationObserver(() => {
-    if (latest.size > 0) annotateDysonSessionRows(latest)
+    if (latest.size > 0) annotateWorkbenchSessionRows(latest)
   })
   observer.observe(document.body, { childList: true, subtree: true })
   void refresh()
@@ -378,4 +378,4 @@ for (const root of document.querySelectorAll('[data-diwan-session-addon]')) {
   initAddon(root);
 }
 
-initDysonSessionAges()
+initWorkbenchSessionAges()

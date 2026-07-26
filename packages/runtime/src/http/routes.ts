@@ -1327,7 +1327,7 @@ export function codeSessionProxy(
           .diwanSessionBase ?? '/';
       let body = Buffer.concat(chunks).toString('utf8');
       if (String(contentType).includes('text/html')) {
-        // Inject a <base href> so the DysonCode SPA resolves its relative asset
+        // Inject a <base href> so the OpenCode SPA resolves its relative asset
         // chunks (./assets/*.js) and derives its API/SSE server base (via
         // document.baseURI, see the fork's entry.tsx) under the session path
         // prefix. This is the load-bearing rewrite; the SPA uses root-relative
@@ -1522,7 +1522,7 @@ function isRebrandableBrowserAsset(contentType: string): boolean {
 }
 
 function rebrandEmbeddedCodeUi(body: string): string {
-  return body.replaceAll('OpenCode', 'DysonCode');
+  return body.replaceAll('OpenCode', 'OpenCortex Workbench');
 }
 
 interface SessionAddon {
