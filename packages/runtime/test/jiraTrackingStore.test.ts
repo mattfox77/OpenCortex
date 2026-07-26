@@ -155,7 +155,7 @@ describe('JiraTrackingStore', () => {
       },
     });
     expect(detail?.integrationFormat.descriptionSection).toContain(
-      '## Diwan Integration',
+      '## OpenCortex Integration',
     );
   });
 

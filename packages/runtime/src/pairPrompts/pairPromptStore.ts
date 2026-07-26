@@ -354,7 +354,7 @@ export class PairPromptStore {
         draftId: draft.id,
         failedAt: new Date().toISOString(),
         failureCode: 'interrupted',
-        failureMessage: 'Diwan restarted while this prompt was sending.',
+        failureMessage: 'OpenCortex restarted while this prompt was sending.',
       });
     }
   }

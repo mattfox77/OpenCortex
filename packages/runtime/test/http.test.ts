@@ -18,7 +18,7 @@ function testConfig(): AppConfig {
   return {
     NODE_ENV: 'test',
     PORT: 0,
-    DIWAN_PUBLIC_BASE_URL: 'https://dev.dsnscript.com/diwan/',
+    DIWAN_PUBLIC_BASE_URL: 'https://runtime.example.com/diwan/',
     DIWAN_BASE_PATH: '/diwan',
     DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-test-')),
     OIDC_ISSUER: 'https://accounts.google.com',
@@ -42,7 +42,7 @@ function testConfig(): AppConfig {
     DIWAN_ALLOWED_EMAIL_DOMAINS: ['acme.test'],
     DIWAN_SUPER_ADMIN_EMAILS: ['mfox@acme.test'],
     DIWAN_LINUX_USER_PREFIX: '',
-    DIWAN_WORKSPACE_ROOT: '/srv/diwan/workspaces',
+    DIWAN_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
     DIWAN_EXEC_MODE: 'dry-run',
     DIWAN_OPENCODE_PORT_BASE: 4100,
     DIWAN_OPENCODE_BIN: '/usr/local/bin/opencode',
@@ -210,8 +210,8 @@ describe('http app', () => {
     await expect(response.json()).resolves.toMatchObject({
       authorizationEndpoint: 'https://accounts.google.com/o/oauth2/v2/auth',
       clientId: 'client',
-      redirectUri: 'https://dev.dsnscript.com/diwan/auth/callback',
-      logoutUrl: 'https://dev.dsnscript.com/diwan/',
+      redirectUri: 'https://runtime.example.com/diwan/auth/callback',
+      logoutUrl: 'https://runtime.example.com/diwan/',
       basePath: '/diwan',
       scope: 'openid email profile',
     });
@@ -254,7 +254,7 @@ describe('http app', () => {
     expect(form.get('client_id')).toBe('client');
     expect(form.get('client_secret')).toBe('client-secret');
     expect(form.get('redirect_uri')).toBe(
-      'https://dev.dsnscript.com/diwan/auth/callback',
+      'https://runtime.example.com/diwan/auth/callback',
     );
     expect(form.get('code')).toBe('auth-code');
     expect(form.get('code_verifier')).toBe('pkce-verifier');
@@ -1132,7 +1132,7 @@ describe('http app', () => {
     expect(detailBody.links).toHaveLength(1);
     expect(detailBody.sessions[0].id).toBe(createdBody.session.id);
     expect(detailBody.integrationFormat.descriptionSection).toContain(
-      '## Diwan Integration',
+      '## OpenCortex Integration',
     );
   });
 

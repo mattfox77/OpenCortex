@@ -781,11 +781,11 @@ function unique<T>(values: T[]): T[] {
 
 function jiraItemIntegrationDescription(key: string): string {
   return [
-    '## Diwan Integration',
+    '## OpenCortex Integration',
     `Jira Key: ${key}`,
-    'Workspace Sessions: tracked automatically when this key appears in a Diwan session thread, pair prompt, branch, commit, or manual tag.',
+    'Workspace Sessions: tracked automatically when this key appears in an OpenCortex session thread, pair prompt, branch, commit, or manual tag.',
     'Implementation Notes:',
     '- Keep acceptance criteria and QA notes under stable headings.',
-    '- Mention related Jira keys explicitly so Diwan can correlate linked work.',
+    '- Mention related Jira keys explicitly so OpenCortex can correlate linked work.',
   ].join('\n');
 }

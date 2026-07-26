@@ -1,10 +1,12 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-APP_DIR="${DIWAN_APP_DIR:-/opt/diwan}"
-SERVICE_USER="${DIWAN_SERVICE_USER:-diwan}"
-INSTALL_LOCK_FILE="${DIWAN_INSTALL_LOCK_FILE:-/var/lock/diwan-runtime-install.lock}"
-INSTALL_LOCK_TIMEOUT="${DIWAN_INSTALL_LOCK_TIMEOUT:-900}"
+APP_DIR="${OPENCORTEX_APP_DIR:-${DIWAN_APP_DIR:-/opt/opencortex/runtime}}"
+SERVICE_USER="${OPENCORTEX_SERVICE_USER:-${DIWAN_SERVICE_USER:-opencortex}}"
+DATA_DIR="${OPENCORTEX_DATA_DIR:-${DIWAN_DATA_DIR:-/var/lib/opencortex}}"
+WORKSPACE_ROOT="${OPENCORTEX_WORKSPACE_ROOT:-${DIWAN_WORKSPACE_ROOT:-/srv/opencortex/workspaces}}"
+INSTALL_LOCK_FILE="${OPENCORTEX_INSTALL_LOCK_FILE:-${DIWAN_INSTALL_LOCK_FILE:-/var/lock/opencortex-runtime-install.lock}}"
+INSTALL_LOCK_TIMEOUT="${OPENCORTEX_INSTALL_LOCK_TIMEOUT:-${DIWAN_INSTALL_LOCK_TIMEOUT:-900}}"
 
 acquire_install_lock() {
   if ! command -v flock >/dev/null 2>&1; then
@@ -15,7 +17,7 @@ acquire_install_lock() {
   mkdir -p "$(dirname "$INSTALL_LOCK_FILE")"
   exec 9>"$INSTALL_LOCK_FILE"
   if ! flock -w "$INSTALL_LOCK_TIMEOUT" 9; then
-    echo "timed out waiting for Diwan install lock: $INSTALL_LOCK_FILE" >&2
+    echo "timed out waiting for OpenCortex install lock: $INSTALL_LOCK_FILE" >&2
     exit 1
   fi
 }
@@ -72,7 +74,7 @@ ensure_rsync() {
 
 # Per-user code sessions expect Node.js/npm/npx, git, jq, GitHub (gh),
 # Atlassian (acli), and Brain Trust (brain) on PATH. Install them system-wide
-# so every Diwan Linux user's session shell can use them.
+# so every OpenCortex Linux user's session shell can use them.
 # Idempotent: skips anything already present.
 ensure_clis() {
   local arch
@@ -80,7 +82,7 @@ ensure_clis() {
   case "$arch" in
     amd64|arm64) ;;
     *)
-      echo "unsupported architecture for Diwan CLI bootstrap: $arch" >&2
+      echo "unsupported architecture for OpenCortex CLI bootstrap: $arch" >&2
       exit 1
       ;;
   esac
@@ -97,7 +99,7 @@ ensure_clis() {
   ensure_apt_packages gh
 
   # Atlassian CLI (acli). Install the current official latest binary on every
-  # deploy so stale shared installs are refreshed for all Diwan users.
+  # deploy so stale shared installs are refreshed for all OpenCortex users.
   local acliurls tmp installed
   case "$arch" in
     amd64)
@@ -143,13 +145,15 @@ ensure_clis() {
 
 ensure_brain_cli() {
   # The Brain Trust CLI is a single executable script. Install only the shared
-  # binary here; each Diwan Linux user keeps their own ~/.braintrust/config.
+  # binary here; each OpenCortex Linux user keeps their own ~/.braintrust/config.
   local target="/usr/local/bin/brain"
+  local brain_cli_bin="${OPENCORTEX_BRAIN_CLI_BIN:-${DIWAN_BRAIN_CLI_BIN:-}}"
+  local brain_cli_url="${OPENCORTEX_BRAIN_CLI_URL:-${DIWAN_BRAIN_CLI_URL:-}}"
 
-  if [ -n "${DIWAN_BRAIN_CLI_BIN:-}" ] && [ -f "${DIWAN_BRAIN_CLI_BIN}" ]; then
-    if [ ! -x "$target" ] || ! cmp -s "${DIWAN_BRAIN_CLI_BIN}" "$target"; then
-      install -o root -g root -m 0755 "${DIWAN_BRAIN_CLI_BIN}" "$target"
-      echo "installed brain CLI from ${DIWAN_BRAIN_CLI_BIN}"
+  if [ -n "$brain_cli_bin" ] && [ -f "$brain_cli_bin" ]; then
+    if [ ! -x "$target" ] || ! cmp -s "$brain_cli_bin" "$target"; then
+      install -o root -g root -m 0755 "$brain_cli_bin" "$target"
+      echo "installed brain CLI from ${brain_cli_bin}"
     fi
     return 0
   fi
@@ -162,13 +166,13 @@ ensure_brain_cli() {
     return 0
   fi
 
-  if [ -n "${DIWAN_BRAIN_CLI_URL:-}" ]; then
+  if [ -n "$brain_cli_url" ]; then
     local tmp
     tmp="$(mktemp -d)"
-    curl -fsSL --retry 3 "${DIWAN_BRAIN_CLI_URL}" -o "${tmp}/brain"
+    curl -fsSL --retry 3 "$brain_cli_url" -o "${tmp}/brain"
     install -o root -g root -m 0755 "${tmp}/brain" "$target"
     rm -rf "$tmp"
-    echo "installed brain CLI from ${DIWAN_BRAIN_CLI_URL}"
+    echo "installed brain CLI from ${brain_cli_url}"
     return 0
   fi
 
@@ -176,33 +180,34 @@ ensure_brain_cli() {
     return 0
   fi
 
-  echo "WARNING: brain CLI source unavailable; continuing without /usr/local/bin/brain. Set DIWAN_BRAIN_CLI_BIN or DIWAN_BRAIN_CLI_URL, or stage /opt/braintrust/dist/brain to install it." >&2
+  echo "WARNING: brain CLI source unavailable; continuing without /usr/local/bin/brain. Set OPENCORTEX_BRAIN_CLI_BIN or OPENCORTEX_BRAIN_CLI_URL, or stage /opt/braintrust/dist/brain to install it." >&2
   return 0
 }
 
 ensure_opencode() {
-  # Diwan embeds the DySoN OpenCode fork (anomalyco/opencode, dyson-sidebar-runtime
-  # branch) which adds the Skills + Automations sidebar panels. The fork ships as a
-  # single self-contained linux-x64 binary with the web UI embedded. Provide it via
-  # DIWAN_OPENCODE_FORK_URL (tarball or raw binary) or DIWAN_OPENCODE_FORK_BIN (local
-  # path); install to /usr/local/bin/opencode. Falls back to stock opencode-ai only
-  # if no fork source is configured.
+  # OpenCortex can use a pinned OpenCode fork carrying the path-prefix support
+  # needed by the embedded workbench. Provide it via OPENCORTEX_OPENCODE_FORK_URL
+  # (tarball or raw binary) or OPENCORTEX_OPENCODE_FORK_BIN (local path); install
+  # to /usr/local/bin/opencode. Falls back to stock opencode-ai only if no fork
+  # source is configured.
   local target="/usr/local/bin/opencode"
+  local fork_bin="${OPENCORTEX_OPENCODE_FORK_BIN:-${DIWAN_OPENCODE_FORK_BIN:-}}"
+  local fork_url="${OPENCORTEX_OPENCODE_FORK_URL:-${DIWAN_OPENCODE_FORK_URL:-}}"
 
-  if [ -n "${DIWAN_OPENCODE_FORK_BIN:-}" ] && [ -f "${DIWAN_OPENCODE_FORK_BIN}" ]; then
-    install -m 0755 "${DIWAN_OPENCODE_FORK_BIN}" "$target"
-    echo "installed OpenCode fork from ${DIWAN_OPENCODE_FORK_BIN}"
+  if [ -n "$fork_bin" ] && [ -f "$fork_bin" ]; then
+    install -m 0755 "$fork_bin" "$target"
+    echo "installed OpenCode fork from ${fork_bin}"
     return 0
   fi
 
-  if [ -n "${DIWAN_OPENCODE_FORK_URL:-}" ]; then
+  if [ -n "$fork_url" ]; then
     if [ "$(id -u)" -ne 0 ]; then
       echo "installing the OpenCode fork requires root." >&2
       exit 1
     fi
     local tmp
     tmp="$(mktemp -d)"
-    curl -fsSL "${DIWAN_OPENCODE_FORK_URL}" -o "${tmp}/opencode-fork"
+    curl -fsSL "$fork_url" -o "${tmp}/opencode-fork"
     # Accept either a raw ELF binary or a .tar.gz containing bin/opencode.
     if tar -tzf "${tmp}/opencode-fork" >/dev/null 2>&1; then
       tar -xzf "${tmp}/opencode-fork" -C "${tmp}"
@@ -211,7 +216,7 @@ ensure_opencode() {
       install -m 0755 "${tmp}/opencode-fork" "$target"
     fi
     rm -rf "${tmp}"
-    echo "installed OpenCode fork from ${DIWAN_OPENCODE_FORK_URL}"
+    echo "installed OpenCode fork from ${fork_url}"
     return 0
   fi
 
@@ -236,7 +241,7 @@ ensure_opencode() {
     exit 1
   fi
 
-  echo "WARNING: no OpenCode fork source configured; falling back to stock opencode-ai (no DySoN sidebar)." >&2
+  echo "WARNING: no OpenCode fork source configured; falling back to stock opencode-ai." >&2
   npm install -g opencode-ai
   if [ "$(command -v opencode)" != "/usr/local/bin/opencode" ]; then
     ln -sf "$(command -v opencode)" /usr/local/bin/opencode
@@ -248,11 +253,10 @@ install_sudoers() {
     return 0
   fi
 
-  cat > /etc/sudoers.d/diwan-opencode <<'SUDOERS'
-diwan ALL=(ALL) NOPASSWD: /usr/bin/bash
-SUDOERS
-  chmod 0440 /etc/sudoers.d/diwan-opencode
-  visudo -cf /etc/sudoers.d/diwan-opencode
+  local sudoers_file="/etc/sudoers.d/opencortex-workbench"
+  printf '%s ALL=(ALL) NOPASSWD: /usr/bin/bash\n' "$SERVICE_USER" > "$sudoers_file"
+  chmod 0440 "$sudoers_file"
+  visudo -cf "$sudoers_file"
 }
 
 install_nginx_site() {
@@ -261,15 +265,20 @@ install_nginx_site() {
     return 0
   fi
 
-  install -m 0644 "${APP_DIR}/nginx/diwan.conf" /etc/nginx/sites-available/diwan
+  if [ ! -f "${APP_DIR}/nginx/opencortex.conf" ]; then
+    echo "nginx/opencortex.conf not found; skipping nginx site install"
+    return 0
+  fi
+
+  install -m 0644 "${APP_DIR}/nginx/opencortex.conf" /etc/nginx/sites-available/opencortex
   rm -f /etc/nginx/sites-enabled/default
-  ln -sf /etc/nginx/sites-available/diwan /etc/nginx/sites-enabled/diwan
+  ln -sf /etc/nginx/sites-available/opencortex /etc/nginx/sites-enabled/opencortex
   nginx -t
   systemctl reload nginx || systemctl restart nginx
 }
 
 provision_persisted_session_users() {
-  local sessions_file="/var/lib/diwan/code-sessions.json"
+  local sessions_file="${DATA_DIR}/code-sessions.json"
   local provision_script="${APP_DIR}/scripts/provision-diwan-user.sh"
   if [ ! -s "$sessions_file" ] || [ ! -x "$provision_script" ] || ! command -v jq >/dev/null 2>&1; then
     return 0
@@ -351,8 +360,8 @@ if ! id "$SERVICE_USER" >/dev/null 2>&1; then
 fi
 install_sudoers
 
-install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$APP_DIR" /var/lib/diwan /srv/diwan/workspaces
-install -d -o root -g root /etc/diwan
+install -d -o "$SERVICE_USER" -g "$SERVICE_USER" "$APP_DIR" "$DATA_DIR" "$WORKSPACE_ROOT"
+install -d -o root -g root /etc/opencortex
 
 rsync -a --delete \
   --exclude node_modules \
@@ -367,12 +376,16 @@ rm -rf node_modules
 npm ci
 npm run build
 npm prune --omit=dev
-chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR" /var/lib/diwan
+chown -R "$SERVICE_USER:$SERVICE_USER" "$APP_DIR" "$DATA_DIR"
 
-install -m 0644 systemd/diwan.service /etc/systemd/system/diwan.service
-systemctl daemon-reload
-systemctl enable diwan.service
-systemctl restart diwan.service
+if [ -f systemd/opencortex-runtime.service ]; then
+  install -m 0644 systemd/opencortex-runtime.service /etc/systemd/system/opencortex-runtime.service
+  systemctl daemon-reload
+  systemctl enable opencortex-runtime.service
+  systemctl restart opencortex-runtime.service
+else
+  echo "systemd/opencortex-runtime.service not found; skipping systemd service install"
+fi
 install_nginx_site
 
-echo "installed Diwan runtime at $APP_DIR"
+echo "installed OpenCortex runtime at $APP_DIR"

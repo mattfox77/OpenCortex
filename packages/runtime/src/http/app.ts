@@ -36,7 +36,7 @@ export function createApp(
   );
 
   app.use(helmet());
-  // Parse JSON bodies for Diwan's own API, but NOT for the OpenCode session
+  // Parse JSON bodies for OpenCortex API, but NOT for the OpenCode session
   // proxy. http-proxy streams the raw request body to the backend; if
   // express.json() drains it first, proxied POSTs (e.g. the chat prompt_async)
   // hang waiting for a body that never arrives and abort after the timeout.

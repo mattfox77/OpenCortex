@@ -1,7 +1,7 @@
 import type { AppConfig } from '../config/config.js';
 
 // Linux usernames are the bare email local-part (no "diwan-" prefix). Because
-// there is no prefix namespacing Diwan accounts away from system accounts, the
+// there is no prefix namespacing OpenCortex accounts away from system accounts, the
 // reserved set must block any name that could collide with a privileged or
 // service account on the host.
 const reserved = new Set([

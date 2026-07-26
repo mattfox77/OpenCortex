@@ -4,7 +4,7 @@ import { provisioningCommands } from '../src/system/provisioning.js';
 import type { AppConfig } from '../src/config/config.js';
 
 const config = {
-  DIWAN_WORKSPACE_ROOT: '/srv/diwan/workspaces',
+  DIWAN_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
   DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-diwan-user.sh',
 } as AppConfig;
 
@@ -20,7 +20,7 @@ describe('provisioning', () => {
       config,
     );
 
-    expect(commands.join('\n')).toContain('/srv/diwan/workspaces/mfox/repos');
+    expect(commands.join('\n')).toContain('/srv/opencortex/workspaces/mfox/repos');
     expect(commands.join('\n')).toContain('/home/mfox/.config/opencode');
     expect(commands.join('\n')).toContain('/home/mfox/.config/gh');
     expect(commands.join('\n')).toContain('/home/mfox/.config/acli');
@@ -34,12 +34,12 @@ describe('provisioning', () => {
       '/opt/opencortex/scripts/provision-diwan-user.sh mfox',
     );
     expect(commands.join('\n')).not.toContain('/home/mfox-dev/.claude/skills');
-    expect(commands.join('\n')).toContain('/home/mfox/.aws');
+    expect(commands.join('\n')).not.toContain('/home/mfox/.aws');
   });
 });
 
 describe('server installer', () => {
-  it('bootstraps the shared CLI toolchain for all Diwan users', () => {
+  it('bootstraps the shared CLI toolchain for all OpenCortex users', () => {
     const installer = readFileSync('scripts/install-server.sh', 'utf8');
 
     expect(installer).toContain('ensure_node');

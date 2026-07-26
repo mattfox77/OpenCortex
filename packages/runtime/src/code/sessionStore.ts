@@ -14,7 +14,7 @@ import type { CodeSession } from './sessionLauncher.js';
  *
  * Sessions are held in memory (fast path for the request handlers) and
  * mirrored to a JSONL-style JSON file in DIWAN_DATA_DIR so that a restart of
- * the diwan service does not lose the record of OpenCode processes. On startup,
+ * the OpenCortex service does not lose the record of OpenCode processes. On startup,
  * `init()` reloads the persisted sessions without dropping records whose
  * backing OpenCode port is temporarily down; request handlers can use the saved
  * launch metadata to restart them.
@@ -36,7 +36,7 @@ export class SessionStore {
         `[diwan] code-session data dir is not writable: ${dataDir}. ` +
           'Sessions will work but will NOT survive a diwan restart. ' +
           'Set DIWAN_DATA_DIR to a path the service user can write ' +
-          '(e.g. /var/lib/diwan).',
+          '(e.g. /var/lib/opencortex).',
       );
     }
     // Populate the in-memory map from disk immediately so reads work before

@@ -6,7 +6,7 @@ import {
 } from "../src/auth/linuxUser.js";
 
 describe("linux user mapping", () => {
-  it("maps configured email addresses to deterministic Diwan Linux users", () => {
+  it("maps configured email addresses to deterministic OpenCortex Linux users", () => {
     expect(emailToLinuxUser("Matt.Fox@acme.test", { DIWAN_LINUX_USER_PREFIX: "" })).toBe("matt-fox");
   });
 

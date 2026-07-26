@@ -81,7 +81,7 @@ export class SessionLauncher {
 
     // Ensure the repos git root exists and is initialized as the user, then run
     // opencode web from it. Done inside the sudo shell so the dirs/files are
-    // owned by the target user (the diwan service user cannot write into homes).
+    // owned by the target user (the OpenCortex service user cannot write into homes).
     const prepareUserRuntime = prepareWorkbenchRuntime(launchPlan);
 
     const command =

@@ -540,7 +540,7 @@ export function apiRouter(
             actor: req.user!,
             failureCode: 'missing_opencode_session_id',
             failureMessage:
-              'Diwan does not yet know the active OpenCode internal session ID.',
+              'OpenCortex does not yet know the active OpenCode internal session ID.',
           });
           await publishPairPromptEvent(chat, events, resolved.channel.id, {
             type: 'pairPrompt.failed',

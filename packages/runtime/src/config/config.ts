@@ -44,7 +44,7 @@ const schema = z.object({
   DIWAN_ALLOWED_EMAIL_DOMAINS: csv(''),
   DIWAN_SUPER_ADMIN_EMAILS: csv(''),
   DIWAN_LINUX_USER_PREFIX: z.string().default(''),
-  DIWAN_WORKSPACE_ROOT: z.string().default('/srv/diwan/workspaces'),
+  DIWAN_WORKSPACE_ROOT: z.string().default('/srv/opencortex/workspaces'),
   DIWAN_EXEC_MODE: z.enum(['dry-run', 'sudo']).default('dry-run'),
   DIWAN_OPENCODE_PORT_BASE: z.coerce.number().int().positive().default(4100),
   DIWAN_OPENCODE_BIN: z.string().default('/usr/local/bin/opencode'),
