@@ -13,8 +13,10 @@
     "packages/ui"
   ],
   "scripts": {
-    "build": "npm --prefix packages/orchestrator run build",
-    "check": "npm --prefix packages/orchestrator run check && node scripts/config-inventory.mjs",
+    "build": "npm --prefix packages/orchestrator run build && npm --prefix packages/runtime run build",
+    "check": "npm --prefix packages/orchestrator run check && npm --prefix packages/runtime run check && node scripts/config-inventory.mjs",
+    "runtime:check": "npm --prefix packages/runtime run check",
+    "runtime:test": "npm --prefix packages/runtime test",
     "config:inventory": "node scripts/config-inventory.mjs",
     "orchestrator:worker": "npm --prefix packages/orchestrator run worker",
     "orchestrator:task": "npm --prefix packages/orchestrator run task",

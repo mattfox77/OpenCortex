@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="utf-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1" />
+    <base href="%DIWAN_BASE_HREF%" />
+    <title>DIWAN — DSN Intelligent Workspace for Agentic eNgineering</title>
+    <link rel="stylesheet" href="styles.css" />
+  </head>
+  <body>
+    <main class="shell">
+      <header>
+        <div class="brand">
+          <p class="eyebrow">DIWAN</p>
+          <h1>DSN Intelligent Workspace for Agentic eNgineering</h1>
+        </div>
+        <div class="header-actions">
+          <span id="auth-status" class="auth-status">Signed out</span>
+          <button id="profile-link" type="button" class="secondary" hidden>
+            Profile
+          </button>
+          <button id="sign-in" type="button">Sign in</button>
+          <button id="sign-out" type="button" class="secondary" hidden>
+            Sign out
+          </button>
+          <button id="start-code" type="button" hidden>Open DysonCode</button>
+        </div>
+      </header>
+
+      <section id="auth-screen" class="auth-screen panel">
+        <div>
+          <h2>Sign in to DIWAN</h2>
+          <p>
+            Use your DSN account to access DysonCode, TeamChat, and work
+            tracking.
+          </p>
+        </div>
+        <button id="auth-screen-sign-in" type="button">Sign in with DSN</button>
+      </section>
+
+      <section id="profile-page" class="profile-page panel" hidden>
+        <div class="profile-heading">
+          <div>
+            <h2>Profile</h2>
+            <p id="profile-subtitle" class="channel-meta"></p>
+          </div>
+          <button id="profile-close" type="button" class="secondary">
+            Workspace
+          </button>
+        </div>
+        <dl id="profile-details" class="profile-details"></dl>
+      </section>
+
+      <section id="workspace-grid" class="grid" hidden>
+        <section class="panel" id="code-panel">
+          <div class="panel-heading compact">
+            <h2>DysonCode</h2>
+            <form id="work-search-form" class="work-search">
+              <input
+                id="work-search"
+                name="work-search"
+                autocomplete="off"
+                placeholder="Jira item or team"
+              />
+              <button type="submit" class="secondary">Search</button>
+            </form>
+          </div>
+          <section
+            id="work-tracking-panel"
+            class="work-tracking"
+            hidden
+          ></section>
+          <div id="code-output" class="code-session empty">
+            Select a TeamChat session, then use Open Code Session when you want
+            to load DysonCode.
+          </div>
+        </section>
+
+        <div
+          id="pane-resizer"
+          class="resizer"
+          role="separator"
+          aria-orientation="vertical"
+          aria-label="Resize DysonCode and TeamChat panels"
+          tabindex="0"
+        ></div>
+
+        <aside class="panel" id="chat-panel" aria-label="TeamChat">
+          <div class="teamchat-header">
+            <div>
+              <h2>TeamChat</h2>
+              <span id="teamchat-alert" class="unread-pill" hidden>0</span>
+            </div>
+            <button
+              id="toggle-chat"
+              type="button"
+              class="icon-button"
+              aria-expanded="true"
+              aria-label="Collapse TeamChat"
+            >
+              ‹
+            </button>
+          </div>
+
+          <div id="teamchat-body" class="teamchat-body">
+            <div id="channels" class="session-picker"></div>
+            <section id="thread-panel" class="thread-panel">
+              <div class="panel-heading">
+                <div>
+                  <h2 id="channel-title">TeamChat</h2>
+                  <p id="channel-meta" class="channel-meta"></p>
+                </div>
+                <div class="thread-actions">
+                  <button id="open-selected-code" type="button" hidden>
+                    Open Code Session
+                  </button>
+                  <button id="share-channel" type="button" hidden>Share</button>
+                </div>
+              </div>
+              <div id="messages" class="messages"></div>
+              <form id="chat-form">
+                <input
+                  id="message"
+                  name="message"
+                  autocomplete="off"
+                  placeholder="Message the team"
+                />
+                <button type="submit">Send</button>
+              </form>
+              <section
+                id="pair-prompt-panel"
+                class="pair-prompt"
+                hidden
+              ></section>
+            </section>
+          </div>
+        </aside>
+      </section>
+      <dialog id="jira-dialog" class="jira-dialog">
+        <div class="jira-dialog-heading">
+          <div>
+            <p class="eyebrow">Jira Item</p>
+            <h2 id="jira-dialog-title">Jira Item</h2>
+          </div>
+          <button
+            id="jira-dialog-close"
+            type="button"
+            class="icon-button"
+            aria-label="Close Jira item details"
+          >
+            ×
+          </button>
+        </div>
+        <div id="jira-dialog-body" class="jira-dialog-body"></div>
+      </dialog>
+    </main>
+    <script src="app.js" type="module"></script>
+  </body>
+</html>
