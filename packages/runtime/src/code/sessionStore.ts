@@ -13,11 +13,11 @@ import type { CodeSession } from './sessionLauncher.js';
  * Durable, process-restart-surviving store for code sessions.
  *
  * Sessions are held in memory (fast path for the request handlers) and
- * mirrored to a JSONL-style JSON file in DIWAN_DATA_DIR so that a restart of
- * the OpenCortex service does not lose the record of OpenCode processes. On startup,
- * `init()` reloads the persisted sessions without dropping records whose
- * backing OpenCode port is temporarily down; request handlers can use the saved
- * launch metadata to restart them.
+ * mirrored to a JSONL-style JSON file in OPENCORTEX_DATA_DIR so that a restart
+ * of the OpenCortex service does not lose the record of OpenCode processes. On
+ * startup, `init()` reloads the persisted sessions without dropping records
+ * whose backing OpenCode port is temporarily down; request handlers can use the
+ * saved launch metadata to restart them.
  *
  * Implements the subset of the Map API the request handlers use (`get`,
  * `set`, `delete`, `values`) so it is a drop-in replacement for the previous
@@ -33,9 +33,9 @@ export class SessionStore {
     this.persistent = this.ensureWritable(dataDir);
     if (!this.persistent) {
       console.warn(
-        `[diwan] code-session data dir is not writable: ${dataDir}. ` +
-          'Sessions will work but will NOT survive a diwan restart. ' +
-          'Set DIWAN_DATA_DIR to a path the service user can write ' +
+        `[opencortex] code-session data dir is not writable: ${dataDir}. ` +
+          'Sessions will work but will NOT survive an OpenCortex restart. ' +
+          'Set OPENCORTEX_DATA_DIR to a path the service user can write ' +
           '(e.g. /var/lib/opencortex).',
       );
     }
@@ -143,7 +143,7 @@ export class SessionStore {
       // warns once, rather than throwing on every mutation.
       this.persistent = false;
       console.warn(
-        `[diwan] failed to persist code sessions to ${this.filePath}; ` +
+        `[opencortex] failed to persist code sessions to ${this.filePath}; ` +
           'disabling persistence for this process. ' +
           `${error instanceof Error ? error.message : String(error)}`,
       );
@@ -160,7 +160,7 @@ export async function isSessionRestorable(
 /**
  * Returns true if something is accepting TCP connections on 127.0.0.1:<port>
  * within a short timeout. Used to decide whether a persisted session's
- * OpenCode process survived a diwan restart.
+ * OpenCode process survived an OpenCortex restart.
  */
 export function isPortListening(
   port: number,
