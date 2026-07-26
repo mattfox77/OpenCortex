@@ -116,10 +116,11 @@ EMBED_URL=http://opencortex-embeddings:7997/v1/embeddings
 EMBED_KEY=
 EMBED_MODEL=nomic-ai/nomic-embed-text-v1.5
 EMBED_DIMENSIONS=768
-S3_BUCKET=
-S3_REGION=us-east-1
-S3_PREFIX=artifacts
-S3_KMS_KEY_ID=
+OBJECT_STORE_ENDPOINT_URL=http://opencortex-objects:8333
+OBJECT_STORE_BUCKET=opencortex-artifacts
+OBJECT_STORE_REGION=us-east-1
+OBJECT_STORE_PREFIX=artifacts
+OBJECT_STORE_CLIENT=aws
 SYNC_CURSOR_ENABLED=0
 OTEL_ENDPOINT=
 OTEL_SERVICE_NAME=opencortex-memory
@@ -201,28 +202,56 @@ file_mime() {
   fi
 }
 
+object_store_bucket() {
+  echo "${OBJECT_STORE_BUCKET:-${S3_BUCKET:-}}"
+}
+
+object_store_endpoint_url() {
+  echo "${OBJECT_STORE_ENDPOINT_URL:-${S3_ENDPOINT_URL:-}}"
+}
+
+object_store_region() {
+  echo "${OBJECT_STORE_REGION:-${S3_REGION:-us-east-1}}"
+}
+
+object_store_prefix() {
+  echo "${OBJECT_STORE_PREFIX:-${S3_PREFIX:-artifacts}}"
+}
+
+object_store_client() {
+  echo "${OBJECT_STORE_CLIENT:-aws}"
+}
+
 require_s3() {
-  [ -n "${S3_BUCKET:-}" ] || { echo "Set S3_BUCKET in $BT_CONF" >&2; return 1; }
-  command -v aws >/dev/null 2>&1 || { echo "AWS CLI required for S3 artifact sync" >&2; return 1; }
+  local bucket endpoint client
+  bucket="$(object_store_bucket)"
+  endpoint="$(object_store_endpoint_url)"
+  client="$(object_store_client)"
+  [ -n "$bucket" ] || { echo "Set OBJECT_STORE_BUCKET in $BT_CONF" >&2; return 1; }
+  [ -n "$endpoint" ] || { echo "Set OBJECT_STORE_ENDPOINT_URL in $BT_CONF" >&2; return 1; }
+  command -v "$client" >/dev/null 2>&1 || { echo "Install ${client} for S3-compatible artifact sync" >&2; return 1; }
 }
 
 s3_uri_for_key() {
   local key="$1"
-  echo "s3://${S3_BUCKET}/${key}"
+  echo "s3://$(object_store_bucket)/${key}"
 }
 
 s3_put_file() {
   local file="$1" key="$2" mime="$3"
-  local -a cmd=(aws s3api put-object
-    --bucket "$S3_BUCKET"
+  local endpoint bucket region client
+  endpoint="$(object_store_endpoint_url)"
+  bucket="$(object_store_bucket)"
+  region="$(object_store_region)"
+  client="$(object_store_client)"
+  local -a cmd=("$client" s3api put-object
+    --endpoint-url "$endpoint"
+    --bucket "$bucket"
     --key "$key"
     --body "$file"
-    --content-type "$mime"
-    --server-side-encryption "aws:kms")
+    --content-type "$mime")
 
-  [ -n "${S3_REGION:-}" ] && cmd+=(--region "$S3_REGION")
-  [ -n "${S3_KMS_KEY_ID:-}" ] && cmd+=(--ssekms-key-id "$S3_KMS_KEY_ID")
-  [ -n "${AWS_PROFILE:-}" ] && cmd+=(--profile "$AWS_PROFILE")
+  [ -n "$region" ] && cmd+=(--region "$region")
 
   "${cmd[@]}" >/dev/null
 }
@@ -1823,10 +1852,11 @@ EMBED_URL=${EMBED_URL:-http://opencortex-embeddings:7997/v1/embeddings}
 EMBED_KEY=${EMBED_KEY:-}
 EMBED_MODEL=${EMBED_MODEL:-nomic-ai/nomic-embed-text-v1.5}
 EMBED_DIMENSIONS=${EMBED_DIMENSIONS:-768}
-S3_BUCKET=${S3_BUCKET:-}
-S3_REGION=${S3_REGION:-us-east-1}
-S3_PREFIX=${S3_PREFIX:-artifacts}
-S3_KMS_KEY_ID=${S3_KMS_KEY_ID:-}
+OBJECT_STORE_ENDPOINT_URL=${OBJECT_STORE_ENDPOINT_URL:-http://opencortex-objects:8333}
+OBJECT_STORE_BUCKET=${OBJECT_STORE_BUCKET:-opencortex-artifacts}
+OBJECT_STORE_REGION=${OBJECT_STORE_REGION:-us-east-1}
+OBJECT_STORE_PREFIX=${OBJECT_STORE_PREFIX:-artifacts}
+OBJECT_STORE_CLIENT=${OBJECT_STORE_CLIENT:-aws}
 SYNC_CURSOR_ENABLED=${SYNC_CURSOR_ENABLED:-0}
 OTEL_ENDPOINT=${OTEL_ENDPOINT:-}
 OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-opencortex-memory}
@@ -1939,9 +1969,12 @@ cmd_artifacts_get() {
 
   local uri
   uri=$(s3_uri_for_key "$storage_key")
-  local -a cmd=(aws s3 cp "$uri" "$out")
-  [ -n "${S3_REGION:-}" ] && cmd+=(--region "$S3_REGION")
-  [ -n "${AWS_PROFILE:-}" ] && cmd+=(--profile "$AWS_PROFILE")
+  local endpoint region client
+  endpoint="$(object_store_endpoint_url)"
+  region="$(object_store_region)"
+  client="$(object_store_client)"
+  local -a cmd=("$client" s3 cp --endpoint-url "$endpoint" "$uri" "$out")
+  [ -n "$region" ] && cmd+=(--region "$region")
   "${cmd[@]}" >/dev/null
   echo "Downloaded ${id} → ${out}"
 }
@@ -2059,7 +2092,7 @@ PHELP
 
   local date_path rel_key s3_uri existing artifact_id tags_json meta_initial meta_final
   date_path=$(date +%Y/%m/%d)
-  rel_key="${S3_PREFIX:-artifacts}/${OWNER_ID}/${project:-unscoped}/repository/${date_path}/${sha}-$(basename "$file")"
+  rel_key="$(object_store_prefix)/${OWNER_ID}/${project:-unscoped}/repository/${date_path}/${sha}-$(basename "$file")"
   s3_uri=$(s3_uri_for_key "$rel_key")
   tags_json=$(tags_to_json "$tags")
 
@@ -2585,7 +2618,7 @@ sync_store_artifact() {
 
   local date_path
   date_path=$(date +%Y/%m/%d)
-  rel_key="${S3_PREFIX:-artifacts}/${OWNER_ID}/${project:-unscoped}/${source}/${date_path}/${sha}-$(basename "$file")"
+  rel_key="$(object_store_prefix)/${OWNER_ID}/${project:-unscoped}/${source}/${date_path}/${sha}-$(basename "$file")"
   s3_uri=$(s3_uri_for_key "$rel_key")
 
   if [ "$dry_run" = "0" ]; then
@@ -2791,7 +2824,7 @@ Defaults:
   repo=auto-detected from git
 
 Notes:
-  - S3_BUCKET is required in ~/.braintrust/config
+  - OBJECT_STORE_BUCKET and OBJECT_STORE_ENDPOINT_URL are required in ~/.braintrust/config
   - Cursor sync requires SYNC_CURSOR_ENABLED=1
   - Repo auto-detected from git if not specified; also inferred from file paths
   - Tool name auto-detected from file location (claude-code, cursor-agent, etc.)
