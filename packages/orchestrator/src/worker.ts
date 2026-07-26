@@ -16,7 +16,7 @@ async function run() {
     process.env.SUPABASE_SERVICE_ROLE_KEY!
   );
 
-  // Register this worker in Open Brain
+  // Register this worker in Cortex Memory
   await supabase.from('worker_registry').upsert(
     {
       worker_name: WORKER_NAME,
@@ -40,7 +40,7 @@ async function run() {
   console.log(`   Task Queues: ${TASK_QUEUES.join(', ')}`);
   console.log(`   Capabilities: ${CAPABILITIES.join(', ')}`);
 
-  // Heartbeat to Open Brain every 30 seconds
+  // Heartbeat to Cortex Memory every 30 seconds
   const heartbeat = setInterval(async () => {
     await supabase
       .from('worker_registry')

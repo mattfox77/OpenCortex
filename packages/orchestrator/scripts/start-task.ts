@@ -25,7 +25,7 @@ Options:
   --type <code|review|research|deploy|custom>  Task type (default: custom)
   --queue <queue-name>                          Target queue (default: cortex-tasks)
   --approval                                    Require human approval before execution
-  --brain <search-query>                        Pre-load brain context
+  --brain <search-query>                        Pre-load Cortex Memory context
   --iterations <n>                              Max loop iterations (default: 10)
   --monitor                                     Start as long-running monitor
   --interval <duration>                         Monitor check interval (default: 30 minutes)

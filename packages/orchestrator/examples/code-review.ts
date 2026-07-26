@@ -2,11 +2,11 @@
  * Example: Distributed Code Review
  *
  * Start a code review task that:
- * 1. Searches your Open Brain for architectural context
+ * 1. Searches Cortex Memory for architectural context
  * 2. Plans the review approach
  * 3. Waits for your approval
- * 4. Executes the review via Claude Code
- * 5. Captures findings back to your Open Brain
+ * 4. Executes the review via OpenCode
+ * 5. Captures findings back to Cortex Memory
  *
  * Usage:
  *   npx ts-node examples/code-review.ts
@@ -24,7 +24,7 @@ async function main() {
       'Produce a numbered list of findings with severity (critical/high/medium/low) and suggested fixes.',
     type: 'review',
     approval: true, // Will pause for your approval before executing
-    brainContext: 'authentication security architecture', // Pre-load relevant brain context
+    brainContext: 'authentication security architecture', // Pre-load relevant memory context
     queue: 'cortex-code',
     maxIterations: 5,
   });

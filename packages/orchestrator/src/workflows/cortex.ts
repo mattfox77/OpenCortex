@@ -59,7 +59,7 @@ type ApprovalDecision = { approved: boolean; notes?: string };
 
 // ================================================================
 // MAIN WORKFLOW: cortexTask
-// A durable, crash-proof task loop with brain-powered context.
+// A durable, crash-proof task loop with Cortex Memory context.
 // ================================================================
 export async function cortexTask(input: CortexTaskInput): Promise<string> {
   const info = workflowInfo();
@@ -103,9 +103,9 @@ export async function cortexTask(input: CortexTaskInput): Promise<string> {
     input,
   });
 
-  // --- PHASE 1: Gather brain context ---
+  // --- PHASE 1: Gather memory context ---
   phase = 'gathering-context';
-  currentStep = 'Searching Open Brain for relevant knowledge';
+  currentStep = 'Searching Cortex Memory for relevant knowledge';
 
   let brainContext = '';
   if (input.brainSearchContext) {
@@ -123,7 +123,7 @@ export async function cortexTask(input: CortexTaskInput): Promise<string> {
   const planPrompt = [
     `Task: ${input.taskDescription}`,
     `Type: ${input.taskType}`,
-    brainContext ? `\nRelevant context from Open Brain:\n${brainContext}` : '',
+    brainContext ? `\nRelevant context from Cortex Memory:\n${brainContext}` : '',
     `\nProduce a numbered step-by-step plan. Be specific about commands, files, and decisions. Output ONLY the plan.`,
   ].join('\n');
 
@@ -186,7 +186,7 @@ export async function cortexTask(input: CortexTaskInput): Promise<string> {
     lastOutput = result;
     stepsCompleted = iteration + 1;
 
-    // Auto-capture to brain
+    // Auto-capture to Cortex Memory
     const captures = result.split('\n')
       .filter((l: string) => l.startsWith('BRAIN_CAPTURE:'))
       .map((l: string) => l.replace('BRAIN_CAPTURE:', '').trim());
@@ -232,7 +232,7 @@ export async function cortexTask(input: CortexTaskInput): Promise<string> {
 }
 
 // ================================================================
-// MONITOR WORKFLOW: Long-running brain-powered monitoring
+// MONITOR WORKFLOW: Long-running memory-powered monitoring
 // ================================================================
 export async function cortexMonitor(config: {
   watchDescription: string;
@@ -250,7 +250,7 @@ export async function cortexMonitor(config: {
     const result = await cli.executeCliCommand({
       prompt: `You are a monitoring agent. Check the following:\n` +
         `Target: ${config.watchDescription}\n` +
-        `Previous brain context: ${context}\n` +
+        `Previous memory context: ${context}\n` +
         `Report: Is everything normal? Start with "ALERT:" if action needed, "OK:" if clear.`,
     });
 

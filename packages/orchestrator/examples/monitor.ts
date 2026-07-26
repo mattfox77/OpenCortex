@@ -3,7 +3,7 @@
  *
  * Starts a monitor workflow that:
  * - Checks a system/service at regular intervals
- * - Captures each check result to Open Brain
+ * - Captures each check result to Cortex Memory
  * - Sends alerts when something looks wrong
  * - Runs indefinitely (uses continueAsNew to avoid history bloat)
  *
@@ -25,7 +25,7 @@ async function main() {
   });
 
   console.log('\n✅ Monitor is running continuously.');
-  console.log('   It will capture findings to your Open Brain and alert you if something breaks.');
+  console.log('   It will capture findings to Cortex Memory and alert you if something breaks.');
   console.log(`   Stop it:  npx ts-node -e "require('./src/client').cancelTask('${workflowId}')"`);
 }
 
