@@ -5,8 +5,6 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
 import {
-  awsRemoteLaunchCommand,
-  awsStartSessionCommand,
   codeWorkspaceId,
   localProvisionCommand,
   opencodeRuntimeEnvironment,
@@ -15,30 +13,12 @@ import {
 import type { AppConfig } from '../src/config/config.js';
 
 const config = {
-  DIWAN_AWS_REGION: 'us-east-1',
-  DIWAN_SSM_TARGET_INSTANCE_ID: 'i-abc123',
   DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-diwan-user.sh',
 } as AppConfig;
 
-describe('AWS Session Manager sessions', () => {
+describe('SessionLauncher', () => {
   it('uses a stable per-user Code Workspace id', () => {
     expect(codeWorkspaceId({ linuxUser: 'mfox' })).toBe('workspace-mfox');
-  });
-
-  it('builds a port-forwarding start-session command', () => {
-    expect(awsStartSessionCommand(config, 4107, 5107)).toEqual([
-      'aws',
-      'ssm',
-      'start-session',
-      '--region',
-      'us-east-1',
-      '--target',
-      'i-abc123',
-      '--document-name',
-      'AWS-StartPortForwardingSession',
-      '--parameters',
-      'portNumber=4107,localPortNumber=5107',
-    ]);
   });
 
   it('builds a non-interactive local provisioning command before sudo launch', () => {
@@ -49,45 +29,6 @@ describe('AWS Session Manager sessions', () => {
       '/opt/opencortex/scripts/provision-diwan-user.sh',
       'grathke',
     ]);
-  });
-
-  it('runs OpenCode as the mapped Linux user on the target instance', () => {
-    const command = awsRemoteLaunchCommand(
-      'mfox',
-      '/opt/opencortex/scripts/provision-diwan-user.sh',
-      '/home/mfox/repos',
-      "export HOME='/home/mfox' && export XDG_CONFIG_HOME='/home/mfox/.config' && export XDG_DATA_HOME='/home/mfox/.local/share' && export XDG_STATE_HOME='/home/mfox/.local/state' && export XDG_CACHE_HOME='/home/mfox/.cache' && mkdir -p '/home/mfox/repos'",
-      [
-        '/usr/local/bin/opencode',
-        'web',
-        '--hostname',
-        '127.0.0.1',
-        '--port',
-        '4107',
-      ],
-      '/var/lib/diwan/code-session-logs/session.log',
-      4107,
-    );
-
-    expect(command).toContain(
-      "'sudo' '-n' '/usr/bin/bash' '/opt/opencortex/scripts/provision-diwan-user.sh' 'mfox' &&",
-    );
-    expect(command).toContain(
-      "install -d -o 'mfox' -g 'mfox' '/var/lib/diwan/code-session-logs'",
-    );
-    expect(command).toContain(
-      "install -o 'mfox' -g 'mfox' -m 0644 /dev/null '/var/lib/diwan/code-session-logs/session.log'",
-    );
-    expect(command).toContain("'sudo' '-n' '-H' '-u' 'mfox'");
-    expect(command).toContain('export HOME=');
-    expect(command).toContain('/home/mfox');
-    expect(command).toContain('export XDG_DATA_HOME=');
-    expect(command).toContain('/home/mfox/.local/share');
-    expect(command).toContain('nohup');
-    expect(command).toContain('/usr/local/bin/opencode');
-    expect(command).toContain('/dev/tcp/127.0.0.1/4107');
-    expect(command).toContain('http://127.0.0.1:4107/api/session');
-    expect(command).not.toContain('& &&');
   });
 
   it("pins OpenCode runtime state to the mapped user's home", () => {

@@ -861,16 +861,6 @@ button.secondary {
   white-space: nowrap;
 }
 
-.ssm-command {
-  flex: 1;
-  margin: 0;
-  overflow: auto;
-  padding: 14px;
-  color: #d9f2e6;
-  white-space: pre-wrap;
-  word-break: break-word;
-}
-
 button:disabled {
   opacity: 0.65;
   cursor: wait;

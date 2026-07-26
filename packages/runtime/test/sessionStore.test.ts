@@ -82,35 +82,6 @@ describe('SessionStore', () => {
     expect([...restarted.values()].map(s => s.id)).toEqual(['dead']);
   });
 
-  it('keeps aws-ssm sessions after init() even without a local listener', async () => {
-    const dir = mkdtempSync(join(tmpdir(), 'diwan-store-'));
-    const deadPort = await listenOnEphemeralPort();
-    listeners.splice(0).forEach(srv => srv.close());
-
-    const a = new SessionStore(dir);
-    a.set(
-      'ssm',
-      makeSession({
-        id: 'ssm',
-        port: deadPort,
-        mode: 'aws-ssm',
-        aws: {
-          region: 'us-east-1',
-          targetInstanceId: 'i-test',
-          remotePort: deadPort,
-          localPort: deadPort + 1000,
-          commandId: 'cmd-test',
-          startSessionCommand: ['aws', 'ssm', 'start-session'],
-          localUrl: 'http://127.0.0.1:5100/',
-        },
-      }),
-    );
-
-    const restarted = new SessionStore(dir);
-    await restarted.init();
-    expect([...restarted.values()].map(s => s.id)).toEqual(['ssm']);
-  });
-
   it('delete removes a session and persists the removal', () => {
     const dir = mkdtempSync(join(tmpdir(), 'diwan-store-'));
     const a = new SessionStore(dir);

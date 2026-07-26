@@ -154,9 +154,6 @@ export class SessionStore {
 export async function isSessionRestorable(
   session: CodeSession,
 ): Promise<boolean> {
-  if (session.mode === 'aws-ssm') {
-    return true;
-  }
   return isPortListening(session.port);
 }
 

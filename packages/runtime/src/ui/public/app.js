@@ -1054,46 +1054,31 @@ function renderSession(session) {
 
   renderWorkTrackingPanel();
 
-  if (session.mode === 'aws-ssm' && session.aws) {
-    const command = document.createElement('pre');
-    command.className = 'ssm-command';
-    command.textContent = session.aws.startSessionCommand.join(' ');
+  const link = document.createElement('a');
+  link.href = openCodeFrameUrl(session);
+  link.target = '_blank';
+  link.rel = 'noreferrer';
+  link.textContent = 'Open in new tab';
+  toolbar.append(link);
 
-    const localLink = document.createElement('a');
-    localLink.href = session.aws.localUrl;
-    localLink.target = '_blank';
-    localLink.rel = 'noreferrer';
-    localLink.textContent = 'Open local tunnel';
-    toolbar.append(localLink);
-
-    target.append(toolbar, command, workspace);
-  } else {
-    const link = document.createElement('a');
-    link.href = openCodeFrameUrl(session);
-    link.target = '_blank';
-    link.rel = 'noreferrer';
-    link.textContent = 'Open in new tab';
-    toolbar.append(link);
-
-    const slack =
-      session.channel?.external?.slack ?? selectedChannel()?.external?.slack;
-    if (slack?.url) {
-      const slackLink = document.createElement('a');
-      slackLink.href = slack.url;
-      slackLink.target = '_blank';
-      slackLink.rel = 'noreferrer';
-      slackLink.textContent = 'Open Slack';
-      toolbar.append(slackLink);
-    }
-
-    const frame = document.createElement('iframe');
-    frame.className = 'code-frame';
-    frame.src = openCodeFrameUrl(session);
-    frame.title = 'DysonCode workspace';
-    frame.allow = 'clipboard-read; clipboard-write';
-
-    target.append(toolbar, frame, workspace);
+  const slack =
+    session.channel?.external?.slack ?? selectedChannel()?.external?.slack;
+  if (slack?.url) {
+    const slackLink = document.createElement('a');
+    slackLink.href = slack.url;
+    slackLink.target = '_blank';
+    slackLink.rel = 'noreferrer';
+    slackLink.textContent = 'Open Slack';
+    toolbar.append(slackLink);
   }
+
+  const frame = document.createElement('iframe');
+  frame.className = 'code-frame';
+  frame.src = openCodeFrameUrl(session);
+  frame.title = 'DysonCode workspace';
+  frame.allow = 'clipboard-read; clipboard-write';
+
+  target.append(toolbar, frame, workspace);
 }
 
 function renderWorkTrackingPanel() {

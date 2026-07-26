@@ -45,16 +45,12 @@ const schema = z.object({
   DIWAN_SUPER_ADMIN_EMAILS: csv(''),
   DIWAN_LINUX_USER_PREFIX: z.string().default(''),
   DIWAN_WORKSPACE_ROOT: z.string().default('/srv/diwan/workspaces'),
-  DIWAN_EXEC_MODE: z.enum(['dry-run', 'sudo', 'aws-ssm']).default('dry-run'),
+  DIWAN_EXEC_MODE: z.enum(['dry-run', 'sudo']).default('dry-run'),
   DIWAN_OPENCODE_PORT_BASE: z.coerce.number().int().positive().default(4100),
   DIWAN_OPENCODE_BIN: z.string().default('/usr/local/bin/opencode'),
   DIWAN_PROVISION_USER_SCRIPT: z
     .string()
     .default('/opt/opencortex/scripts/provision-diwan-user.sh'),
-  DIWAN_AWS_REGION: z.string().default('us-east-1'),
-  DIWAN_SSM_TARGET_INSTANCE_ID: z.string().default(''),
-  DIWAN_SSM_LOCAL_PORT_BASE: z.coerce.number().int().positive().default(5100),
-  DIWAN_AWS_BIN: z.string().default('/usr/local/bin/aws'),
   DIWAN_JIRA_BASE_URL: optionalUrl.default(''),
   SLACK_BOT_TOKEN: z.string().default(''),
   SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api'),
@@ -83,10 +79,6 @@ function normalizeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   applyAlias(normalized, 'OPENCORTEX_WORKBENCH_PORT_BASE', 'DIWAN_OPENCODE_PORT_BASE');
   applyAlias(normalized, 'OPENCORTEX_WORKBENCH_BIN', 'DIWAN_OPENCODE_BIN');
   applyAlias(normalized, 'OPENCORTEX_PROVISION_USER_SCRIPT', 'DIWAN_PROVISION_USER_SCRIPT');
-  applyAlias(normalized, 'OPENCORTEX_AWS_REGION', 'DIWAN_AWS_REGION');
-  applyAlias(normalized, 'OPENCORTEX_SSM_TARGET_INSTANCE_ID', 'DIWAN_SSM_TARGET_INSTANCE_ID');
-  applyAlias(normalized, 'OPENCORTEX_SSM_LOCAL_PORT_BASE', 'DIWAN_SSM_LOCAL_PORT_BASE');
-  applyAlias(normalized, 'OPENCORTEX_AWS_BIN', 'DIWAN_AWS_BIN');
   applyAlias(normalized, 'OPENCORTEX_JIRA_BASE_URL', 'DIWAN_JIRA_BASE_URL');
   applyAlias(normalized, 'OPENCORTEX_OIDC_ISSUER', 'OIDC_ISSUER');
   applyAlias(normalized, 'OPENCORTEX_OIDC_CLIENT_ID', 'OIDC_CLIENT_ID');
