@@ -22,5 +22,12 @@ OPENCORTEX_MEMORY_TEST_DATABASE_URL=postgres://user:pass@host:5432/db \
   npm --prefix packages/memory run check
 ```
 
+Or run the containerized empty-database check, which requires Podman or Docker
+but not a host `psql`:
+
+```bash
+npm --prefix packages/memory run check:empty-db
+```
+
 Skill bundle publishing remains in scope for `@opencortex/skills`. Importing or
 migrating existing BrainTrust/DSN skill bundles is deliberately deferred.

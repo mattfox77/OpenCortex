@@ -6,6 +6,7 @@
   "type": "module",
   "scripts": {
     "check": "node scripts/check-migrations.mjs",
+    "check:empty-db": "node scripts/check-empty-db.mjs",
     "migrate": "node scripts/migrate.mjs"
   },
   "engines": {
