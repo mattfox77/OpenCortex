@@ -1,4 +1,4 @@
--- Brain Trust Entra-gated provisioning support.
+-- OpenCortex runtime identity-gated provisioning support.
 -- Safe to run repeatedly on existing deployments.
 
 CREATE TABLE IF NOT EXISTS identities (

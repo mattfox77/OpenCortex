@@ -1,10 +1,10 @@
 -- ============================================================
 -- MIGRATION: user-facing Task List (task_items + task_entries)
 -- ============================================================
--- Safe to run repeatedly on existing BrainTrust deployments.
+-- OpenCortex task item schema carried forward from BrainTrust capability code.
 -- All DDL guarded with IF NOT EXISTS / CREATE OR REPLACE / DROP POLICY.
 -- Run AFTER 01-schema.sql (depends on: update_ts(), keys, entries,
--- request_owner_id(), request_key_hash(), braintrust_api role).
+-- request_owner_id(), request_key_hash(), opencortex_memory_api role).
 --
 -- This migration does NOT touch the Temporal-style `tasks` table
 -- (01-schema.sql:182) — that is a workflow-execution queue. User to-dos
@@ -143,8 +143,8 @@ CREATE POLICY task_entries_delete_policy ON task_entries
 
 REVOKE ALL ON TABLE task_items   FROM PUBLIC;
 REVOKE ALL ON TABLE task_entries FROM PUBLIC;
-GRANT SELECT, INSERT, UPDATE, DELETE ON task_items   TO braintrust_api;
-GRANT SELECT, INSERT, UPDATE, DELETE ON task_entries TO braintrust_api;
+GRANT SELECT, INSERT, UPDATE, DELETE ON task_items   TO opencortex_memory_api;
+GRANT SELECT, INSERT, UPDATE, DELETE ON task_entries TO opencortex_memory_api;
 
 -- ============================================================
 -- 4. FUNCTIONS
@@ -320,9 +320,9 @@ REVOKE ALL ON FUNCTION task_list(TEXT,TEXT,TEXT,TEXT,BOOLEAN,INTEGER) FROM PUBLI
 REVOKE ALL ON FUNCTION task_link_entry(UUID,UUID,TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION task_entries_list(UUID) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION lexo_between(TEXT,TEXT) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION task_add(TEXT,TEXT,TEXT,DATE,TEXT,TEXT,TEXT,TEXT) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION task_reorder(UUID,UUID,UUID) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION task_list(TEXT,TEXT,TEXT,TEXT,BOOLEAN,INTEGER) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION task_link_entry(UUID,UUID,TEXT) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION task_entries_list(UUID) TO braintrust_api;
+GRANT EXECUTE ON FUNCTION lexo_between(TEXT,TEXT) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION task_add(TEXT,TEXT,TEXT,DATE,TEXT,TEXT,TEXT,TEXT) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION task_reorder(UUID,UUID,UUID) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION task_list(TEXT,TEXT,TEXT,TEXT,BOOLEAN,INTEGER) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION task_link_entry(UUID,UUID,TEXT) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION task_entries_list(UUID) TO opencortex_memory_api;

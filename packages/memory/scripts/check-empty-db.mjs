@@ -44,6 +44,8 @@ try {
       "done",
       "table_count=$(psql -U opencortex -d opencortex -t -A -c \"select count(*) from information_schema.tables where table_schema = 'public';\")",
       "test \"$table_count\" -ge 8",
+      "role_count=$(psql -U opencortex -d opencortex -t -A -c \"select count(*) from pg_roles where rolname = 'opencortex_memory_api';\")",
+      "test \"$role_count\" = 1",
       "echo \"created $table_count public tables\"",
     ].join("\n"),
   ]);

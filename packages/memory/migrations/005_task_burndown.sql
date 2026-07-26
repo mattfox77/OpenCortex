@@ -130,8 +130,8 @@ CREATE POLICY task_events_insert_policy ON task_events
 
 REVOKE ALL ON TABLE task_cycles FROM PUBLIC;
 REVOKE ALL ON TABLE task_events FROM PUBLIC;
-GRANT SELECT, INSERT, UPDATE, DELETE ON task_cycles TO braintrust_api;
-GRANT SELECT, INSERT                 ON task_events TO braintrust_api;  -- append-only
+GRANT SELECT, INSERT, UPDATE, DELETE ON task_cycles TO opencortex_memory_api;
+GRANT SELECT, INSERT                 ON task_events TO opencortex_memory_api;  -- append-only
 
 -- ============================================================
 -- 5. FUNCTIONS
@@ -469,10 +469,10 @@ REVOKE ALL ON FUNCTION cycle_assign(UUID,UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION burndown(UUID) FROM PUBLIC;
 REVOKE ALL ON FUNCTION velocity(TEXT,INTEGER) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION task_add(TEXT,TEXT,TEXT,DATE,TEXT,TEXT,TEXT,TEXT,NUMERIC,UUID) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION task_set_status(UUID,TEXT) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION task_set_estimate(UUID,NUMERIC) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION cycle_add(TEXT,DATE,DATE,TEXT,TEXT) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION cycle_assign(UUID,UUID) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION burndown(UUID) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION velocity(TEXT,INTEGER) TO braintrust_api;
+GRANT EXECUTE ON FUNCTION task_add(TEXT,TEXT,TEXT,DATE,TEXT,TEXT,TEXT,TEXT,NUMERIC,UUID) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION task_set_status(UUID,TEXT) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION task_set_estimate(UUID,NUMERIC) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION cycle_add(TEXT,DATE,DATE,TEXT,TEXT) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION cycle_assign(UUID,UUID) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION burndown(UUID) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION velocity(TEXT,INTEGER) TO opencortex_memory_api;

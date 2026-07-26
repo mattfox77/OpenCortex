@@ -47,4 +47,4 @@ END;
 $$;
 
 REVOKE ALL ON FUNCTION task_set_search_entry(UUID,UUID) FROM PUBLIC;
-GRANT EXECUTE ON FUNCTION task_set_search_entry(UUID,UUID) TO braintrust_api;
+GRANT EXECUTE ON FUNCTION task_set_search_entry(UUID,UUID) TO opencortex_memory_api;

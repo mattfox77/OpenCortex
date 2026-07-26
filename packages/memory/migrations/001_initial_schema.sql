@@ -250,7 +250,7 @@ CREATE TABLE IF NOT EXISTS keys (
 CREATE INDEX IF NOT EXISTS idx_keys_owner ON keys(owner_id);
 
 -- ============================================================
--- IDENTITIES: Entra/Diwan identity mapping + provisioned keys
+-- IDENTITIES: OIDC/runtime identity mapping + provisioned service keys
 -- ============================================================
 
 CREATE TABLE IF NOT EXISTS identities (
@@ -300,8 +300,8 @@ CREATE INDEX IF NOT EXISTS idx_provisioned_credentials_owner
 
 DO $$
 BEGIN
-  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'braintrust_api') THEN
-    CREATE ROLE braintrust_api NOLOGIN;
+  IF NOT EXISTS (SELECT 1 FROM pg_roles WHERE rolname = 'opencortex_memory_api') THEN
+    CREATE ROLE opencortex_memory_api NOLOGIN;
   END IF;
 END
 $$;
@@ -715,12 +715,12 @@ REVOKE ALL ON TABLE artifacts FROM PUBLIC;
 REVOKE ALL ON TABLE artifact_links FROM PUBLIC;
 REVOKE ALL ON TABLE sync_state FROM PUBLIC;
 
-GRANT SELECT, INSERT, UPDATE, DELETE ON entries TO braintrust_api;
-GRANT SELECT, INSERT ON log TO braintrust_api;
-GRANT SELECT, INSERT ON keys TO braintrust_api;
-GRANT SELECT, INSERT, UPDATE, DELETE ON artifacts TO braintrust_api;
-GRANT SELECT, INSERT, DELETE ON artifact_links TO braintrust_api;
-GRANT SELECT, INSERT, UPDATE ON sync_state TO braintrust_api;
+GRANT SELECT, INSERT, UPDATE, DELETE ON entries TO opencortex_memory_api;
+GRANT SELECT, INSERT ON log TO opencortex_memory_api;
+GRANT SELECT, INSERT ON keys TO opencortex_memory_api;
+GRANT SELECT, INSERT, UPDATE, DELETE ON artifacts TO opencortex_memory_api;
+GRANT SELECT, INSERT, DELETE ON artifact_links TO opencortex_memory_api;
+GRANT SELECT, INSERT, UPDATE ON sync_state TO opencortex_memory_api;
 
 REVOKE ALL ON FUNCTION request_api_key() FROM PUBLIC;
 REVOKE ALL ON FUNCTION request_key_hash() FROM PUBLIC;
@@ -728,11 +728,11 @@ REVOKE ALL ON FUNCTION request_owner_id() FROM PUBLIC;
 REVOKE ALL ON FUNCTION request_role() FROM PUBLIC;
 REVOKE ALL ON FUNCTION request_is_admin() FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION request_api_key() TO braintrust_api;
-GRANT EXECUTE ON FUNCTION request_key_hash() TO braintrust_api;
-GRANT EXECUTE ON FUNCTION request_owner_id() TO braintrust_api;
-GRANT EXECUTE ON FUNCTION request_role() TO braintrust_api;
-GRANT EXECUTE ON FUNCTION request_is_admin() TO braintrust_api;
+GRANT EXECUTE ON FUNCTION request_api_key() TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION request_key_hash() TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION request_owner_id() TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION request_role() TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION request_is_admin() TO opencortex_memory_api;
 
 REVOKE ALL ON FUNCTION search(TEXT, vector, TEXT, INTEGER, TEXT, TEXT, FLOAT, BOOLEAN, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION expand(UUID, INTEGER) FROM PUBLIC;
@@ -741,9 +741,9 @@ REVOKE ALL ON FUNCTION timeline(INTEGER, TEXT, TEXT, TIMESTAMPTZ) FROM PUBLIC;
 REVOKE ALL ON FUNCTION sessions(TEXT, INTEGER, TEXT, TEXT, TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION provision(TEXT, TEXT, TEXT) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION search(TEXT, vector, TEXT, INTEGER, TEXT, TEXT, FLOAT, BOOLEAN, TEXT) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION expand(UUID, INTEGER) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION browse(TEXT, INTEGER, TEXT, TEXT, TEXT, TEXT) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION timeline(INTEGER, TEXT, TEXT, TIMESTAMPTZ) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION sessions(TEXT, INTEGER, TEXT, TEXT, TEXT) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION provision(TEXT, TEXT, TEXT) TO braintrust_api;
+GRANT EXECUTE ON FUNCTION search(TEXT, vector, TEXT, INTEGER, TEXT, TEXT, FLOAT, BOOLEAN, TEXT) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION expand(UUID, INTEGER) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION browse(TEXT, INTEGER, TEXT, TEXT, TEXT, TEXT) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION timeline(INTEGER, TEXT, TEXT, TIMESTAMPTZ) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION sessions(TEXT, INTEGER, TEXT, TEXT, TEXT) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION provision(TEXT, TEXT, TEXT) TO opencortex_memory_api;

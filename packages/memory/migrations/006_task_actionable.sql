@@ -216,9 +216,9 @@ REVOKE ALL ON FUNCTION task_next(TEXT,INTEGER) FROM PUBLIC;
 REVOKE ALL ON FUNCTION burndown_ws(TEXT) FROM PUBLIC;
 REVOKE ALL ON FUNCTION cycle_close(UUID,UUID) FROM PUBLIC;
 
-GRANT EXECUTE ON FUNCTION task_is_blocked(UUID) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION task_depends_on(UUID,UUID) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION task_list(TEXT,TEXT,TEXT,TEXT,BOOLEAN,INTEGER,TEXT) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION task_next(TEXT,INTEGER) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION burndown_ws(TEXT) TO braintrust_api;
-GRANT EXECUTE ON FUNCTION cycle_close(UUID,UUID) TO braintrust_api;
+GRANT EXECUTE ON FUNCTION task_is_blocked(UUID) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION task_depends_on(UUID,UUID) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION task_list(TEXT,TEXT,TEXT,TEXT,BOOLEAN,INTEGER,TEXT) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION task_next(TEXT,INTEGER) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION burndown_ws(TEXT) TO opencortex_memory_api;
+GRANT EXECUTE ON FUNCTION cycle_close(UUID,UUID) TO opencortex_memory_api;

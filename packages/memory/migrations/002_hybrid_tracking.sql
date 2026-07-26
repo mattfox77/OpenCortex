@@ -1,7 +1,7 @@
 -- ============================================================
 -- MIGRATION: Hybrid search + session-group tracking
 -- ============================================================
--- Safe to run on existing BrainTrust deployments.
+-- OpenCortex fresh-install hybrid search and tracking extensions.
 -- All ADD COLUMN uses IF NOT EXISTS (Postgres 9.6+).
 -- Run after 01-schema.sql on fresh installs; run standalone on upgrades.
 -- ============================================================
