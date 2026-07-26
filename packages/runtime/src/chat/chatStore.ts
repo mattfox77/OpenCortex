@@ -12,7 +12,7 @@ import { createInterface } from 'node:readline';
 import { nanoid } from 'nanoid';
 import type { AuthenticatedUser } from '../auth/types.js';
 import {
-  assertAllowedEmailDomain,
+  assertAllowedEmailDomains,
   emailToLinuxUser,
 } from '../auth/linuxUser.js';
 import type { AppConfig } from '../config/config.js';
@@ -105,7 +105,7 @@ export class ChatStore {
     private readonly config: Pick<
       AppConfig,
       | 'DIWAN_DATA_DIR'
-      | 'DIWAN_ALLOWED_EMAIL_DOMAIN'
+      | 'DIWAN_ALLOWED_EMAIL_DOMAINS'
       | 'DIWAN_LINUX_USER_PREFIX'
     >,
   ) {
@@ -316,9 +316,9 @@ export class ChatStore {
     }
 
     const normalizedEmail = email.trim().toLowerCase();
-    assertAllowedEmailDomain(
+    assertAllowedEmailDomains(
       normalizedEmail,
-      this.config.DIWAN_ALLOWED_EMAIL_DOMAIN,
+      this.config.DIWAN_ALLOWED_EMAIL_DOMAINS,
     );
     if (!this.isMember(channel, normalizedEmail)) {
       const now = new Date().toISOString();

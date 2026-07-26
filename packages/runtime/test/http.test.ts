@@ -28,6 +28,7 @@ function testConfig(): AppConfig {
     COGNITO_REDIRECT_PATH: '/auth/callback',
     COGNITO_REQUIRED_GROUPS: ['TeamChatUsers', 'OpenCodeUsers'],
     DIWAN_ALLOWED_EMAIL_DOMAIN: 'dsn.com',
+    DIWAN_ALLOWED_EMAIL_DOMAINS: ['dsn.com'],
     DIWAN_SUPER_ADMIN_EMAILS: ['mfox@dsn.com'],
     DIWAN_LINUX_USER_PREFIX: '',
     DIWAN_WORKSPACE_ROOT: '/srv/diwan/workspaces',

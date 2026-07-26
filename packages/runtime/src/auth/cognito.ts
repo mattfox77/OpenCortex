@@ -3,7 +3,7 @@ import { createRemoteJWKSet, jwtVerify } from 'jose';
 import type { JWTPayload } from 'jose';
 import type { AppConfig } from '../config/config.js';
 import { cognitoIssuer } from '../config/config.js';
-import { assertAllowedEmailDomain, emailToLinuxUser } from './linuxUser.js';
+import { assertAllowedEmailDomains, emailToLinuxUser } from './linuxUser.js';
 
 const authCookieName = 'diwan.idToken';
 
@@ -63,7 +63,7 @@ export function cognitoAuth(config: AppConfig): RequestHandler {
         const devMatch = /^Dev\s+(.+@.+)$/i.exec(devCredential);
         if (devMatch) {
           const email = devMatch[1].toLowerCase();
-          assertAllowedEmailDomain(email, config.DIWAN_ALLOWED_EMAIL_DOMAIN);
+          assertAllowedEmailDomains(email, config.DIWAN_ALLOWED_EMAIL_DOMAINS);
           req.user = {
             sub: `dev:${email}`,
             email,
@@ -89,7 +89,7 @@ export function cognitoAuth(config: AppConfig): RequestHandler {
         return res.status(403).json({ error: 'missing_email_claim' });
       }
 
-      assertAllowedEmailDomain(email, config.DIWAN_ALLOWED_EMAIL_DOMAIN);
+      assertAllowedEmailDomains(email, config.DIWAN_ALLOWED_EMAIL_DOMAINS);
 
       const groups = groupsFrom(result.payload);
       if (!hasAnyRequiredGroup(groups, config.COGNITO_REQUIRED_GROUPS)) {

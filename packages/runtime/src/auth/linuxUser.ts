@@ -41,9 +41,16 @@ export function emailToLinuxUser(
 }
 
 export function assertAllowedEmailDomain(email: string, domain: string): void {
+  assertAllowedEmailDomains(email, domain ? [domain] : []);
+}
+
+export function assertAllowedEmailDomains(email: string, domains: string[]): void {
+  if (domains.length === 0) {
+    return;
+  }
   const normalized = email.trim().toLowerCase();
-  const suffix = `@${domain.toLowerCase()}`;
-  if (!normalized.endsWith(suffix)) {
-    throw new Error(`Email domain is not allowed: expected ${suffix}`);
+  const allowed = domains.map(domain => `@${domain.toLowerCase()}`);
+  if (!allowed.some(suffix => normalized.endsWith(suffix))) {
+    throw new Error(`Email domain is not allowed: expected one of ${allowed.join(', ')}`);
   }
 }

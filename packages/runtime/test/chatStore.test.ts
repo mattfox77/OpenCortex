@@ -9,11 +9,11 @@ import type { AppConfig } from "../src/config/config.js";
 
 function config(): Pick<
   AppConfig,
-  "DIWAN_DATA_DIR" | "DIWAN_ALLOWED_EMAIL_DOMAIN" | "DIWAN_LINUX_USER_PREFIX"
+  "DIWAN_DATA_DIR" | "DIWAN_ALLOWED_EMAIL_DOMAINS" | "DIWAN_LINUX_USER_PREFIX"
 > {
   return {
     DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), "diwan-chat-")),
-    DIWAN_ALLOWED_EMAIL_DOMAIN: "dsn.com",
+    DIWAN_ALLOWED_EMAIL_DOMAINS: ["dsn.com"],
     DIWAN_LINUX_USER_PREFIX: "diwan-"
   };
 }
