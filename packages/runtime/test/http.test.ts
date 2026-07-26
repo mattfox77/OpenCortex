@@ -54,7 +54,7 @@ function testConfig(): AppConfig {
     DIWAN_JIRA_BASE_URL: 'https://dsnsoft-dev.atlassian.net',
     SLACK_BOT_TOKEN: '',
     SLACK_API_BASE_URL: 'https://slack.com/api',
-    SLACK_WORKSPACE_URL: 'https://dsnsoft.slack.com',
+    SLACK_WORKSPACE_URL: 'https://workspace.example.com',
     SLACK_SESSION_CHANNEL_PREFIX: 'diwan',
   };
 }
@@ -624,7 +624,7 @@ describe('http app', () => {
     expect(createdBody.channel.external.slack).toMatchObject({
       channelId: 'CSESSION',
       channelName: 'diwan-owner-live',
-      url: 'https://dsnsoft.slack.com/archives/CSESSION',
+      url: 'https://workspace.example.com/archives/CSESSION',
     });
     expect(slack.requests.map(request => request.url)).toEqual([
       '/conversations.create',
@@ -1265,7 +1265,7 @@ describe('http app', () => {
     chat.attachSlackChannel(channel.id, {
       channelId: 'CSESSION',
       channelName: 'diwan-owner-live',
-      url: 'https://dsnsoft.slack.com/archives/CSESSION',
+      url: 'https://workspace.example.com/archives/CSESSION',
     });
     const app = createApp(config, sessions, chat);
     server = app.listen(0);
@@ -1289,7 +1289,7 @@ describe('http app', () => {
     expect(htmlBody).toContain('data-channel-id="');
     expect(htmlBody).toContain('data-diwan-url="/diwan/code/sessions/live"');
     expect(htmlBody).toContain(
-      'data-slack-url="https://dsnsoft.slack.com/archives/CSESSION"',
+      'data-slack-url="https://workspace.example.com/archives/CSESSION"',
     );
     expect(htmlBody).toContain('/diwan/diwan-session-addon.js');
 

@@ -82,6 +82,17 @@ describe('runtime config compatibility', () => {
 
     expect(config.DIWAN_ALLOWED_EMAIL_DOMAINS).toEqual([]);
   });
+
+  it('does not bake tenant-specific Jira or Slack workspace defaults into config', () => {
+    const config = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+    });
+
+    expect(config.DIWAN_JIRA_BASE_URL).toBe('');
+    expect(config.SLACK_WORKSPACE_URL).toBe('');
+    expect(config.SLACK_SESSION_CHANNEL_PREFIX).toBe('opencortex');
+  });
 });
 
 function requiredAuthEnv(): NodeJS.ProcessEnv {

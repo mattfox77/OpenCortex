@@ -13,6 +13,8 @@ function csv(defaultValue: string) {
     );
 }
 
+const optionalUrl = z.union([z.string().url(), z.literal('')]);
+
 const schema = z.object({
   NODE_ENV: z
     .enum(['development', 'test', 'production'])
@@ -53,14 +55,11 @@ const schema = z.object({
   DIWAN_SSM_TARGET_INSTANCE_ID: z.string().default(''),
   DIWAN_SSM_LOCAL_PORT_BASE: z.coerce.number().int().positive().default(5100),
   DIWAN_AWS_BIN: z.string().default('/usr/local/bin/aws'),
-  DIWAN_JIRA_BASE_URL: z
-    .string()
-    .url()
-    .default('https://dsnsoft-dev.atlassian.net'),
+  DIWAN_JIRA_BASE_URL: optionalUrl.default(''),
   SLACK_BOT_TOKEN: z.string().default(''),
   SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api'),
-  SLACK_WORKSPACE_URL: z.string().url().default('https://dsnsoft.slack.com'),
-  SLACK_SESSION_CHANNEL_PREFIX: z.string().default('diwan'),
+  SLACK_WORKSPACE_URL: optionalUrl.default(''),
+  SLACK_SESSION_CHANNEL_PREFIX: z.string().default('opencortex'),
 });
 
 export type AppConfig = z.infer<typeof schema>;

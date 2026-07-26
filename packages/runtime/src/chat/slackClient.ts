@@ -149,5 +149,8 @@ function sessionSlackChannelName(prefix: string, session: CodeSession): string {
 }
 
 function slackChannelUrl(workspaceUrl: string, channelId: string): string {
+  if (!workspaceUrl.trim()) {
+    throw new Error('SLACK_WORKSPACE_URL is required when Slack integration is enabled');
+  }
   return `${workspaceUrl.replace(/\/$/, '')}/archives/${channelId}`;
 }
