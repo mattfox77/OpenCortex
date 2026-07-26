@@ -1,0 +1,18 @@
+[Unit]
+Description=OpenCortex Temporal UI
+After=opencortex-temporal.service
+Requires=opencortex-temporal.service
+
+[Container]
+ContainerName=opencortex-temporal-ui
+Image=docker.io/temporalio/ui:2.31.2
+Network=opencortex.network
+Environment=TEMPORAL_ADDRESS=opencortex-temporal:7233
+Environment=TEMPORAL_CORS_ORIGINS=http://localhost:8233
+PublishPort=127.0.0.1:8233:8080
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

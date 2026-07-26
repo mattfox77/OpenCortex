@@ -1,0 +1,22 @@
+[Unit]
+Description=OpenCortex Temporal server
+After=opencortex-memory-db.service
+Requires=opencortex-memory-db.service
+
+[Container]
+ContainerName=opencortex-temporal
+Image=docker.io/temporalio/auto-setup:1.25
+Network=opencortex.network
+Environment=DB=postgres12
+Environment=DB_PORT=5432
+Environment=POSTGRES_SEEDS=opencortex-memory-db
+Environment=POSTGRES_USER=opencortex
+Secret=opencortex_postgres_password,type=env,target=POSTGRES_PWD
+Environment=DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/development-sql.yaml
+PublishPort=127.0.0.1:7233:7233
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

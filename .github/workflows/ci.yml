@@ -1,0 +1,32 @@
+name: ci
+
+on:
+  pull_request:
+  push:
+    branches:
+      - main
+      - phase0-guardrails
+
+jobs:
+  guardrails:
+    runs-on: self-hosted
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Use Node
+        uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: packages/orchestrator/package-lock.json
+
+      - name: Install orchestrator dependencies
+        run: npm ci --include=dev
+        working-directory: packages/orchestrator
+
+      - name: Type check and config inventory
+        run: npm run check
+
+      - name: Build
+        run: npm run build

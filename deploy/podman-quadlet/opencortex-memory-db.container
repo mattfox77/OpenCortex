@@ -1,0 +1,20 @@
+[Unit]
+Description=OpenCortex Postgres memory and Temporal database
+After=network-online.target
+Wants=network-online.target
+
+[Container]
+ContainerName=opencortex-memory-db
+Image=docker.io/pgvector/pgvector:pg16
+Network=opencortex.network
+Volume=opencortex-memory-db.volume:/var/lib/postgresql/data:Z
+Environment=POSTGRES_DB=opencortex_memory
+Environment=POSTGRES_USER=opencortex
+Secret=opencortex_postgres_password,type=env,target=POSTGRES_PASSWORD
+PublishPort=127.0.0.1:5432:5432
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target
