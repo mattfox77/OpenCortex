@@ -73,7 +73,7 @@ ensure_rsync() {
 }
 
 # Per-user code sessions expect Node.js/npm/npx, git, jq, GitHub (gh),
-# Atlassian (acli), and Brain Trust (brain) on PATH. Install them system-wide
+# Atlassian (acli), and OpenCortex Memory (brain) on PATH. Install them system-wide
 # so every OpenCortex Linux user's session shell can use them.
 # Idempotent: skips anything already present.
 ensure_clis() {
@@ -144,8 +144,9 @@ ensure_clis() {
 }
 
 ensure_brain_cli() {
-  # The Brain Trust CLI is a single executable script. Install only the shared
-  # binary here; each OpenCortex Linux user keeps their own ~/.braintrust/config.
+  # The OpenCortex Memory compatibility CLI is a single executable script.
+  # Install only the shared binary here; each OpenCortex Linux user keeps their
+  # own memory config. The Phase 7 cortex CLI will replace this shim.
   local target="/usr/local/bin/brain"
   local brain_cli_bin="${OPENCORTEX_BRAIN_CLI_BIN:-${DIWAN_BRAIN_CLI_BIN:-}}"
   local brain_cli_url="${OPENCORTEX_BRAIN_CLI_URL:-${DIWAN_BRAIN_CLI_URL:-}}"
@@ -158,13 +159,19 @@ ensure_brain_cli() {
     return 0
   fi
 
-  if [ -f /opt/braintrust/dist/brain ]; then
-    if [ ! -x "$target" ] || ! cmp -s /opt/braintrust/dist/brain "$target"; then
-      install -o root -g root -m 0755 /opt/braintrust/dist/brain "$target"
-      echo "installed brain CLI from /opt/braintrust/dist/brain"
+  local candidate
+  for candidate in \
+    "${APP_DIR}/../memory/scripts/brain" \
+    "/opt/opencortex/memory/scripts/brain" \
+    "/opt/opencortex/packages/memory/scripts/brain"; do
+    if [ -f "$candidate" ]; then
+      if [ ! -x "$target" ] || ! cmp -s "$candidate" "$target"; then
+        install -o root -g root -m 0755 "$candidate" "$target"
+        echo "installed brain CLI from ${candidate}"
+      fi
+      return 0
     fi
-    return 0
-  fi
+  done
 
   if [ -n "$brain_cli_url" ]; then
     local tmp
@@ -180,7 +187,7 @@ ensure_brain_cli() {
     return 0
   fi
 
-  echo "WARNING: brain CLI source unavailable; continuing without /usr/local/bin/brain. Set OPENCORTEX_BRAIN_CLI_BIN or OPENCORTEX_BRAIN_CLI_URL, or stage /opt/braintrust/dist/brain to install it." >&2
+  echo "WARNING: brain CLI source unavailable; continuing without /usr/local/bin/brain. Set OPENCORTEX_BRAIN_CLI_BIN or OPENCORTEX_BRAIN_CLI_URL, or stage packages/memory/scripts/brain with the runtime install." >&2
   return 0
 }
 

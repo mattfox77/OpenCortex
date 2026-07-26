@@ -61,7 +61,8 @@ describe('server installer', () => {
     expect(installer).toContain('OPENCORTEX_SKILLS_BUNDLE_PATH');
     expect(installer).toContain('OPENCORTEX_SKILLS_BUNDLE_URL');
     expect(installer).toContain('/usr/local/bin/brain');
-    expect(installer).toContain('/opt/braintrust/dist/brain');
+    expect(installer).toContain('/opt/opencortex/memory/scripts/brain');
+    expect(installer).not.toContain('/opt/braintrust/dist/brain');
     expect(installer).toContain('continuing without /usr/local/bin/brain');
     expect(installer).toContain('ensure_skills\nensure_brain_cli');
   });
