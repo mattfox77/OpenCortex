@@ -87,14 +87,14 @@ install -d -o "$user" -g "$user" "$workspace_root/$user/repos"
 
 install -d -o "$user" -g "$user" "$home/.config/opencode" "$home/.config/gh" "$home/.config/acli"
 install -d -o "$user" -g "$user" "$home/.opencode/skills" "$home/.codex/skills"
-install -d -o "$user" -g "$user" "$home/.braintrust"
+install -d -o "$user" -g "$user" "$home/.opencortex/memory" "$home/.opencortex/credentials"
 install -d -o "$user" -g "$user" \
   "$home/.local/share/opencode" \
   "$home/.local/state/opencode" \
   "$home/.cache/opencode"
 install -d -o "$user" -g "$user" "$home/.azure" "$home/.ssh"
-chown -R "$user:$user" "$home/.config" "$home/.opencode" "$home/.codex" "$home/.braintrust" "$home/.local" "$home/.cache"
-chmod 700 "$home/.azure" "$home/.ssh" "$home/.braintrust" "$home/.config/gh" "$home/.config/acli"
+chown -R "$user:$user" "$home/.config" "$home/.opencode" "$home/.codex" "$home/.opencortex" "$home/.local" "$home/.cache"
+chmod 700 "$home/.azure" "$home/.ssh" "$home/.opencortex" "$home/.opencortex/memory" "$home/.opencortex/credentials" "$home/.config/gh" "$home/.config/acli"
 
 skills_source="${OPENCORTEX_SKILLS_DIR:-${DIWAN_BRAIN_SKILLS_SOURCE:-/opt/opencortex/skills/skills}}"
 

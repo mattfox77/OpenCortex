@@ -6,8 +6,15 @@ set -euo pipefail
 
 BRAIN_VERSION="1.15.0"
 
-BT_DIR="${HOME}/.braintrust"
-BT_CONF="${BT_DIR}/config"
+BT_DIR="${OPENCORTEX_MEMORY_CONFIG_DIR:-${HOME}/.opencortex/memory}"
+BT_CONF="${OPENCORTEX_MEMORY_CONFIG:-${BT_DIR}/config}"
+if [ -z "${OPENCORTEX_MEMORY_CONFIG:-}" ] \
+  && [ -z "${OPENCORTEX_MEMORY_CONFIG_DIR:-}" ] \
+  && [ ! -f "$BT_CONF" ] \
+  && [ -f "${HOME}/.braintrust/config" ]; then
+  BT_DIR="${HOME}/.braintrust"
+  BT_CONF="${BT_DIR}/config"
+fi
 DYSONCODE_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/dysoncode"
 DYSONCODE_AUTH_JSON="${DYSONCODE_CONFIG_DIR}/auth.json"
 
@@ -1009,7 +1016,7 @@ cmd_review() {
             *) echo "approve pending: unknown arg '$1'" >&2; return 1;;
           esac
         done
-        [ -z "${OWNER_ID:-}" ] && { echo "approve pending: OWNER_ID not set in ~/.braintrust/config" >&2; return 1; }
+        [ -z "${OWNER_ID:-}" ] && { echo "approve pending: OWNER_ID not set in $BT_CONF" >&2; return 1; }
         local q="entries?review=eq.pending&owner_id=eq.${OWNER_ID}&select=id,project,scope,title"
         [ -n "$p" ]  && q+="&project=eq.${p}"
         [ -n "$s" ]  && q+="&scope=eq.${s}"
@@ -2835,7 +2842,7 @@ Defaults:
   repo=auto-detected from git
 
 Notes:
-  - OBJECT_STORE_BUCKET and OBJECT_STORE_ENDPOINT_URL are required in ~/.braintrust/config
+  - OBJECT_STORE_BUCKET and OBJECT_STORE_ENDPOINT_URL are required in ~/.opencortex/memory/config
   - Cursor sync requires SYNC_CURSOR_ENABLED=1
   - Repo auto-detected from git if not specified; also inferred from file paths
   - Tool name auto-detected from file location (claude-code, cursor-agent, etc.)
@@ -3714,7 +3721,7 @@ Session/repo/tool tracking:
   --repo/-r   Filter by repository name (auto-detected from git on sync)
   --tool      Filter by tool name (cursor-agent, claude-code, pai-algorithm, etc.)
 
-Config: ~/.braintrust/config
+Config: ~/.opencortex/memory/config
 H
 }
 

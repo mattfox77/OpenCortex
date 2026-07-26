@@ -29,7 +29,9 @@ describe('provisioning', () => {
     expect(commands.join('\n')).toContain('/home/mfox/.cache/opencode');
     expect(commands.join('\n')).toContain('/home/mfox/.opencode/skills');
     expect(commands.join('\n')).toContain('/home/mfox/.codex/skills');
-    expect(commands.join('\n')).toContain('/home/mfox/.braintrust');
+    expect(commands.join('\n')).toContain('/home/mfox/.opencortex/memory');
+    expect(commands.join('\n')).toContain('/home/mfox/.opencortex/credentials');
+    expect(commands.join('\n')).not.toContain('/home/mfox/.braintrust');
     expect(commands.join('\n')).toContain(
       '/opt/opencortex/scripts/provision-opencortex-user.sh mfox',
     );
