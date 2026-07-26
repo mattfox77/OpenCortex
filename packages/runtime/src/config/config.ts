@@ -104,9 +104,9 @@ function normalizeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   applyAlias(normalized, 'OIDC_REQUIRED_GROUPS', 'COGNITO_REQUIRED_GROUPS');
 
   if (!normalized.OIDC_ISSUER && normalized.COGNITO_USER_POOL_ID) {
-    const region = normalized.COGNITO_REGION || 'us-east-1';
-    normalized.OIDC_ISSUER = `https://cognito-idp.${region}.amazonaws.com/${normalized.COGNITO_USER_POOL_ID}`;
-    console.warn('COGNITO_USER_POOL_ID is deprecated; use OIDC_ISSUER instead.');
+    throw new Error(
+      'COGNITO_USER_POOL_ID no longer derives OIDC_ISSUER; set OPENCORTEX_OIDC_ISSUER instead.',
+    );
   }
   if (normalized.COGNITO_DOMAIN) {
     if (!normalized.OIDC_AUTHORIZATION_ENDPOINT) {

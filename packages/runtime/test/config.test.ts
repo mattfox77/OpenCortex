@@ -49,19 +49,16 @@ describe('runtime config compatibility', () => {
     );
   });
 
-  it('derives generic OIDC config from legacy Cognito env names', () => {
+  it('maps direct legacy Cognito env names onto generic OIDC config', () => {
     const warn = vi.spyOn(console, 'warn').mockImplementation(() => undefined);
     const config = loadConfig({
-      COGNITO_REGION: 'us-east-1',
-      COGNITO_USER_POOL_ID: 'us-east-1_example',
+      OIDC_ISSUER: 'https://issuer.example.com',
       COGNITO_APP_CLIENT_ID: 'client',
       COGNITO_DOMAIN: 'https://example.auth.us-east-1.amazoncognito.com',
       DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-config-')),
     });
 
-    expect(config.OIDC_ISSUER).toBe(
-      'https://cognito-idp.us-east-1.amazonaws.com/us-east-1_example',
-    );
+    expect(config.OIDC_ISSUER).toBe('https://issuer.example.com');
     expect(config.OIDC_CLIENT_ID).toBe('client');
     expect(config.OIDC_AUTHORIZATION_ENDPOINT).toBe(
       'https://example.auth.us-east-1.amazoncognito.com/oauth2/authorize',
@@ -70,7 +67,20 @@ describe('runtime config compatibility', () => {
       'https://example.auth.us-east-1.amazoncognito.com/oauth2/token',
     );
     expect(warn).toHaveBeenCalledWith(
-      'COGNITO_USER_POOL_ID is deprecated; use OIDC_ISSUER instead.',
+      'COGNITO_APP_CLIENT_ID is deprecated; use OIDC_CLIENT_ID instead.',
+    );
+  });
+
+  it('requires an explicit OIDC issuer instead of deriving one from a Cognito pool id', () => {
+    expect(() =>
+      loadConfig({
+        COGNITO_REGION: 'us-east-1',
+        COGNITO_USER_POOL_ID: 'us-east-1_example',
+        COGNITO_APP_CLIENT_ID: 'client',
+        DIWAN_DATA_DIR: mkdtempSync(join(tmpdir(), 'diwan-config-')),
+      }),
+    ).toThrow(
+      'COGNITO_USER_POOL_ID no longer derives OIDC_ISSUER; set OPENCORTEX_OIDC_ISSUER instead.',
     );
   });
 
