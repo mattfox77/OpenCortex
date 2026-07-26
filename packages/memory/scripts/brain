@@ -1,0 +1,3744 @@
+#!/usr/bin/env bash
+# ============================================================
+# brain — Brain Trust CLI
+# ============================================================
+set -euo pipefail
+
+BRAIN_VERSION="1.15.0"
+
+BT_DIR="${HOME}/.braintrust"
+BT_CONF="${BT_DIR}/config"
+DYSONCODE_CONFIG_DIR="${XDG_CONFIG_HOME:-${HOME}/.config}/dysoncode"
+DYSONCODE_AUTH_JSON="${DYSONCODE_CONFIG_DIR}/auth.json"
+
+now_utc() {
+  date -u +"%Y-%m-%dT%H:%M:%SZ"
+}
+
+write_dysoncode_auth_json() {
+  local brain_json="$1"
+  mkdir -p "$DYSONCODE_CONFIG_DIR"
+  local existing="{}"
+  if [ -f "$DYSONCODE_AUTH_JSON" ] && jq -e 'type == "object"' "$DYSONCODE_AUTH_JSON" >/dev/null 2>&1; then
+    existing=$(cat "$DYSONCODE_AUTH_JSON")
+  fi
+  local tmp="${DYSONCODE_AUTH_JSON}.tmp.$$"
+  jq -n --argjson existing "$existing" --argjson brain "$brain_json" --arg updated_at "$(now_utc)" \
+    '$existing + {schemaVersion:1, updatedAt:$updated_at, source:"brain-cli", brain:$brain}' > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$DYSONCODE_AUTH_JSON"
+}
+
+patch_dysoncode_auth_json() {
+  local patch_json="$1"
+  mkdir -p "$DYSONCODE_CONFIG_DIR"
+  local existing="{}"
+  if [ -f "$DYSONCODE_AUTH_JSON" ] && jq -e 'type == "object"' "$DYSONCODE_AUTH_JSON" >/dev/null 2>&1; then
+    existing=$(cat "$DYSONCODE_AUTH_JSON")
+  fi
+  local tmp="${DYSONCODE_AUTH_JSON}.tmp.$$"
+  jq -n --argjson existing "$existing" --argjson patch "$patch_json" --arg updated_at "$(now_utc)" \
+    '$existing + $patch + {schemaVersion:1, updatedAt:$updated_at, source:"brain-cli"}' > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$DYSONCODE_AUTH_JSON"
+}
+
+patch_dysoncode_brain_broker_status() {
+  local status_json="$1"
+  mkdir -p "$DYSONCODE_CONFIG_DIR"
+  local existing="{}"
+  if [ -f "$DYSONCODE_AUTH_JSON" ] && jq -e 'type == "object"' "$DYSONCODE_AUTH_JSON" >/dev/null 2>&1; then
+    existing=$(cat "$DYSONCODE_AUTH_JSON")
+  fi
+  local tmp="${DYSONCODE_AUTH_JSON}.tmp.$$"
+  jq -n \
+    --argjson existing "$existing" \
+    --argjson status "$status_json" \
+    --arg checked_at "$(now_utc)" \
+    --arg updated_at "$(now_utc)" \
+    '
+    def cleanCredential:
+      {
+        kind:(.kind // ""),
+        keyPrefix:(.keyPrefix // ""),
+        createdAt:(.createdAt // null),
+        rotatedAt:(.rotatedAt // null),
+        revokedAt:(.revokedAt // null),
+        managedBy:(.managedBy // ""),
+        lastConfigWriteAt:(.lastConfigWriteAt // null),
+        lastConfigWriteBy:(.lastConfigWriteBy // ""),
+        lastConfigWriteSource:(.lastConfigWriteSource // ""),
+        lastConfigWriteStatus:(.lastConfigWriteStatus // "")
+      };
+
+    $existing + {
+      schemaVersion:1,
+      updatedAt:$updated_at,
+      source:"brain-cli",
+      brain: (($existing.brain // {}) + {
+        provider:($status.provider // (($existing.brain // {}).provider // "")),
+        subject:($status.subject // (($existing.brain // {}).subject // "")),
+        email:($status.email // (($existing.brain // {}).email // "")),
+        ownerId:($status.ownerId // (($existing.brain // {}).ownerId // "")),
+        role:($status.role // (($existing.brain // {}).role // "")),
+        brokerVerifiedAt:$checked_at,
+        brokerStatus:{
+          provider:($status.provider // ""),
+          subject:($status.subject // ""),
+          email:($status.email // ""),
+          ownerId:($status.ownerId // ""),
+          role:($status.role // ""),
+          disabledAt:($status.disabledAt // null),
+          credentials:(($status.credentials // []) | map(cleanCredential))
+        }
+      })
+    }' > "$tmp"
+  chmod 600 "$tmp"
+  mv "$tmp" "$DYSONCODE_AUTH_JSON"
+}
+
+load_config_soft() {
+  [ -f "$BT_CONF" ] && source "$BT_CONF"
+  return 0
+}
+
+init() {
+  if [ ! -f "$BT_CONF" ]; then
+    mkdir -p "$BT_DIR"
+    cat > "$BT_CONF" << 'C'
+# Brain Trust config
+# BT_URL: PostgREST base URL (server sets this)
+BT_URL=
+BT_KEY=
+OWNER_ID=
+EMBED_PROVIDER=bedrock
+EMBED_REGION=us-east-1
+EMBED_URL=
+EMBED_KEY=
+EMBED_MODEL=amazon.titan-embed-text-v1
+S3_BUCKET=
+S3_REGION=us-east-1
+S3_PREFIX=artifacts
+S3_KMS_KEY_ID=
+SYNC_CURSOR_ENABLED=0
+OTEL_ENDPOINT=
+OTEL_SERVICE_NAME=brain-trust
+C
+    echo "Edit ${BT_CONF}" >&2; exit 1
+  fi
+  source "$BT_CONF"
+  for v in BT_URL BT_KEY OWNER_ID; do
+    [ -z "${!v:-}" ] && { echo "Set $v in $BT_CONF" >&2; exit 1; }
+  done
+  # apikey = Kong gateway auth (raw API key); Authorization Bearer = PostgREST JWT
+  # for RLS identity. Without the Bearer header, RLS evaluates as anon and
+  # rejects every INSERT with HTTP 401 "new row violates row-level security policy".
+  # Falls back to BT_KEY for older configs that haven't been split yet.
+  H=(-H "apikey: ${BT_RAW_KEY:-${BT_KEY}}" -H "Authorization: Bearer ${BT_KEY}" -H "Content-Type: application/json" -H "Prefer: return=representation")
+}
+
+# ---- helpers ----
+
+embed() {
+  local provider="${EMBED_PROVIDER:-openrouter}"
+  local vec=""
+
+  case "$provider" in
+    bedrock)
+      command -v aws >/dev/null 2>&1 || { echo "Install AWS CLI for EMBED_PROVIDER=bedrock" >&2; exit 1; }
+      local region="${EMBED_REGION:-${AWS_REGION:-us-east-1}}"
+      local model="${EMBED_MODEL:-amazon.titan-embed-text-v1}"
+      local aws_profile="${EMBED_AWS_PROFILE:-${AWS_PROFILE:-}}"
+      local payload; payload=$(jq -n --arg t "$1" '{inputText:$t}')
+      local out; out=$(mktemp)
+      local -a aws_cmd=(aws bedrock-runtime invoke-model
+        --region "$region"
+        --model-id "$model"
+        --content-type "application/json"
+        --accept "application/json"
+        --cli-binary-format raw-in-base64-out
+        --body "$payload"
+        "$out")
+      [ -n "$aws_profile" ] && aws_cmd+=(--profile "$aws_profile")
+      local err; err=$(mktemp)
+      local rc=0
+      "${aws_cmd[@]}" >/dev/null 2>"$err" || rc=$?
+      if [ $rc -ne 0 ]; then
+        echo "brain: bedrock invoke-model failed (rc=$rc, model=$model, region=$region${aws_profile:+, profile=$aws_profile}):" >&2
+        sed 's/^/  /' "$err" >&2
+        case "$(cat "$err")" in
+          *"session has expired"*|*"Token has expired"*|*"SSO session"*)
+            echo "  hint: run 'aws sso login --profile ${aws_profile:-default}'" >&2
+            ;;
+          *"AccessDenied"*|*"not authorized"*)
+            echo "  hint: confirm Bedrock model access is enabled for $model in $region" >&2
+            ;;
+        esac
+        rm -f "$out" "$err"
+        exit 1
+      fi
+      vec=$(jq -c '.embedding // .embeddings[0] // empty' "$out")
+      rm -f "$out" "$err"
+      ;;
+    openrouter|*)
+      [ -z "${EMBED_KEY:-}" ] && { echo "Set EMBED_KEY in $BT_CONF" >&2; exit 1; }
+      local url="${EMBED_URL:-https://openrouter.ai/api/v1/embeddings}"
+      local model="${EMBED_MODEL:-openai/text-embedding-3-small}"
+      local resp; resp=$(mktemp)
+      local http_code
+      http_code=$(curl -s -o "$resp" -w '%{http_code}' "$url" \
+        -H "Content-Type: application/json" \
+        -H "Authorization: Bearer ${EMBED_KEY}" \
+        -d "$(jq -n --arg t "$1" --arg m "$model" '{model:$m,input:$t,dimensions:1536}')") || http_code="000"
+      if [ "$http_code" != "200" ]; then
+        echo "brain: embeddings API returned HTTP $http_code from $url (model=$model):" >&2
+        sed 's/^/  /' "$resp" >&2
+        rm -f "$resp"
+        exit 1
+      fi
+      vec=$(jq -c '.data[0].embedding // empty' "$resp")
+      rm -f "$resp"
+      ;;
+  esac
+
+  local dim; dim=$(echo "$vec" | jq 'length // 0')
+  [ "$dim" -eq 1536 ] || {
+    echo "brain: embedding dimension ${dim} != required 1536 (provider=${provider}, model=${EMBED_MODEL:-<unset>}). Vector was empty or wrong shape." >&2
+    exit 1
+  }
+  echo "$vec"
+}
+
+sha() {
+  if command -v sha256sum &>/dev/null; then
+    echo -n "$1" | sha256sum | cut -d' ' -f1
+  else
+    echo -n "$1" | shasum -a 256 | cut -d' ' -f1
+  fi
+}
+
+sha_file() {
+  local file="$1"
+  if command -v sha256sum &>/dev/null; then
+    sha256sum "$file" | cut -d' ' -f1
+  else
+    shasum -a 256 "$file" | awk '{print $1}'
+  fi
+}
+
+file_mime() {
+  local file="$1"
+  if command -v file >/dev/null 2>&1; then
+    file --brief --mime-type "$file" 2>/dev/null || echo "application/octet-stream"
+  else
+    echo "application/octet-stream"
+  fi
+}
+
+require_s3() {
+  [ -n "${S3_BUCKET:-}" ] || { echo "Set S3_BUCKET in $BT_CONF" >&2; return 1; }
+  command -v aws >/dev/null 2>&1 || { echo "AWS CLI required for S3 artifact sync" >&2; return 1; }
+}
+
+s3_uri_for_key() {
+  local key="$1"
+  echo "s3://${S3_BUCKET}/${key}"
+}
+
+s3_put_file() {
+  local file="$1" key="$2" mime="$3"
+  local -a cmd=(aws s3api put-object
+    --bucket "$S3_BUCKET"
+    --key "$key"
+    --body "$file"
+    --content-type "$mime"
+    --server-side-encryption "aws:kms")
+
+  [ -n "${S3_REGION:-}" ] && cmd+=(--region "$S3_REGION")
+  [ -n "${S3_KMS_KEY_ID:-}" ] && cmd+=(--ssekms-key-id "$S3_KMS_KEY_ID")
+  [ -n "${AWS_PROFILE:-}" ] && cmd+=(--profile "$AWS_PROFILE")
+
+  "${cmd[@]}" >/dev/null
+}
+
+is_textual_file() {
+  local file="$1" mime="$2"
+  [[ "$mime" == text/* ]] && return 0
+  case "$file" in
+    *.md|*.txt|*.json|*.jsonl|*.yaml|*.yml|*.sql|*.ts|*.js|*.tsx|*.jsx|*.sh|*.zsh|*.xml|*.csv|*.log|*.mdc)
+      return 0
+      ;;
+  esac
+  return 1
+}
+
+detect_artifact_language() {
+  local file="$1"
+  case "$file" in
+    *.sh) echo "bash" ;;
+    *.zsh) echo "zsh" ;;
+    *.bash) echo "bash" ;;
+    *.js|*.mjs|*.cjs) echo "javascript" ;;
+    *.ts|*.tsx) echo "typescript" ;;
+    *.jsx) echo "javascript" ;;
+    *.py) echo "python" ;;
+    *.sql) echo "sql" ;;
+    *.md|*.mdc) echo "markdown" ;;
+    *.json) echo "json" ;;
+    *.yaml|*.yml) echo "yaml" ;;
+    *) echo "" ;;
+  esac
+}
+
+read_text_snippet() {
+  local file="$1" max="${2:-16000}"
+  python3 -c "import pathlib,sys; p=pathlib.Path(sys.argv[1]); n=int(sys.argv[2]); print(p.read_bytes()[:n].decode('utf-8','replace'))" "$file" "$max"
+}
+
+tags_to_json() {
+  local tags="${1:-}"
+  jq -Rn --arg tags "$tags" '$tags | split(",") | map(gsub("^\\s+|\\s+$";"")) | map(select(length > 0))'
+}
+
+json_escape() {
+  jq -Rn --arg s "$1" '$s'
+}
+
+# ============================================================
+# OpenTelemetry instrumentation (OTLP/HTTP JSON)
+# ============================================================
+# Emits spans to OTEL_ENDPOINT/v1/traces when configured.
+# All emission is fire-and-forget (background curl).
+# When OTEL_ENDPOINT is empty, all functions are no-ops.
+
+_OTEL_TRACE_ID=""
+_OTEL_ROOT_SPAN_ID=""
+_OTEL_SERVICE="${OTEL_SERVICE_NAME:-brain-trust}"
+
+otel_enabled() {
+  [ -n "${OTEL_ENDPOINT:-}" ]
+}
+
+otel_hex() {
+  # generate N random hex bytes
+  local n="${1:-16}"
+  if command -v openssl &>/dev/null; then
+    openssl rand -hex "$n" 2>/dev/null
+  else
+    head -c "$n" /dev/urandom 2>/dev/null | od -An -tx1 | tr -d ' \n' | head -c "$((n * 2))"
+  fi
+}
+
+otel_time_ns() {
+  # nanosecond timestamp (seconds * 1e9)
+  local s
+  s=$(date +%s)
+  echo "${s}000000000"
+}
+
+otel_init() {
+  # Generate a trace_id for the current CLI invocation
+  otel_enabled || return 0
+  _OTEL_TRACE_ID=$(otel_hex 16)
+  _OTEL_ROOT_SPAN_ID=$(otel_hex 8)
+}
+
+otel_span_start() {
+  # Usage: otel_span_start VAR_NAME "span.name"
+  # Stores start time in the named variable
+  otel_enabled || return 0
+  local var_name="$1"
+  eval "${var_name}_start=$(otel_time_ns)"
+  eval "${var_name}_span_id=$(otel_hex 8)"
+  eval "${var_name}_name=\"$2\""
+}
+
+otel_span_end() {
+  # Usage: otel_span_end VAR_NAME [status_code] [parent_span_id] [key1=val1 key2=val2 ...]
+  # Sends completed span to OTLP endpoint
+  otel_enabled || return 0
+  local var_name="$1"
+  local status_code="${2:-0}"  # 0=Unset, 1=Ok, 2=Error
+  local parent_span="${3:-$_OTEL_ROOT_SPAN_ID}"
+  shift 3 2>/dev/null || true
+
+  local start_ns end_ns span_id span_name
+  eval "start_ns=\${${var_name}_start:-0}"
+  eval "span_id=\${${var_name}_span_id:-$(otel_hex 8)}"
+  eval "span_name=\${${var_name}_name:-unknown}"
+  end_ns=$(otel_time_ns)
+
+  # build attributes array from remaining args
+  local attrs='[]'
+  local extra_attrs=""
+  for kv in "$@"; do
+    local k="${kv%%=*}"
+    local v="${kv#*=}"
+    extra_attrs+="{\"key\":\"$k\",\"value\":{\"stringValue\":\"$v\"}},"
+  done
+
+  # standard attributes
+  local std_attrs=""
+  std_attrs+="{\"key\":\"bt.owner_id\",\"value\":{\"stringValue\":\"${OWNER_ID:-}\"}},"
+  std_attrs+="{\"key\":\"bt.command\",\"value\":{\"stringValue\":\"${span_name}\"}},"
+  [ -n "${_BT_PROJECT:-}" ] && std_attrs+="{\"key\":\"bt.project\",\"value\":{\"stringValue\":\"${_BT_PROJECT}\"}},"
+  [ -n "${_BT_REPO:-}" ] && std_attrs+="{\"key\":\"bt.repo\",\"value\":{\"stringValue\":\"${_BT_REPO}\"}},"
+
+  local all_attrs="${std_attrs}${extra_attrs}"
+  all_attrs="${all_attrs%,}"  # remove trailing comma
+
+  local payload
+  payload=$(cat <<OTLP
+{
+  "resourceSpans": [{
+    "resource": {
+      "attributes": [
+        {"key": "service.name", "value": {"stringValue": "${_OTEL_SERVICE}"}},
+        {"key": "service.version", "value": {"stringValue": "2.0"}},
+        {"key": "host.name", "value": {"stringValue": "$(hostname -s 2>/dev/null || echo unknown)"}}
+      ]
+    },
+    "scopeSpans": [{
+      "scope": {"name": "brain-cli", "version": "${BRAIN_VERSION}"},
+      "spans": [{
+        "traceId": "${_OTEL_TRACE_ID}",
+        "spanId": "${span_id}",
+        "parentSpanId": "${parent_span}",
+        "name": "${span_name}",
+        "kind": 3,
+        "startTimeUnixNano": "${start_ns}",
+        "endTimeUnixNano": "${end_ns}",
+        "status": {"code": ${status_code}},
+        "attributes": [${all_attrs}]
+      }]
+    }]
+  }]
+}
+OTLP
+)
+
+  # fire-and-forget: background curl, discard output
+  curl -sf -X POST "${OTEL_ENDPOINT}/v1/traces" \
+    -H "Content-Type: application/json" \
+    -d "$payload" >/dev/null 2>&1 &
+}
+
+rpc() {
+  # call a PostgREST RPC function
+  local fn="$1"; shift
+  curl -sf "${BT_URL}/rpc/${fn}" "${H[@]}" -d "$1"
+}
+
+rest() {
+  # direct table access; logs HTTP errors to ${BT_DIR}/cli.log instead of swallowing them.
+  # Stdout matches the previous `curl -sf` contract: response body on success, empty on failure.
+  # Returns non-zero on transport errors or non-2xx HTTP, so callers' `|| echo "[]"` fallbacks still work.
+  local path="$1"; shift
+  local out http_code body
+  out=$(curl -s -w $'\n%{http_code}' "${BT_URL}/${path}" "${H[@]}" "$@") || {
+    {
+      printf '%s rest %s -> curl transport failure (exit %s)\n' \
+        "$(date +%Y-%m-%dT%H:%M:%S)" "$path" "$?"
+    } >> "${BT_DIR}/cli.log" 2>/dev/null || true
+    return 1
+  }
+  http_code="${out##*$'\n'}"
+  body="${out%$'\n'*}"
+  if [ -z "$http_code" ] || [ "$http_code" -lt 200 ] || [ "$http_code" -ge 300 ]; then
+    {
+      printf '%s rest %s -> HTTP %s\n' \
+        "$(date +%Y-%m-%dT%H:%M:%S)" "$path" "${http_code:-?}"
+      printf '  body: %s\n' \
+        "$(printf '%s' "$body" | head -c 500 | tr '\n' ' ')"
+    } >> "${BT_DIR}/cli.log" 2>/dev/null || true
+    # v1.2.0: surface HTTP errors to stderr by default. Set BT_QUIET=1 to
+    # silence (e.g. when callers have an `|| echo "[]"` fallback they don't
+    # want noisy). BT_DEBUG=1 additionally appends the response body.
+    if [ "${BT_QUIET:-0}" != "1" ]; then
+      printf 'brain: rest %s -> HTTP %s (see %s/cli.log)\n' \
+        "$path" "${http_code:-?}" "${BT_DIR}" >&2
+      if [ "${BT_DEBUG:-0}" = "1" ]; then
+        printf '  body: %s\n' \
+          "$(printf '%s' "$body" | head -c 500 | tr '\n' ' ')" >&2
+      fi
+    fi
+    return 1
+  fi
+  printf '%s' "$body"
+}
+
+# ============================================================
+# search
+# ============================================================
+cmd_search() {
+  otel_span_start _otel_search "brain.search"
+  local q="" p="" n=10 a="0.5" s="" repo=""
+  local -a q_parts=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -p|--project) p="$2"; shift 2;;
+      -n|--limit) n="$2"; shift 2;;
+      -a|--alpha) a="$2"; shift 2;;
+      -s|--scope) s="$2"; shift 2;;
+      -r|--repo) repo="$2"; shift 2;;
+      *) q_parts+=("$1"); shift;;
+    esac
+  done
+  q="${q_parts[*]}"
+  [ -z "$q" ] && { echo "Usage: brain search \"query\" [-p project] [-s scope] [-r repo] [-n limit]" >&2; exit 1; }
+  _BT_PROJECT="${p:-}" _BT_REPO="${repo:-}"
+  local emb; emb=$(embed "$q")
+  rpc search "$(jq -n \
+    --arg q "$q" --argjson e "$emb" --arg c "$OWNER_ID" \
+    --argjson n "$n" --arg p "${p:-}" --arg s "${s:-}" --argjson a "$a" \
+    --arg r "${repo:-}" \
+    '{q:$q,q_embedding:$e,caller:$c,n:$n,a:$a,
+      p:(if $p=="" then null else $p end),
+      s:(if $s=="" then null else $s end),
+      r:(if $r=="" then null else $r end)}')" \
+  | jq -r '.[] | "[\(.score|tostring|.[0:5])] \(.kind) \(.title // "(untitled)")" + (if .repo then " [repo=\(.repo)]" else "" end),
+    (if .heading then "  § \(.heading)" else "" end),
+    "  \(.content|.[0:300])", "---"'
+  otel_span_end _otel_search 1 "" "bt.query=${q}" "bt.limit=${n}"
+}
+
+# ============================================================
+# capture
+# ============================================================
+cmd_capture() {
+  otel_span_start _otel_capture "brain.capture"
+  local content="" title="" project="" scope="team" kind="thought" au="user" review="" jira=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -t|--title) title="$2"; shift 2;; -p|--project) project="$2"; shift 2;;
+      -s|--scope) scope="$2"; shift 2;; -k|--kind) kind="$2"; shift 2;;
+      --review) review="$2"; shift 2;;
+      --jira) jira="$2"; shift 2;;
+      --agent) au="agent"; shift;; *) content="$1"; shift;;
+    esac
+  done
+  [ -z "$content" ] && content=$(cat)
+  [ -z "$content" ] && { echo "Usage: brain capture \"text\" [-t title] [-p project] [-s scope] [-k kind] [--review approved|pending|rejected] [--jira KEY] [--agent]" >&2; exit 1; }
+
+  case "${review}" in ""|approved|pending|rejected) :;;
+    *) echo "brain: --review must be one of approved|pending|rejected (got: ${review})" >&2; exit 1;;
+  esac
+
+  local h; h=$(sha "$content")
+  local dup; dup=$(rest "entries?content_hash=eq.${h}&select=id")
+  # Print the id as the FIRST token (id-first contract, same as the success path
+  # below) so callers like `brain task capture` can `awk 'NR==1{print $1}'` it.
+  [ "$dup" != "[]" ] && { echo "$(echo "$dup" | jq -r '.[0].id')  (exists)"; return 0; }
+
+  local emb; emb=$(embed "$content")
+  # Jira keying: stamp meta.jira_key + tags ['jira', KEY] so brain becomes the
+  # ticket's cross-session memory (brain jira context/recall filter on this).
+  local meta='{}' tags='[]'
+  if [ -n "$jira" ]; then
+    meta=$(jq -n --arg k "$jira" '{jira_key:$k}')
+    tags=$(jq -n --arg k "$jira" '["jira",$k]')
+  fi
+  local res; res=$(rest entries -d "$(jq -n \
+    --arg c "$content" --arg t "${title:-}" --argjson e "$emb" \
+    --arg k "$kind" --arg p "${project:-}" --arg s "$scope" \
+    --arg o "$OWNER_ID" --arg au "$au" --arg h "$h" --arg rv "${review:-}" \
+    --argjson meta "$meta" --argjson tags "$tags" \
+    '{content:$c,title:(if $t=="" then null else $t end),
+      embedding:$e,kind:$k,scope:$s,owner_id:$o,author:$au,
+      content_hash:$h,project:(if $p=="" then null else $p end),
+      meta:$meta,tags:$tags}
+     | if $rv != "" then .review = $rv else . end')")
+  local id; id=$(echo "$res" | jq -r '.[0].id // .id // empty')
+
+  if [ -n "$review" ] && [ -n "$id" ]; then
+    local actual; actual=$(echo "$res" | jq -r '.[0].review // empty')
+    if [ "$actual" != "$review" ]; then
+      rest "entries?id=eq.${id}" -X PATCH \
+        -d "$(jq -n --arg r "$review" '{review:$r}')" > /dev/null \
+        || echo "warn: capture stored as ${actual}, --review ${review} PATCH failed (see ${BT_DIR}/cli.log)" >&2
+    fi
+  fi
+
+  echo "${id}  ${kind}  ${scope}  ${title:-$(echo "$content"|head -c 60)}"
+
+  # log it
+  rest log -d "$(jq -n --arg s "Captured: ${title:-$(echo "$content"|head -c 40)}" \
+    --arg p "${project:-}" --arg o "$OWNER_ID" \
+    '{kind:"capture",summary:$s,owner_id:$o,
+      project:(if $p=="" then null else $p end)}')" > /dev/null 2>&1 || true
+  otel_span_end _otel_capture 1 "" "bt.kind=${kind}" "bt.scope=${scope}"
+}
+
+# ============================================================
+# ingest
+# ============================================================
+cmd_ingest() {
+  local file="" title="" project="" scope="team"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in -t|--title) title="$2"; shift 2;; -p|--project) project="$2"; shift 2;; -s|--scope) scope="$2"; shift 2;; *) file="$1"; shift;; esac
+  done
+  [ -z "$file" ] || [ ! -f "$file" ] && { echo "Usage: brain ingest FILE [-t title] [-p project]" >&2; exit 1; }
+
+  local content; content=$(cat "$file")
+  [ -z "$title" ] && title=$(basename "$file" | sed 's/\.[^.]*$//')
+  local h; h=$(sha "$content")
+
+  local dup; dup=$(rest "entries?content_hash=eq.${h}&select=id")
+  [ "$dup" != "[]" ] && { echo "Exists: $(echo "$dup" | jq -r '.[0].id')"; return 0; }
+
+  # create parent doc (no embedding on container — it's the shell)
+  local doc_id; doc_id=$(rest entries -d "$(jq -n \
+    --arg c "$content" --arg t "$title" --arg p "${project:-}" \
+    --arg s "$scope" --arg o "$OWNER_ID" --arg h "$h" --arg sp "$file" \
+    '{content:$c,title:$t,kind:"document",scope:$s,owner_id:$o,
+      author:"user",content_hash:$h,
+      project:(if $p=="" then null else $p end),
+      meta:{source_path:$sp}}')" | jq -r '.[0].id // .id // empty')
+
+  echo "Ingesting: ${title}"
+
+  # chunk by headings
+  local i=0 chunk="" heading=""
+  _flush_chunk() {
+    [ -z "$chunk" ] && return
+    local emb; emb=$(embed "$chunk")
+    rest entries -d "$(jq -n \
+      --arg c "$chunk" --arg hd "${heading:-}" --arg pid "$doc_id" \
+      --argjson ci "$i" --argjson e "$emb" --arg p "${project:-}" \
+      --arg s "$scope" --arg o "$OWNER_ID" \
+      '{content:$c,kind:"chunk",parent_id:$pid,chunk_index:$ci,
+        heading:(if $hd=="" then null else $hd end),
+        embedding:$e,scope:$s,owner_id:$o,author:"user",
+        project:(if $p=="" then null else $p end)}')" > /dev/null
+    ((i++)); echo "  chunk ${i}"
+    chunk=""
+  }
+
+  while IFS= read -r line || [ -n "$line" ]; do
+    if [[ "$line" =~ ^##+ ]]; then
+      _flush_chunk
+      heading="$line"
+      chunk="${line}"$'\n'
+    else
+      chunk+="${line}"$'\n'
+      [ ${#chunk} -gt 2000 ] && _flush_chunk
+    fi
+  done < "$file"
+  _flush_chunk
+
+  echo "Done: ${doc_id} (${i} chunks)"
+  rest log -d "$(jq -n --arg s "Ingested: ${title} (${i} chunks)" \
+    --arg p "${project:-}" --arg o "$OWNER_ID" --arg eid "$doc_id" \
+    '{kind:"ingest",summary:$s,owner_id:$o,entry_id:$eid,
+      project:(if $p=="" then null else $p end),data:{chunks:'$i'}}')" > /dev/null 2>&1 || true
+}
+
+# ============================================================
+# browse
+# ============================================================
+cmd_browse() {
+  local n=20 p="" s="" k="" repo=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in -n|--limit) n="$2"; shift 2;; -p|--project) p="$2"; shift 2;; -s|--scope) s="$2"; shift 2;; -k|--kind) k="$2"; shift 2;; -r|--repo) repo="$2"; shift 2;; *) shift;; esac
+  done
+  rpc browse "$(jq -n --arg c "$OWNER_ID" --argjson n "$n" \
+    --arg p "${p:-}" --arg s "${s:-}" --arg k "${k:-}" --arg r "${repo:-}" \
+    '{caller:$c,n:$n,p:(if $p=="" then null else $p end),
+      s:(if $s=="" then null else $s end),
+      k:(if $k=="" then null else $k end),
+      r:(if $r=="" then null else $r end)}')" \
+  | jq -r '.[] | "\(.created_at|.[0:16]) \(.kind) [\(.scope)]" + (if .repo then " [repo=\(.repo)]" else "" end) + " \(.title // "(untitled)")",
+    "  \(.content|.[0:200])", "---"'
+}
+
+# ============================================================
+# expand
+# ============================================================
+cmd_expand() {
+  local target="${1:-}" radius="${2:-2}"
+  [ -z "$target" ] && { echo "Usage: brain expand ID [radius]" >&2; exit 1; }
+  rpc expand "$(jq -n --arg t "$target" --argjson r "$radius" '{target:$t,radius:$r}')" \
+  | jq -r '.[] | (if .heading then "§ \(.heading)" else "" end), "\(.content)", "---"'
+}
+
+# ============================================================
+# sessions
+# ============================================================
+cmd_sessions() {
+  local sub="${1:-}"; shift 2>/dev/null || true
+  case "$sub" in
+    list) cmd_sessions_list "$@" ;;
+    show) cmd_sessions_show "$@" ;;
+    ""|help)
+      cat << 'SHELP'
+brain sessions
+
+  brain sessions list [-p project] [-r repo] [--source pai|cursor] [-n limit]
+  brain sessions show SESSION_ID [-n limit]
+
+List and inspect agent sessions grouped by session ID.
+SHELP
+      ;;
+    *) cmd_sessions_list "$sub" "$@" ;;
+  esac
+}
+
+cmd_sessions_list() {
+  local n=30 p="" repo="" src=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n|--limit) n="$2"; shift 2 ;;
+      -p|--project) p="$2"; shift 2 ;;
+      -r|--repo) repo="$2"; shift 2 ;;
+      --source) src="$2"; shift 2 ;;
+      *) shift ;;
+    esac
+  done
+
+  rpc sessions "$(jq -n --arg c "$OWNER_ID" --argjson n "$n" \
+    --arg p "${p:-}" --arg r "${repo:-}" --arg src "${src:-}" \
+    '{caller:$c,n:$n,
+      p:(if $p=="" then null else $p end),
+      r:(if $r=="" then null else $r end),
+      src:(if $src=="" then null else $src end)}')" \
+  | jq -r '.[] | "\(.last_seen|.[0:16]) \(.session_id|.[0:12])… [\(.source_system)] \(.tool_name // "-") repo=\(.repo // "-") entries=\(.entry_count) artifacts=\(.artifact_count)", "---"'
+}
+
+cmd_sessions_show() {
+  local session_id="${1:-}" n=20
+  [ -z "$session_id" ] && { echo "Usage: brain sessions show SESSION_ID [-n limit]" >&2; return 1; }
+  shift
+  while [[ $# -gt 0 ]]; do
+    case "$1" in -n|--limit) n="$2"; shift 2 ;; *) shift ;; esac
+  done
+
+  echo "=== Session: ${session_id} ==="
+  echo ""
+
+  echo "--- Entries ---"
+  rest "entries?source_session_id=eq.${session_id}&select=id,created_at,title,kind,source_system,repo,tool_name&order=created_at.desc&limit=${n}" \
+    | jq -r '.[] | "\(.created_at|.[0:16]) [\(.kind)] \(.title // "(untitled)") [\(.tool_name // "-")]"'
+
+  echo ""
+  echo "--- Artifacts ---"
+  rest "artifacts?source_session_id=eq.${session_id}&select=id,created_at,source_path,size_bytes,tool_name,storage_uri&order=created_at.desc&limit=${n}" \
+    | jq -r '.[] | "\(.created_at|.[0:16]) \(.source_path | split("/") | last) (\(.size_bytes)B) [\(.tool_name // "-")]", "  \(.storage_uri // "no S3")"'
+}
+
+# ============================================================
+# log
+# ============================================================
+cmd_log() {
+  local summary="" kind="milestone" status="" project="" worker="" data="{}"
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -k|--type|--kind) kind="$2"; shift 2;; --status) status="$2"; shift 2;;
+      -p|--project) project="$2"; shift 2;; -w|--worker) worker="$2"; shift 2;;
+      -d|--data) data="$2"; shift 2;; *) summary="$1"; shift;;
+    esac
+  done
+  [ -z "$summary" ] && { echo "Usage: brain log \"summary\" [-k type] [--status s] [-p project]" >&2; exit 1; }
+  rest log -d "$(jq -n \
+    --arg s "$summary" --arg k "$kind" --arg st "${status:-}" \
+    --arg p "${project:-}" --arg o "$OWNER_ID" --arg w "${worker:-}" \
+    --argjson d "$data" \
+    '{summary:$s,kind:$k,owner_id:$o,data:$d,
+      status:(if $st=="" then null else $st end),
+      project:(if $p=="" then null else $p end),
+      worker:(if $w=="" then null else $w end)}')" > /dev/null
+  echo "Logged: [${kind}] ${summary}"
+}
+
+# ============================================================
+# timeline
+# ============================================================
+cmd_timeline() {
+  local n=30 p="" k="" since=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in -n|--limit) n="$2"; shift 2;; -p|--project) p="$2"; shift 2;; -k|--type) k="$2"; shift 2;; --since) since="$2"; shift 2;; *) shift;; esac
+  done
+  rpc timeline "$(jq -n --argjson n "$n" --arg p "${p:-}" --arg k "${k:-}" --arg s "${since:-}" \
+    '{n:$n,p:(if $p=="" then null else $p end),
+      k:(if $k=="" then null else $k end),
+      since:(if $s=="" then null else $s end)}')" \
+  | jq -r '.[] | "\(.ts|.[0:16]) [\(.kind)] \(.status // "-") \(.summary)",
+    (if .worker then "  worker: \(.worker)" else "" end)'
+}
+
+# ============================================================
+# recall (OBSERVE helper)
+# ============================================================
+cmd_recall() {
+  local q="${1:-}" p="${2:-}"
+  [ -z "$q" ] && { echo "Usage: brain recall \"topic\" [project]" >&2; exit 1; }
+  echo "── personal ──"
+  cmd_search "$q" -n 3 -s personal ${p:+-p "$p"} 2>/dev/null || echo "(none)"
+  echo ""
+  echo "── team ──"
+  cmd_search "$q" -n 5 -s team ${p:+-p "$p"} 2>/dev/null || echo "(none)"
+  echo ""
+  echo "── events ──"
+  cmd_timeline -n 5 ${p:+-p "$p"} 2>/dev/null || echo "(none)"
+}
+
+# ============================================================
+# jira — brain as the MEMORY + read-only ANALYTICS layer over Jira.
+# brain NEVER writes to Jira; ticket state/workflow stays with acli + the
+# Jira PAI skills. brain keys its knowledge on meta.jira_key.
+# ============================================================
+cmd_jira() {
+  otel_span_start _otel_jira "brain.jira"
+  local sub="${1:-help}"; shift 2>/dev/null || true
+  case "$sub" in
+    capture) _jira_capture "$@" ;;
+    context) _jira_context "${1:-}" ;;
+    recall)  _jira_recall "${1:-}" ;;
+    stats)   _jira_stats "$@" ;;
+    burndown) _jira_burndown "$@" ;;
+    velocity) _jira_velocity "$@" ;;
+    help|"") cat << 'JH'
+brain jira — brain as Jira's cross-session memory + read-only analytics (never writes Jira)
+
+  brain jira capture KEY "text" [-k finding|decision|thought] [-s scope]
+        capture a finding/decision tied to a Jira key (brain capture --jira KEY)
+  brain jira context KEY        everything brain knows about a ticket (entries + events)
+  brain jira recall KEY         pull the ticket summary (acli) + semantic prior art
+  brain jira stats   [--project P | --jql J]   live board counts by status (read-only)
+  brain jira burndown --project P [--days N]    burndown from the live board (read-only)
+  brain jira velocity --project P [--weeks N]   done-per-week from the live board
+JH
+      ;;
+    *) echo "brain jira: unknown subcommand '$sub'" >&2; cmd_jira help; otel_span_end _otel_jira 0 ""; return 1 ;;
+  esac
+  otel_span_end _otel_jira 1 "" "bt.jira_sub=${sub}"
+}
+
+_jira_acli() { command -v "${ACLI_BIN:-acli}" >/dev/null 2>&1; }
+_jira_acli_warn() { echo "brain jira: acli not found or not authed (Atlassian CLI required for live board reads)" >&2; }
+
+# capture a finding/decision against a Jira key (Tier 1)
+_jira_capture() {
+  local key="$1"; shift 2>/dev/null || true
+  local text="" kind="finding" scope="team"
+  while [[ $# -gt 0 ]]; do case "$1" in -k|--kind) kind="$2"; shift 2;; -s|--scope) scope="$2"; shift 2;; *) text="$1"; shift;; esac; done
+  [ -z "$key" ] || [ -z "$text" ] && { echo "Usage: brain jira capture KEY \"text\" [-k finding|decision]" >&2; return 1; }
+  cmd_capture "$text" -t "$key" -k "$kind" -s "$scope" --jira "$key" --agent
+}
+
+# everything brain knows about a ticket (Tier 1): entries keyed to it + log
+_jira_context() {
+  local key="$1"
+  [ -z "$key" ] && { echo "Usage: brain jira context KEY" >&2; return 1; }
+  echo "── brain knowledge for ${key} ──"
+  rest "entries?meta->>jira_key=eq.${key}&select=created_at,kind,title,content,author&order=created_at.desc" 2>/dev/null \
+    | jq -r 'if length==0 then "(no captured knowledge yet — capture with: brain jira capture '"$key"' \"...\")" else .[] | "\(.created_at[0:16]) [\(.kind)/\(.author)] \(.title // "")\n  \(.content[0:240])" end'
+  echo ""
+  echo "── related events ──"
+  rest "log?summary=ilike.*${key}*&select=ts,kind,status,summary&order=ts.desc&limit=10" 2>/dev/null \
+    | jq -r 'if length==0 then "(none)" else .[] | "\(.ts[0:16]) [\(.kind)] \(.status // "-") \(.summary)" end' 2>/dev/null || echo "(none)"
+}
+
+# pull the ticket summary (acli) then semantic-search brain for prior art (Tier 2)
+_jira_recall() {
+  local key="$1"
+  [ -z "$key" ] && { echo "Usage: brain jira recall KEY" >&2; return 1; }
+  _jira_acli || { _jira_acli_warn; return 1; }
+  local summary; summary=$("${ACLI_BIN:-acli}" jira workitem view "$key" --json 2>/dev/null | jq -r '.fields.summary // empty' 2>/dev/null)
+  [ -z "$summary" ] && summary="$key"
+  echo "── ${key}: ${summary} ──"
+  echo "── prior art in brain (semantic) ──"
+  cmd_search "$summary" -n 5 2>/dev/null || echo "(none)"
+}
+
+# read-only board analytics via acli JSON (Tier 3) — never writes Jira
+_jira_search_json() {  # echoes acli search JSON for a project/jql
+  local project="" jql="" n=200
+  while [[ $# -gt 0 ]]; do case "$1" in --project) project="$2"; shift 2;; --jql) jql="$2"; shift 2;; -n) n="$2"; shift 2;; *) shift;; esac; done
+  [ -z "$jql" ] && jql="project = ${project:-DSNPAYMVP}"
+  "${ACLI_BIN:-acli}" jira workitem search --jql "$jql" --limit "$n" --json 2>/dev/null
+}
+
+_jira_stats() {
+  _jira_acli || { _jira_acli_warn; return 1; }
+  local j; j=$(_jira_search_json "$@")
+  [ -z "$j" ] && { echo "(no issues)"; return 0; }
+  echo "── status ──"; echo "$j" | jq -r 'group_by(.fields.status.name)[] | "\(.[0].fields.status.name)\t\(length)"' | column -t -s $'\t'
+  echo "── priority ──"; echo "$j" | jq -r 'group_by(.fields.priority.name)[] | "\(.[0].fields.priority.name)\t\(length)"' | column -t -s $'\t'
+  echo "── assignee ──"; echo "$j" | jq -r 'group_by(.fields.assignee.displayName)[] | "\((.[0].fields.assignee.displayName) // "Unassigned")\t\(length)"' | column -t -s $'\t'
+}
+
+_jira_burndown() {
+  _jira_acli || { _jira_acli_warn; return 1; }
+  local days=14; local args=(); while [[ $# -gt 0 ]]; do case "$1" in --days) days="$2"; shift 2;; *) args+=("$1"); shift;; esac; done
+  local j; j=$(_jira_search_json "${args[@]}")
+  [ -z "$j" ] && { echo "(no issues)"; return 0; }
+  local haveres; haveres=$(echo "$j" | jq -r '[.[]|select((.fields.resolutiondate // "")!="")] | length')
+  if [ "${haveres:-0}" -gt 0 ]; then
+    echo "$j" | jq -r --argjson days "$days" '
+      [.[] | {created:(.fields.created[0:10]), resolved:((.fields.resolutiondate // "")[0:10])}] as $items
+      | ($items|length) as $total
+      | [range(0;$days+1)] | reverse | .[] | (now - (.*86400)) | strftime("%Y-%m-%d") as $d
+      | "\($d)  remaining:\([$items[]|select(.created<=$d and (.resolved=="" or .resolved>$d))]|length)/\($total)"' 2>/dev/null
+  else
+    echo "── scope snapshot (resolutiondate unavailable in board export) ──"
+    echo "$j" | jq -r '"  open: \([.[]|select(.fields.status.name!="Done" and .fields.status.name!="Closed")]|length)  /  total: \(length)"'
+    echo "  (tip: live burndown-over-time needs resolutiondate; use brain task burndown for tracked cycles)"
+  fi
+}
+
+_jira_velocity() {
+  _jira_acli || { _jira_acli_warn; return 1; }
+  local weeks=6; local args=(); while [[ $# -gt 0 ]]; do case "$1" in --weeks) weeks="$2"; shift 2;; *) args+=("$1"); shift;; esac; done
+  local j; j=$(_jira_search_json "${args[@]}")
+  [ -z "$j" ] && { echo "(no issues)"; return 0; }
+  local resolved; resolved=$(echo "$j" | jq -r '[.[]|select((.fields.resolutiondate // "")!="")] | length')
+  if [ "${resolved:-0}" -gt 0 ]; then
+    echo "── done per ISO week (by resolution date) ──"
+    echo "$j" | jq -r '[.[]|select((.fields.resolutiondate // "")!="")|(.fields.resolutiondate[0:10])]
+      | group_by(.[0:7]) | .[] | "\(.[0][0:7])\t\(length) resolved"' 2>/dev/null | column -t -s $'\t'
+  else
+    # acli default search omits resolutiondate → fall back to current done/total snapshot
+    echo "── throughput snapshot (resolutiondate unavailable in board export) ──"
+    echo "$j" | jq -r '"  done: \([.[]|select(.fields.status.name=="Done" or .fields.status.name=="Closed")]|length)  /  total: \(length)"'
+    echo "  (tip: per-week velocity needs resolutiondate; use the brain task cycle/velocity for tracked sprints)"
+  fi
+}
+
+# ============================================================
+# learn (LEARN helper)
+# ============================================================
+cmd_learn() {
+  local title="${1:-Finding}"
+  shift 2>/dev/null || true
+  local p="" explain=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --explain) explain=1; shift;;
+      -p|--project) p="$2"; shift 2;;
+      *) [ -z "$p" ] && p="$1"; shift;;
+    esac
+  done
+  local content; content=$(cat)
+  [ -z "$content" ] && { echo "Usage: echo \"text\" | brain learn \"title\" [project] [--explain]" >&2; exit 1; }
+
+  if [ "$explain" = "1" ]; then
+    # Wrap raw content in teaching-grade prose scaffolding so the agent
+    # writing this content is reminded to explain the WHY, not just the WHAT.
+    local enriched
+    enriched=$(cat <<EOF
+${content}
+
+---
+
+## Why this matters
+(Teach-back: explain the underlying principle so a teammate reading this six
+months from now can apply it to a different problem. Avoid restating what
+the code does — focus on the constraint, the tradeoff, or the insight.)
+
+## What you would have done before
+(One sentence: the manual approach this replaces, or the workaround this avoids.)
+
+## Where this generalizes
+(One sentence: where else in our stack the same idea applies.)
+EOF
+)
+    cmd_capture "$enriched" -t "$title" -s team -k finding --agent ${p:+-p "$p"}
+  else
+    cmd_capture "$content" -t "$title" -s team -k finding --agent ${p:+-p "$p"}
+  fi
+}
+
+# ============================================================
+# review — manage pending entries (approve/reject the review gate)
+# ============================================================
+cmd_review() {
+  otel_span_start _otel_review "brain.review"
+  local sub="${1:-list}"
+  shift 2>/dev/null || true
+
+  case "$sub" in
+    list|ls|"")
+      local n=30 p="" s="team" au="" k=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -n|--limit) n="$2"; shift 2;;
+          -p|--project) p="$2"; shift 2;;
+          -s|--scope) s="$2"; shift 2;;
+          -k|--kind) k="$2"; shift 2;;
+          --author) au="$2"; shift 2;;
+          *) shift;;
+        esac
+      done
+      local path="entries?review=eq.pending&select=id,project,scope,kind,author,created_at,title&order=created_at.desc&limit=${n}"
+      [ -n "$p" ]  && path+="&project=eq.${p}"
+      [ -n "$s" ]  && path+="&scope=eq.${s}"
+      [ -n "$au" ] && path+="&author=eq.${au}"
+      [ -n "$k" ]  && path+="&kind=eq.${k}"
+      rest "$path" \
+        | jq -r '.[] | "\(.created_at|.[0:16]) \(.id|.[0:8]) [\(.scope)/\(.author)] \(.project // "-") \(.kind) — \(.title // "(untitled)")"'
+      ;;
+
+    show|get)
+      local id="${1:-}"
+      [ -z "$id" ] && { echo "Usage: brain review show ID" >&2; return 1; }
+      rest "entries?id=eq.${id}&select=id,title,kind,scope,project,author,review,created_at,content" \
+        | jq -r '.[] | "ID:      \(.id)\nTitle:   \(.title // "(untitled)")\nKind:    \(.kind)   Scope: \(.scope)   Project: \(.project // "-")\nAuthor:  \(.author)   Review: \(.review)\nCreated: \(.created_at)\n\n\(.content)"'
+      ;;
+
+    approve)
+      # v1.2.0: `brain review approve pending [filters] [--yes]` bulk-approves
+      # every pending entry the caller owns. Without -p it spans all projects;
+      # RLS already restricts the set to your own rows. Interactive y/N
+      # confirmation unless --yes (or stdin is a tty and --yes is absent).
+      if [ "${1:-}" = "pending" ]; then
+        shift
+        local p="" s="" k="" au="" yes=0
+        while [[ $# -gt 0 ]]; do
+          case "$1" in
+            -p|--project) p="$2"; shift 2;;
+            -s|--scope)   s="$2"; shift 2;;
+            -k|--kind)    k="$2"; shift 2;;
+            --author)     au="$2"; shift 2;;
+            --yes|-y)     yes=1; shift;;
+            *) echo "approve pending: unknown arg '$1'" >&2; return 1;;
+          esac
+        done
+        [ -z "${OWNER_ID:-}" ] && { echo "approve pending: OWNER_ID not set in ~/.braintrust/config" >&2; return 1; }
+        local q="entries?review=eq.pending&owner_id=eq.${OWNER_ID}&select=id,project,scope,title"
+        [ -n "$p" ]  && q+="&project=eq.${p}"
+        [ -n "$s" ]  && q+="&scope=eq.${s}"
+        [ -n "$k" ]  && q+="&kind=eq.${k}"
+        [ -n "$au" ] && q+="&author=eq.${au}"
+        local rows; rows=$(rest "${q}&order=created_at.asc&limit=10000") || return 1
+        local total; total=$(echo "$rows" | jq 'length')
+        if [ "$total" -eq 0 ]; then
+          echo "(no pending entries to approve for owner=${OWNER_ID}${p:+, project=${p}}${s:+, scope=${s}}${k:+, kind=${k}}${au:+, author=${au}})"
+          otel_span_end _otel_review 1 "" "bt.review_action=approve-pending" "bt.count=0"
+          return 0
+        fi
+        echo "Pending entries owned by ${OWNER_ID}: ${total}"
+        echo "$rows" | jq -r 'group_by(.project // "-")[] | "  \(.[0].project // "-"): \(length)"'
+        if [ "$yes" -ne 1 ]; then
+          if [ ! -t 0 ] || [ ! -t 1 ]; then
+            echo "" >&2
+            echo "brain: interactive confirmation required (no tty). Re-run with --yes to skip." >&2
+            return 2
+          fi
+          printf "Approve all %d entries? (y/N) " "$total"
+          local reply
+          read -r reply </dev/tty
+          case "$reply" in
+            y|Y|yes|YES) :;;
+            *) echo "aborted (no changes made)"; return 0;;
+          esac
+        fi
+        local patch_q="entries?review=eq.pending&owner_id=eq.${OWNER_ID}"
+        [ -n "$p" ]  && patch_q+="&project=eq.${p}"
+        [ -n "$s" ]  && patch_q+="&scope=eq.${s}"
+        [ -n "$k" ]  && patch_q+="&kind=eq.${k}"
+        [ -n "$au" ] && patch_q+="&author=eq.${au}"
+        patch_q+="&select=id,title"
+        local out; out=$(rest "$patch_q" -X PATCH -d '{"review":"approved"}') || return 1
+        echo "$out" | jq -r '.[]? | "approved: \(.id)  \(.title // "")"'
+        local approved; approved=$(echo "$out" | jq 'length')
+        echo "(${approved} of ${total} approved)"
+        if [ "$approved" -lt "$total" ]; then
+          echo "warn: $((total - approved)) row(s) skipped — likely RLS-blocked or already approved" >&2
+        fi
+        otel_span_end _otel_review 1 "" "bt.review_action=approve-pending" "bt.count=${approved}"
+        return 0
+      fi
+      [ $# -eq 0 ] && { echo "Usage: brain review approve { ID [ID ...] | pending [-p project] [-s scope] [-k kind] [--author who] [--yes] }" >&2; return 1; }
+      local id rc=0
+      for id in "$@"; do
+        local out
+        out=$(rest "entries?id=eq.${id}&select=id,title" -X PATCH \
+          -d '{"review":"approved"}') || { rc=1; continue; }
+        local row_id; row_id=$(echo "$out" | jq -r '.[0].id // empty')
+        if [ -z "$row_id" ]; then
+          echo "approve: ${id} — NOT FOUND" >&2
+          rc=1
+        else
+          local row_title; row_title=$(echo "$out" | jq -r '.[0].title // ""')
+          echo "approved: ${row_id}  ${row_title}"
+        fi
+      done
+      otel_span_end _otel_review 1 "" "bt.review_action=approve" "bt.count=$#"
+      return $rc
+      ;;
+
+    reject|drop)
+      # The server's review CHECK constraint only allows approved|pending,
+      # so true rejection = DELETE the row. Destructive, requires --yes.
+      local yes=0
+      local -a ids=()
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          --yes|-y) yes=1; shift;;
+          *) ids+=("$1"); shift;;
+        esac
+      done
+      [ ${#ids[@]} -eq 0 ] && { echo "Usage: brain review reject ID [ID ...] --yes" >&2; return 1; }
+      if [ "$yes" -ne 1 ]; then
+        echo "brain: reject is destructive (DELETEs the row). Re-run with --yes to confirm." >&2
+        echo "  Would delete: ${ids[*]}" >&2
+        return 2
+      fi
+      local id rc=0
+      for id in "${ids[@]}"; do
+        local out
+        out=$(rest "entries?id=eq.${id}&select=id,title" -X DELETE) || { rc=1; continue; }
+        local row_id; row_id=$(echo "$out" | jq -r '.[0].id // empty')
+        if [ -z "$row_id" ]; then
+          echo "reject: ${id} — NOT FOUND (already deleted?)" >&2
+          rc=1
+        else
+          local row_title; row_title=$(echo "$out" | jq -r '.[0].title // ""')
+          echo "deleted: ${row_id}  ${row_title}"
+        fi
+      done
+      otel_span_end _otel_review 1 "" "bt.review_action=reject" "bt.count=${#ids[@]}"
+      return $rc
+      ;;
+
+    approve-all)
+      local p="" s="team" au="agent" k=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -p|--project) p="$2"; shift 2;;
+          -s|--scope) s="$2"; shift 2;;
+          -k|--kind) k="$2"; shift 2;;
+          --author) au="$2"; shift 2;;
+          *) shift;;
+        esac
+      done
+      [ -z "$p" ] && { echo "Refusing bulk approve without -p PROJECT (safety guard)" >&2; return 1; }
+      local path="entries?review=eq.pending&project=eq.${p}&scope=eq.${s}&author=eq.${au}"
+      [ -n "$k" ] && path+="&kind=eq.${k}"
+      local out; out=$(rest "$path&select=id,title" -X PATCH -d '{"review":"approved"}') || return 1
+      echo "$out" | jq -r '.[]? | "approved: \(.id)  \(.title // "")"'
+      local count; count=$(echo "$out" | jq 'length')
+      echo "(${count} entr$( [ "$count" = "1" ] && echo y || echo ies ) approved)"
+      otel_span_end _otel_review 1 "" "bt.review_action=approve-all" "bt.project=${p}"
+      ;;
+
+    noise)
+      # Surface near-duplicate pending entries by title-similarity search.
+      # Honest limitation: this uses the existing FTS+vector search RPC, not a
+      # dedicated dedup query. It groups entries whose titles co-rank in each
+      # other's top-N search results. Good enough as a first-pass slop firewall.
+      local p="" s="team" n=50 thresh=0.55
+      while [[ $# -gt 0 ]]; do
+        case "$1" in
+          -p|--project) p="$2"; shift 2;;
+          -s|--scope) s="$2"; shift 2;;
+          -n|--limit) n="$2"; shift 2;;
+          --threshold) thresh="$2"; shift 2;;
+          *) shift;;
+        esac
+      done
+      local path="entries?review=eq.pending&select=id,title,project,scope,created_at&order=created_at.desc&limit=${n}"
+      [ -n "$p" ] && path+="&project=eq.${p}"
+      [ -n "$s" ] && path+="&scope=eq.${s}"
+      local pending; pending=$(rest "$path") || return 1
+      local total; total=$(echo "$pending" | jq 'length')
+      if [ "${total:-0}" = "0" ]; then
+        echo "No pending entries to analyze."
+        return 0
+      fi
+      echo "Analyzing ${total} pending entries for near-duplicates (threshold=${thresh})..."
+      echo ""
+      # For each pending entry, run a search using its title and see which
+      # other pending entries land in the top-3 results. Co-occurring pairs
+      # are reported as candidate duplicates.
+      local seen_pairs="" pair_key
+      echo "$pending" | jq -r '.[] | "\(.id)\t\(.title // "")"' | while IFS=$'\t' read -r id title; do
+        [ -z "$title" ] && continue
+        local emb; emb=$(embed "$title" 2>/dev/null)
+        [ -z "$emb" ] && continue
+        local hits
+        hits=$(rpc search "$(jq -n --arg q "$title" --argjson e "$emb" --arg c "$OWNER_ID" \
+          --argjson n 4 --argjson a "$thresh" --arg p "${p:-}" --arg s "${s:-}" --arg r "" \
+          '{q:$q,emb:$e,n:$n,alpha:$a,caller:$c,
+            project:(if $p=="" then null else $p end),
+            scope:(if $s=="" then null else $s end),
+            repo:(if $r=="" then null else $r end)}')" 2>/dev/null) || continue
+        echo "$hits" | jq -r --arg src_id "$id" --arg src_title "$title" \
+          '.[]? | select(.id != $src_id and (.review // "approved") == "pending")
+             | "\($src_id|.[0:8])  ↔  \(.id|.[0:8])  similarity~\(.score // 0|tostring|.[0:5])  \"\($src_title)\"  ↔  \"\(.title // "")\""'
+      done | awk '!seen[$0]++'
+      echo ""
+      echo "Tip: Run 'brain review reject ID --yes' on confirmed dupes, or 'brain review approve ID' to keep."
+      otel_span_end _otel_review 1 "" "bt.review_action=noise"
+      ;;
+
+    *)
+      cat << 'RHELP'
+brain review — manage pending review queue
+
+  brain review [list]          [-p project] [-s scope] [-k kind] [--author who] [-n limit]
+  brain review show ID
+  brain review approve ID [ID ...]                                (sets review=approved)
+  brain review approve pending [-p project] [-s scope] [-k kind] [--author who] [--yes]
+                                                                  (v1.2.0 — owner-scoped bulk;
+                                                                   prompts unless --yes)
+  brain review reject  ID [ID ...] --yes                          (DELETEs the row; --yes required)
+  brain review approve-all -p PROJECT [-s scope] [-k kind] [--author agent]
+  brain review noise [-p project] [-s scope] [-n limit] [--threshold 0.55]
+                                                                  (find near-duplicate pending
+                                                                   entries via title similarity)
+
+Notes:
+  - Server CHECK constraint only allows review IN ('approved','pending'); reject
+    is implemented as DELETE because no 'rejected' state exists.
+  - Defaults: scope=team, --author=agent (bulk). approve-all requires -p.
+  - `approve pending` is owner-scoped (won't touch other users' rows even
+    without -p), and asks for y/N confirmation unless you pass --yes.
+RHELP
+      ;;
+  esac
+}
+
+# ============================================================
+# provision
+# ============================================================
+cmd_provision() {
+  local id="${1:-}" name="${2:-}" role="${3:-member}"
+  [ -z "$id" ] || [ -z "$name" ] && { echo "Usage: brain provision ID \"Name\" [admin|member|agent]" >&2; exit 1; }
+  local key; key=$(rpc provision "$(jq -n --arg i "$id" --arg n "$name" --arg r "$role" \
+    '{p_id:$i,p_name:$n,p_role:$r}')" | jq -r '.' | tr -d '"')
+  echo "Provisioned: ${name} (${id}) as ${role}"
+  echo "Key: ${key}"
+}
+
+# ============================================================
+# stats
+# ============================================================
+cmd_stats() {
+  echo "🧠 Brain Trust"
+  echo ""
+  echo "Entries:"
+  rest "entries?select=kind&limit=100000" | jq -r '[group_by(.kind)[]|{k:.[0].kind,n:length}]|.[]|"  \(.k): \(.n)"' 2>/dev/null || echo "  (empty)"
+  echo "Workers:"
+  rest "workers?select=name,status,heartbeat" | jq -r '.[]|"  \(.name): \(.status)"' 2>/dev/null || echo "  (none)"
+}
+
+# ============================================================
+# auth / managed runtime keys
+# ============================================================
+brain_key_prefix() {
+  local key="${1:-}"
+  [ -z "$key" ] && return 0
+  if command -v sha256sum >/dev/null 2>&1; then
+    printf '%s' "$key" | sha256sum | awk '{print substr($1,1,8)}'
+  elif command -v shasum >/dev/null 2>&1; then
+    printf '%s' "$key" | shasum -a 256 | awk '{print substr($1,1,8)}'
+  else
+    printf '(hash-unavailable)'
+  fi
+}
+
+cmd_auth_status() {
+  local json=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      *) echo "Usage: brain auth status [--json]" >&2; return 1 ;;
+    esac
+  done
+  load_config_soft
+  refresh_dysoncode_auth_metadata >/dev/null 2>&1 || true
+  if [ "$json" = "1" ]; then
+    if [ -f "$DYSONCODE_AUTH_JSON" ]; then
+      jq '.' "$DYSONCODE_AUTH_JSON"
+    else
+      jq -n --arg path "$DYSONCODE_AUTH_JSON" '{authJson:$path, error:"auth_json_missing"}'
+      return 1
+    fi
+    return 0
+  fi
+  echo "Brain Trust auth"
+  echo "  config: ${BT_CONF}"
+  if [ ! -f "$BT_CONF" ]; then
+    echo "  status: missing"
+    echo "  auth json: ${DYSONCODE_AUTH_JSON}"
+    [ -f "$DYSONCODE_AUTH_JSON" ] && echo "  auth json status: present" || echo "  auth json status: missing"
+    return 1
+  fi
+  echo "  status: configured"
+  echo "  mode: ${AUTH_MODE:-manual}"
+  echo "  owner: ${OWNER_ID:-}"
+  echo "  url: ${BT_URL:-}"
+  if [ -n "${BT_RAW_KEY:-}" ]; then
+    echo "  raw key: present ($(brain_key_prefix "$BT_RAW_KEY"))"
+  else
+    echo "  raw key: missing"
+  fi
+  if [ -n "${BT_KEY:-}" ]; then
+    echo "  bearer key: present ($(brain_key_prefix "$BT_KEY"))"
+  else
+    echo "  bearer key: missing"
+  fi
+  echo "  provisioned by: ${AUTH_PROVISIONED_BY:-}"
+  echo "  identity provider: ${AUTH_IDENTITY_PROVIDER:-}"
+  echo "  auth json: ${DYSONCODE_AUTH_JSON}"
+  if [ -f "$DYSONCODE_AUTH_JSON" ]; then
+    local auth_key_prefix auth_verified auth_write
+    auth_key_prefix=$(jq -r '.brain.keyPrefix // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    auth_verified=$(jq -r '.brain.lastVerifiedAt // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    auth_write=$(jq -r '.brain.lastConfigWriteAt // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    echo "  auth json status: present"
+    echo "  auth json key: ${auth_key_prefix:-}"
+    echo "  auth json verified: ${auth_verified:-}"
+    echo "  auth json config write: ${auth_write:-}"
+  else
+    echo "  auth json status: missing"
+  fi
+}
+
+cmd_auth_refresh_metadata() {
+  local json=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      *) echo "Usage: brain auth refresh-metadata [--json]" >&2; return 1 ;;
+    esac
+  done
+  refresh_dysoncode_auth_metadata
+  if [ "$json" = "1" ]; then
+    jq '.' "$DYSONCODE_AUTH_JSON"
+    return 0
+  fi
+  echo "Updated ${DYSONCODE_AUTH_JSON} metadata"
+}
+
+auth_health_payload() {
+  refresh_dysoncode_auth_metadata >/dev/null 2>&1 || true
+  if [ ! -f "$DYSONCODE_AUTH_JSON" ]; then
+    jq -n --arg checked_at "$(now_utc)" --arg path "$DYSONCODE_AUTH_JSON" '{
+      checkedAt:$checked_at,
+      overall:"critical",
+      authJson:$path,
+      components:{brain:{status:"missing", reason:"auth_json_missing"}}
+    }'
+    return 0
+  fi
+
+  jq --arg checked_at "$(now_utc)" --arg auth_json "$DYSONCODE_AUTH_JSON" --argjson now_epoch "$(date -u +%s)" '
+    def epoch($v): try ($v | fromdateiso8601) catch null;
+    def stale($v; $seconds):
+      (epoch($v)) as $t
+      | if $t == null then null else (($now_epoch - $t) > $seconds) end;
+    def currentBrokerCredential:
+      (.brain.keyPrefix // "") as $kp
+      | ((.brain.brokerStatus.credentials // [])
+          | map(select((.kind // "") == "brain"))
+          | if $kp != "" then map(select((.keyPrefix // "") == $kp)) else . end
+          | sort_by(.createdAt // "")
+          | reverse
+          | .[0]) // null;
+    def brainStatus:
+      currentBrokerCredential as $cred
+      | if (.brain.configured // false) != true then {status:"critical", reason:"brain_config_missing"}
+        elif ((.brain.keyPrefix // "") == "") then {status:"critical", reason:"brain_key_prefix_missing"}
+        elif (.brain.brokerStatus.disabledAt // null) != null then {status:"critical", reason:"identity_disabled"}
+        elif ($cred != null and ($cred.revokedAt // null) != null) then {status:"critical", reason:"brain_key_revoked"}
+        elif ((.brain.managed // false) == true and (.brain.brokerVerifiedAt // "") == "") then {status:"degraded", reason:"broker_status_missing"}
+        elif ((.brain.brokerVerifiedAt // "") != "" and stale(.brain.brokerVerifiedAt; 86400) == true) then {status:"degraded", reason:"broker_status_stale"}
+        else {status:"ok", reason:"ready"} end;
+    def cliStatus($name):
+      .[$name] as $c
+      | if (($c.cliPresent // true) != true) then {status:"degraded", reason:"cli_missing"}
+        elif (($c.configured // false) != true) then {status:"degraded", reason:"not_configured"}
+        else {status:"ok", reason:"ready"} end;
+    def brainActions($brain):
+      if $brain.reason == "ready" then []
+      elif $brain.reason == "brain_config_missing" then [
+        {id:"brain.repair", label:"Repair Brain config", command:"brain auth repair", run:"diwan"}
+      ]
+      elif $brain.reason == "brain_key_prefix_missing" then [
+        {id:"brain.repair", label:"Repair Brain config", command:"brain auth repair", run:"diwan"}
+      ]
+      elif $brain.reason == "identity_disabled" then [
+        {id:"brain.request-access", label:"Request Diwan access", command:"open admin portal", run:"admin-portal"}
+      ]
+      elif $brain.reason == "brain_key_revoked" then [
+        {id:"brain.repair", label:"Repair Brain config", command:"brain auth repair", run:"diwan"}
+      ]
+      elif $brain.reason == "broker_status_missing" then [
+        {id:"brain.refresh-broker-status", label:"Refresh broker status", command:"brain auth broker-status --json", run:"local-if-broker-token"}
+      ]
+      elif $brain.reason == "broker_status_stale" then [
+        {id:"brain.refresh-broker-status", label:"Refresh broker status", command:"brain auth broker-status --json", run:"local-if-broker-token"}
+      ]
+      else [
+        {id:"brain.status", label:"Refresh local status", command:"brain auth status --json", run:"local"}
+      ] end;
+    def cliActions($name; $status):
+      if $status.reason == "ready" then []
+      elif $name == "github" and $status.reason == "cli_missing" then [
+        {id:"github.install-cli", label:"Install GitHub CLI", command:"install gh", run:"manual"}
+      ]
+      elif $name == "github" and $status.reason == "not_configured" then [
+        {id:"github.login", label:"Sign in to GitHub", command:"gh auth login", run:"local"}
+      ]
+      elif $name == "atlassian" and $status.reason == "cli_missing" then [
+        {id:"atlassian.install-cli", label:"Install Atlassian CLI", command:"install acli", run:"manual"}
+      ]
+      elif $name == "atlassian" and $status.reason == "not_configured" then [
+        {id:"atlassian.login", label:"Sign in to Atlassian", command:"acli jira auth login", run:"local"}
+      ]
+      else [] end;
+
+    brainStatus as $brain
+    | cliStatus("github") as $github
+    | cliStatus("atlassian") as $atlassian
+    | [$brain.status, $github.status, $atlassian.status] as $states
+    | {
+        checkedAt:$checked_at,
+        authJson:$auth_json,
+        overall: (
+          if ($states | index("critical")) then "critical"
+          elif ($states | index("degraded")) then "degraded"
+          else "ok" end
+        ),
+        components:{
+          brain:($brain + {
+            configured:(.brain.configured // false),
+            managed:(.brain.managed // false),
+            ownerId:(.brain.ownerId // ""),
+            keyPrefix:(.brain.keyPrefix // ""),
+            authMode:(.brain.authMode // ""),
+            brokerVerifiedAt:(.brain.brokerVerifiedAt // null),
+            brokerStatus:(.brain.brokerStatus // null),
+            actions:brainActions($brain)
+          }),
+          github:($github + {
+            configured:(.github.configured // false),
+            cliPresent:(.github.cliPresent // false),
+            account:(.github.account // ""),
+            host:(.github.host // ""),
+            actions:cliActions("github"; $github)
+          }),
+          atlassian:($atlassian + {
+            configured:(.atlassian.configured // false),
+            cliPresent:(.atlassian.cliPresent // false),
+            account:(.atlassian.account // ""),
+            site:(.atlassian.site // ""),
+            actions:cliActions("atlassian"; $atlassian)
+          })
+        }
+      }
+  ' "$DYSONCODE_AUTH_JSON"
+}
+
+cmd_auth_health() {
+  local json=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      *) echo "Usage: brain auth health [--json]" >&2; return 1 ;;
+    esac
+  done
+
+  local payload
+  payload="$(auth_health_payload)"
+  if [ "$json" = "1" ]; then
+    printf '%s\n' "$payload" | jq '.'
+    return 0
+  fi
+
+  printf '%s\n' "$payload" | jq -r '
+    "Brain credential health: \(.overall)",
+    "  checked: \(.checkedAt)",
+    "  brain: \(.components.brain.status) (\(.components.brain.reason)) owner=\(.components.brain.ownerId // "-") key=\(.components.brain.keyPrefix // "-") mode=\(.components.brain.authMode // "-")",
+    "  github: \(.components.github.status) (\(.components.github.reason)) account=\(.components.github.account // "-")",
+    "  atlassian: \(.components.atlassian.status) (\(.components.atlassian.reason)) account=\(.components.atlassian.account // "-")",
+    "  auth json: \(.authJson)"
+  '
+}
+
+cmd_auth_doctor() {
+  local json=0 check=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      --check) check=1; shift ;;
+      *) echo "Usage: brain auth doctor [--json] [--check]" >&2; return 1 ;;
+    esac
+  done
+
+  local payload overall
+  payload="$(auth_health_payload)"
+  overall="$(printf '%s\n' "$payload" | jq -r '.overall // "critical"')"
+
+  if [ "$json" = "1" ]; then
+    printf '%s\n' "$payload" | jq '.'
+    [ "$check" = "1" ] && [ "$overall" != "ok" ] && return 1
+    return 0
+  fi
+
+  printf '%s\n' "$payload" | jq -r '
+    def actionLine($component):
+      (.components[$component].actions // [])[]?
+      | "  - [\($component)] \(.label): \(.command) (\(.run))";
+
+    "Brain credential doctor",
+    "  overall: \(.overall)",
+    "  checked: \(.checkedAt)",
+    "",
+    "Status:",
+    "  brain: \(.components.brain.status) (\(.components.brain.reason))",
+    "  github: \(.components.github.status) (\(.components.github.reason))",
+    "  atlassian: \(.components.atlassian.status) (\(.components.atlassian.reason))",
+    "",
+    "Recommended actions:",
+    (
+      ([actionLine("brain"), actionLine("github"), actionLine("atlassian")] | map(select(length > 0))) as $actions
+      | if ($actions | length) == 0 then "  none" else $actions[] end
+    ),
+    "",
+    "Auth metadata:",
+    "  \(.authJson)"
+  '
+  [ "$check" = "1" ] && [ "$overall" != "ok" ] && return 1
+  return 0
+}
+
+cmd_auth_broker_status() {
+  local json=0 provider="entra" auth_url token subject email owner
+  load_config_soft
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --json) json=1; shift ;;
+      --provider) provider="${2:-}"; shift 2 ;;
+      --auth-url) auth_url="${2:-}"; shift 2 ;;
+      --token) token="${2:-}"; shift 2 ;;
+      --subject) subject="${2:-}"; shift 2 ;;
+      --email) email="${2:-}"; shift 2 ;;
+      --owner|--owner-id) owner="${2:-}"; shift 2 ;;
+      *) echo "Usage: brain auth broker-status [--json] [--auth-url URL --token TOKEN] [--subject OID|--email EMAIL|--owner OWNER]" >&2; return 1 ;;
+    esac
+  done
+
+  auth_url="${auth_url:-${BRAIN_AUTH_URL:-}}"
+  token="${token:-${BRAIN_AUTH_TOKEN:-${DIWAN_BRAIN_AUTH_TOKEN:-}}}"
+
+  if [ -f "$DYSONCODE_AUTH_JSON" ] && jq -e '.brain' "$DYSONCODE_AUTH_JSON" >/dev/null 2>&1; then
+    subject="${subject:-$(jq -r '.brain.subject // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)}"
+    email="${email:-$(jq -r '.brain.email // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)}"
+    owner="${owner:-$(jq -r '.brain.ownerId // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)}"
+    provider="${provider:-$(jq -r '.brain.provider // "entra"' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)}"
+  fi
+  owner="${owner:-${OWNER_ID:-}}"
+
+  [ -z "$auth_url" ] && { echo "brain: set BRAIN_AUTH_URL or pass --auth-url" >&2; return 1; }
+  [ -z "$token" ] && { echo "brain: set BRAIN_AUTH_TOKEN/DIWAN_BRAIN_AUTH_TOKEN or pass --token" >&2; return 1; }
+  [ -z "$subject" ] && [ -z "$email" ] && [ -z "$owner" ] && {
+    echo "brain: pass --subject, --email, or --owner, or refresh ${DYSONCODE_AUTH_JSON}" >&2
+    return 1
+  }
+
+  local -a query_args=(--data-urlencode "provider=${provider:-entra}")
+  [ -n "$subject" ] && query_args+=(--data-urlencode "subject=${subject}")
+  [ -n "$email" ] && query_args+=(--data-urlencode "email=${email}")
+  [ -n "$owner" ] && query_args+=(--data-urlencode "ownerId=${owner}")
+
+  local response
+  if ! response=$(curl -sfG "${auth_url%/}/credentials/status" \
+    -H "Authorization: Bearer ${token}" \
+    "${query_args[@]}"); then
+    echo "brain: broker credential status request failed" >&2
+    return 1
+  fi
+  patch_dysoncode_brain_broker_status "$response"
+
+  if [ "$json" = "1" ]; then
+    printf '%s\n' "$response" | jq '.'
+    return 0
+  fi
+
+  printf '%s\n' "$response" | jq -r '
+    "Brain broker credential status",
+    "  identity: \(.email // "-") (\(.ownerId // "-"))",
+    "  provider: \(.provider // "-")",
+    "  role: \(.role // "-")",
+    "  disabled: \((.disabledAt != null) | tostring)",
+    "  credentials:",
+    ((.credentials // [])[]? |
+      "    \(.kind // "-") key=\(.keyPrefix // "-") revoked=\((.revokedAt != null) | tostring) configWrite=\(.lastConfigWriteAt // "-")")
+  '
+}
+
+broker_arg_value() {
+  local name="$1"; shift
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      "$name") echo "${2:-}"; return 0 ;;
+      *) shift ;;
+    esac
+  done
+}
+
+broker_request_payload() {
+  local subject="$1" email="$2" display_name="$3" owner_id="$4" role="$5" requested_by="$6"
+  jq -n \
+    --arg provider "entra" \
+    --arg subject "$subject" \
+    --arg email "$email" \
+    --arg display_name "$display_name" \
+    --arg owner_id "$owner_id" \
+    --arg role "$role" \
+    --arg requested_by "$requested_by" \
+    '{
+      provider:$provider,
+      subject:$subject,
+      email:$email,
+      display_name:$display_name,
+      owner_id:$owner_id,
+      role:$role,
+      requested_by:$requested_by,
+      issueCredential:true
+    }'
+}
+
+broker_config_written_payload() {
+  local subject="$1" email="$2" owner_id="$3" key_prefix="$4" requested_by="$5" config_path="$6"
+  jq -n \
+    --arg provider "entra" \
+    --arg subject "$subject" \
+    --arg email "$email" \
+    --arg owner_id "$owner_id" \
+    --arg key_prefix "$key_prefix" \
+    --arg requested_by "$requested_by" \
+    --arg config_path "$config_path" \
+    '{
+      provider:$provider,
+      subject:$subject,
+      email:$email,
+      owner_id:$owner_id,
+      key_prefix:$key_prefix,
+      requested_by:$requested_by,
+      config_path:$config_path,
+      source:"brain-cli",
+      status:"written"
+    }'
+}
+
+dysoncode_brain_auth_payload() {
+  local subject="$1" email="$2" owner_id="$3" bt_url="$4" key_prefix="$5" auth_mode="$6" provisioned_by="$7" identity_provider="$8" rotation_due_at="$9"
+  jq -n \
+    --argjson managed true \
+    --arg provider "entra" \
+    --arg subject "$subject" \
+    --arg email "$email" \
+    --arg owner_id "$owner_id" \
+    --arg url "$bt_url" \
+    --arg key_prefix "$key_prefix" \
+    --arg auth_mode "$auth_mode" \
+    --arg provisioned_by "$provisioned_by" \
+    --arg identity_provider "$identity_provider" \
+    --arg config_path "$BT_CONF" \
+    --arg last_verified_at "$(now_utc)" \
+    --arg last_config_write_at "$(now_utc)" \
+    --arg rotation_due_at "$rotation_due_at" \
+    '{
+      managed:$managed,
+      provider:$provider,
+      subject:$subject,
+      email:$email,
+      ownerId:$owner_id,
+      url:$url,
+      keyPrefix:$key_prefix,
+      authMode:$auth_mode,
+      provisionedBy:$provisioned_by,
+      identityProvider:$identity_provider,
+      configPath:$config_path,
+      lastVerifiedAt:$last_verified_at,
+      lastConfigWriteAt:$last_config_write_at
+    }
+    + (if $rotation_due_at != "" then {rotationDueAt:$rotation_due_at} else {} end)'
+}
+
+current_brain_auth_metadata() {
+  load_config_soft
+  if [ ! -f "$BT_CONF" ]; then
+    jq -n --arg checked_at "$(now_utc)" '{configured:false, configPath:"", lastVerifiedAt:$checked_at}'
+    return 0
+  fi
+
+  local existing_subject="" existing_email="" existing_provider="" existing_provisioned_by="" existing_identity_provider="" existing_rotation_due_at="" existing_config_write_at="" existing_broker_verified_at="" existing_broker_status="null"
+  if [ -f "$DYSONCODE_AUTH_JSON" ] && jq -e '.brain' "$DYSONCODE_AUTH_JSON" >/dev/null 2>&1; then
+    existing_subject=$(jq -r '.brain.subject // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    existing_email=$(jq -r '.brain.email // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    existing_provider=$(jq -r '.brain.provider // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    existing_provisioned_by=$(jq -r '.brain.provisionedBy // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    existing_identity_provider=$(jq -r '.brain.identityProvider // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    existing_rotation_due_at=$(jq -r '.brain.rotationDueAt // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    existing_config_write_at=$(jq -r '.brain.lastConfigWriteAt // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    existing_broker_verified_at=$(jq -r '.brain.brokerVerifiedAt // empty' "$DYSONCODE_AUTH_JSON" 2>/dev/null || true)
+    existing_broker_status=$(jq -c '.brain.brokerStatus // null' "$DYSONCODE_AUTH_JSON" 2>/dev/null || printf 'null')
+  fi
+
+  local key_prefix=""
+  if [ -n "${BT_RAW_KEY:-}" ]; then
+    key_prefix=$(brain_key_prefix "$BT_RAW_KEY")
+  elif [ -n "${BT_KEY:-}" ]; then
+    key_prefix=$(brain_key_prefix "$BT_KEY")
+  fi
+
+  local managed=false
+  [ "${AUTH_MODE:-manual}" = "entra-provisioned-key" ] && managed=true
+
+  jq -n \
+    --argjson managed "$managed" \
+    --argjson configured true \
+    --arg provider "${AUTH_IDENTITY_PROVIDER:-${existing_provider:-}}" \
+    --arg subject "$existing_subject" \
+    --arg email "$existing_email" \
+    --arg owner_id "${OWNER_ID:-}" \
+    --arg url "${BT_URL:-}" \
+    --arg key_prefix "$key_prefix" \
+    --arg auth_mode "${AUTH_MODE:-manual}" \
+    --arg provisioned_by "${AUTH_PROVISIONED_BY:-${existing_provisioned_by:-}}" \
+    --arg identity_provider "${AUTH_IDENTITY_PROVIDER:-${existing_identity_provider:-}}" \
+    --arg config_path "$BT_CONF" \
+    --arg last_verified_at "$(now_utc)" \
+    --arg last_config_write_at "$existing_config_write_at" \
+    --arg rotation_due_at "$existing_rotation_due_at" \
+    --arg broker_verified_at "$existing_broker_verified_at" \
+    --argjson broker_status "$existing_broker_status" \
+    '{
+      configured:$configured,
+      managed:$managed,
+      provider:$provider,
+      subject:$subject,
+      email:$email,
+      ownerId:$owner_id,
+      url:$url,
+      keyPrefix:$key_prefix,
+      authMode:$auth_mode,
+      provisionedBy:$provisioned_by,
+      identityProvider:$identity_provider,
+      configPath:$config_path,
+      lastVerifiedAt:$last_verified_at
+    }
+    + (if $last_config_write_at != "" then {lastConfigWriteAt:$last_config_write_at} else {} end)
+    + (if $rotation_due_at != "" then {rotationDueAt:$rotation_due_at} else {} end)
+    + (if $broker_verified_at != "" then {brokerVerifiedAt:$broker_verified_at} else {} end)
+    + (if $broker_status != null then {brokerStatus:$broker_status} else {} end)'
+}
+
+github_auth_metadata() {
+  local checked_at; checked_at="$(now_utc)"
+  if ! command -v gh >/dev/null 2>&1; then
+    jq -n --arg checked_at "$checked_at" '{configured:false, cliPresent:false, managed:false, lastVerifiedAt:$checked_at}'
+    return 0
+  fi
+  local out rc=0
+  out=$(gh auth status 2>&1) || rc=$?
+  local host account protocol
+  if [ "$rc" -eq 0 ]; then
+    host=$(printf '%s\n' "$out" | awk 'NF {print $1; exit}' | sed 's/:$//')
+    account=$(printf '%s\n' "$out" | sed -nE 's/.*Logged in to .* account ([^ ]+).*/\1/p' | head -1)
+    protocol=$(printf '%s\n' "$out" | sed -nE 's/.*Git operations protocol: (.*)/\1/p' | head -1)
+  else
+    host=""
+    account=""
+    protocol=""
+  fi
+  jq -n \
+    --argjson configured "$([ "$rc" -eq 0 ] && printf true || printf false)" \
+    --argjson cli_present true \
+    --argjson managed false \
+    --arg host "$host" \
+    --arg account "$account" \
+    --arg protocol "$protocol" \
+    --arg checked_at "$checked_at" \
+    '{
+      configured:$configured,
+      cliPresent:$cli_present,
+      managed:$managed,
+      host:$host,
+      account:$account,
+      gitProtocol:$protocol,
+      lastVerifiedAt:$checked_at
+    }'
+}
+
+atlassian_auth_metadata() {
+  local checked_at; checked_at="$(now_utc)"
+  if ! command -v acli >/dev/null 2>&1; then
+    jq -n --arg checked_at "$checked_at" '{configured:false, cliPresent:false, managed:false, lastVerifiedAt:$checked_at}'
+    return 0
+  fi
+  local out rc=0
+  out=$(acli jira auth status 2>&1) || rc=$?
+  local site email auth_type
+  if [ "$rc" -eq 0 ]; then
+    site=$(printf '%s\n' "$out" | sed -nE 's/^[[:space:]]*Site:[[:space:]]*(.*)/\1/p' | head -1)
+    email=$(printf '%s\n' "$out" | sed -nE 's/^[[:space:]]*Email:[[:space:]]*(.*)/\1/p' | head -1)
+    auth_type=$(printf '%s\n' "$out" | sed -nE 's/^[[:space:]]*Authentication Type:[[:space:]]*(.*)/\1/p' | head -1)
+  else
+    site=""
+    email=""
+    auth_type=""
+  fi
+  jq -n \
+    --argjson configured "$([ "$rc" -eq 0 ] && printf true || printf false)" \
+    --argjson cli_present true \
+    --argjson managed false \
+    --arg site "$site" \
+    --arg email "$email" \
+    --arg auth_type "$auth_type" \
+    --arg checked_at "$checked_at" \
+    '{
+      configured:$configured,
+      cliPresent:$cli_present,
+      managed:$managed,
+      site:$site,
+      account:$email,
+      authType:$auth_type,
+      lastVerifiedAt:$checked_at
+    }'
+}
+
+refresh_dysoncode_auth_metadata() {
+  local brain github atlassian
+  brain=$(current_brain_auth_metadata)
+  github=$(github_auth_metadata)
+  atlassian=$(atlassian_auth_metadata)
+  patch_dysoncode_auth_json "$(jq -n \
+    --argjson brain "$brain" \
+    --argjson github "$github" \
+    --argjson atlassian "$atlassian" \
+    '{brain:$brain, github:$github, atlassian:$atlassian}')"
+}
+
+notify_broker_config_written() {
+  local auth_url="$1" token="$2" subject="$3" email="$4" owner_id="$5" key_prefix="$6" requested_by="$7"
+  [ -z "$auth_url" ] || [ -z "$token" ] || [ -z "$subject" ] || [ -z "$key_prefix" ] && return 0
+  local payload
+  payload=$(broker_config_written_payload "$subject" "$email" "$owner_id" "$key_prefix" "$requested_by" "$BT_CONF")
+  curl -sf "${auth_url%/}/config-written" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Content-Type: application/json" \
+    -d "$payload" >/dev/null 2>&1 || true
+}
+
+write_broker_config() {
+  local response="$1"
+  local subject="${2:-}" email="${3:-}" requested_by="${4:-brain-cli}"
+  local bt_key bt_raw_key bt_url owner_id key_prefix rotation_due_at
+  bt_key=$(printf '%s' "$response" | jq -r '.brain.bt_key // empty')
+  bt_raw_key=$(printf '%s' "$response" | jq -r '.brain.bt_raw_key // empty')
+  bt_url=$(printf '%s' "$response" | jq -r '.brain.bt_url // empty')
+  owner_id=$(printf '%s' "$response" | jq -r '.owner_id // empty')
+  key_prefix=$(printf '%s' "$response" | jq -r '.brain.key_prefix // empty')
+  rotation_due_at=$(printf '%s' "$response" | jq -r '.brain.rotation_due_at // empty')
+  [ -z "$bt_key" ] || [ -z "$bt_raw_key" ] || [ -z "$owner_id" ] && {
+    echo "brain: broker response did not include a newly issued secret; ask Diwan to repair with forceRotate=true" >&2
+    return 1
+  }
+  [ -n "$key_prefix" ] || key_prefix="$(brain_key_prefix "$bt_raw_key")"
+  load_config_soft
+  mkdir -p "$BT_DIR"
+  local tmp="${BT_CONF}.tmp.$$"
+  cat > "$tmp" << CONF
+BT_URL=${bt_url:-${BT_URL:-}}
+BT_KEY=${bt_key}
+BT_RAW_KEY=${bt_raw_key}
+OWNER_ID=${owner_id}
+AUTH_MODE=entra-provisioned-key
+AUTH_PROVISIONED_BY=${AUTH_PROVISIONED_BY:-brain-cli}
+AUTH_IDENTITY_PROVIDER=entra
+EMBED_PROVIDER=${EMBED_PROVIDER:-server}
+EMBED_REGION=${EMBED_REGION:-us-east-1}
+EMBED_URL=${EMBED_URL:-}
+EMBED_KEY=${EMBED_KEY:-}
+EMBED_MODEL=${EMBED_MODEL:-amazon.titan-embed-text-v1}
+S3_BUCKET=${S3_BUCKET:-}
+S3_REGION=${S3_REGION:-us-east-1}
+S3_PREFIX=${S3_PREFIX:-artifacts}
+S3_KMS_KEY_ID=${S3_KMS_KEY_ID:-}
+SYNC_CURSOR_ENABLED=${SYNC_CURSOR_ENABLED:-0}
+OTEL_ENDPOINT=${OTEL_ENDPOINT:-}
+OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-brain-trust}
+CONF
+  chmod 600 "$tmp"
+  mv "$tmp" "$BT_CONF"
+  write_dysoncode_auth_json "$(dysoncode_brain_auth_payload \
+    "$subject" "$email" "$owner_id" "${bt_url:-${BT_URL:-}}" "$key_prefix" \
+    "entra-provisioned-key" "${AUTH_PROVISIONED_BY:-$requested_by}" "entra" "$rotation_due_at")"
+  echo "Updated ${BT_CONF} for owner ${owner_id}"
+  echo "Updated ${DYSONCODE_AUTH_JSON} metadata for Brain Trust"
+}
+
+cmd_auth_repair_or_rotate() {
+  local endpoint="$1"; shift
+  load_config_soft
+  local auth_url token subject email name owner role requested_by
+  auth_url="$(broker_arg_value --auth-url "$@")"; auth_url="${auth_url:-${BRAIN_AUTH_URL:-}}"
+  token="$(broker_arg_value --token "$@")"; token="${token:-${BRAIN_AUTH_TOKEN:-${DIWAN_BRAIN_AUTH_TOKEN:-}}}"
+  subject="$(broker_arg_value --subject "$@")"; subject="${subject:-${ENTRA_SUBJECT:-${ENTRA_OID:-}}}"
+  email="$(broker_arg_value --email "$@")"; email="${email:-${ENTRA_EMAIL:-${USER_EMAIL:-}}}"
+  name="$(broker_arg_value --name "$@")"; name="${name:-${ENTRA_NAME:-}}"
+  owner="$(broker_arg_value --owner "$@")"; owner="${owner:-${OWNER_ID:-}}"
+  role="$(broker_arg_value --role "$@")"; role="${role:-member}"
+  requested_by="${AUTH_PROVISIONED_BY:-brain-cli}"
+  [ -z "$auth_url" ] && { echo "brain: set BRAIN_AUTH_URL or pass --auth-url" >&2; return 1; }
+  [ -z "$token" ] && { echo "brain: set BRAIN_AUTH_TOKEN/DIWAN_BRAIN_AUTH_TOKEN or pass --token" >&2; return 1; }
+  [ -z "$subject" ] && { echo "brain: set ENTRA_SUBJECT/ENTRA_OID or pass --subject" >&2; return 1; }
+  [ -z "$email" ] && { echo "brain: set ENTRA_EMAIL/USER_EMAIL or pass --email" >&2; return 1; }
+
+  local payload response
+  payload=$(broker_request_payload "$subject" "$email" "$name" "$owner" "$role" "$requested_by")
+  response=$(curl -sf "${auth_url%/}/${endpoint}" \
+    -H "Authorization: Bearer ${token}" \
+    -H "Content-Type: application/json" \
+    -d "$payload")
+  write_broker_config "$response" "$subject" "$email" "$requested_by"
+  local key_prefix response_owner
+  key_prefix=$(printf '%s' "$response" | jq -r '.brain.key_prefix // empty')
+  response_owner=$(printf '%s' "$response" | jq -r '.owner_id // empty')
+  notify_broker_config_written "$auth_url" "$token" "$subject" "$email" "${response_owner:-${owner:-${OWNER_ID:-}}}" "$key_prefix" "$requested_by"
+}
+
+cmd_auth() {
+  local sub="${1:-status}"; shift 2>/dev/null || true
+  case "$sub" in
+    status) cmd_auth_status "$@" ;;
+    health) cmd_auth_health "$@" ;;
+    doctor) cmd_auth_doctor "$@" ;;
+    refresh-metadata|refresh) cmd_auth_refresh_metadata "$@" ;;
+    broker-status|broker) cmd_auth_broker_status "$@" ;;
+    repair) cmd_auth_repair_or_rotate "ensure-user" "$@" ;;
+    *) echo "Usage: brain auth status [--json] | health [--json] | doctor [--json] [--check] | refresh-metadata [--json] | broker-status [--json] | repair [--auth-url URL --token TOKEN --subject OID --email EMAIL]" >&2; return 1 ;;
+  esac
+}
+
+cmd_key() {
+  local sub="${1:-}"; shift 2>/dev/null || true
+  case "$sub" in
+    rotate) cmd_auth_repair_or_rotate "rotate-brain-key" "$@" ;;
+    *) echo "Usage: brain key rotate [--auth-url URL --token TOKEN --subject OID --email EMAIL]" >&2; return 1 ;;
+  esac
+}
+
+# ============================================================
+# artifacts
+# ============================================================
+
+cmd_artifacts_search() {
+  local q="" p="" s="" n=20 repo="" tool=""
+  local -a q_parts=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -p|--project) p="$2"; shift 2 ;;
+      -s|--scope) s="$2"; shift 2 ;;
+      -n|--limit) n="$2"; shift 2 ;;
+      -r|--repo) repo="$2"; shift 2 ;;
+      --tool) tool="$2"; shift 2 ;;
+      *) q_parts+=("$1"); shift ;;
+    esac
+  done
+  q="${q_parts[*]}"
+
+  local path="artifacts?select=id,created_at,source_system,scope,project,repo,tool_name,source_path,size_bytes,storage_uri,sha256"
+  [ -n "$p" ] && path+="&project=eq.${p}"
+  [ -n "$s" ] && path+="&scope=eq.${s}"
+  [ -n "$repo" ] && path+="&repo=eq.${repo}"
+  [ -n "$tool" ] && path+="&tool_name=eq.${tool}"
+  [ -n "$q" ] && path+="&or=(source_path.ilike.*${q// /%}*,storage_key.ilike.*${q// /%}*)"
+  path+="&order=created_at.desc&limit=${n}"
+
+  rest "$path" \
+    | jq -r '.[] | "\(.created_at|.[0:16]) [\(.source_system)] [\(.scope)] \(.project // "-") repo=\(.repo // "-") tool=\(.tool_name // "-")", "  \(.source_path)", "  \(.size_bytes) bytes  \(.storage_uri // "")", "  sha=\(.sha256)", "  id=\(.id)", "---"'
+}
+
+cmd_artifacts_get() {
+  local id="${1:-}" out="${2:-}"
+  [ -z "$id" ] && { echo "Usage: brain artifacts get ARTIFACT_ID [output-file]" >&2; return 1; }
+  require_s3 || return 1
+
+  local row; row=$(rest "artifacts?id=eq.${id}&select=id,source_path,storage_key,storage_uri&limit=1")
+  local storage_key source_path
+  storage_key=$(echo "$row" | jq -r '.[0].storage_key // empty')
+  source_path=$(echo "$row" | jq -r '.[0].source_path // empty')
+  [ -z "$storage_key" ] && { echo "Artifact not found or missing storage_key" >&2; return 1; }
+
+  if [ -z "$out" ]; then
+    out="$(basename "${source_path:-artifact.bin}")"
+  fi
+
+  local uri
+  uri=$(s3_uri_for_key "$storage_key")
+  local -a cmd=(aws s3 cp "$uri" "$out")
+  [ -n "${S3_REGION:-}" ] && cmd+=(--region "$S3_REGION")
+  [ -n "${AWS_PROFILE:-}" ] && cmd+=(--profile "$AWS_PROFILE")
+  "${cmd[@]}" >/dev/null
+  echo "Downloaded ${id} → ${out}"
+}
+
+cmd_artifacts() {
+  local sub="${1:-}"; shift 2>/dev/null || true
+  case "$sub" in
+    search) cmd_artifacts_search "$@" ;;
+    get) cmd_artifacts_get "$@" ;;
+    *)
+      cat << 'ARTH'
+brain artifacts
+
+  brain artifacts search [query] [-p project] [-s scope] [-r repo] [--tool T] [-n limit]
+  brain artifacts get ARTIFACT_ID [output-file]
+ARTH
+      ;;
+  esac
+}
+
+# ============================================================
+# repo — reusable scripts/skills artifact repository
+# ============================================================
+
+repo_type_ok() {
+  case "$1" in
+    skill|script|hook|prompt|runbook|config|template|other) return 0 ;;
+    *) return 1 ;;
+  esac
+}
+
+cmd_repo_publish() {
+  otel_span_start _otel_repo_publish "brain.repo.publish"
+  local file="" artifact_type="" title="" summary="" summary_file="" project="" repo="" scope="team"
+  local tags="" review="pending" author="agent" language="" runtime="" platform="" version="" license=""
+  local created_for="" usage_notes="" origin_chat="" source_system="repository" tool="brain-repo"
+
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --type) artifact_type="$2"; shift 2 ;;
+      -t|--title) title="$2"; shift 2 ;;
+      --summary) summary="$2"; shift 2 ;;
+      --summary-file) summary_file="$2"; shift 2 ;;
+      -p|--project) project="$2"; shift 2 ;;
+      -r|--repo) repo="$2"; shift 2 ;;
+      -s|--scope) scope="$2"; shift 2 ;;
+      --tags) tags="$2"; shift 2 ;;
+      --review) review="$2"; shift 2 ;;
+      --author) author="$2"; shift 2 ;;
+      --language) language="$2"; shift 2 ;;
+      --runtime) runtime="$2"; shift 2 ;;
+      --platform) platform="$2"; shift 2 ;;
+      --version) version="$2"; shift 2 ;;
+      --license) license="$2"; shift 2 ;;
+      --created-for) created_for="$2"; shift 2 ;;
+      --usage-notes) usage_notes="$2"; shift 2 ;;
+      --origin-chat) origin_chat="$2"; shift 2 ;;
+      --source-system) source_system="$2"; shift 2 ;;
+      --tool) tool="$2"; shift 2 ;;
+      -h|--help)
+        cat << 'PHELP'
+brain repo publish PATH --type TYPE [options]
+
+  --type skill|script|hook|prompt|runbook|config|template|other
+  --title "Title"
+  --summary "Short summary" | --summary-file SUMMARY.md
+  -p PROJECT  -r REPO  -s team|personal|global
+  --tags a,b,c  --review pending|approved  --author agent|user
+  --language LANG  --runtime RUNTIME  --platform PLATFORM
+  --version VERSION  --license LICENSE
+  --created-for "why this exists"  --usage-notes "how to use it"
+  --origin-chat "session/transcript id"
+PHELP
+        return 0 ;;
+      *) file="$1"; shift ;;
+    esac
+  done
+
+  [ -z "$file" ] || [ ! -f "$file" ] && {
+    echo "Usage: brain repo publish PATH --type TYPE [--title T] [--summary S|--summary-file F] [-p project] [-r repo] [--tags a,b]" >&2
+    return 1
+  }
+  [ -z "$artifact_type" ] && artifact_type="other"
+  repo_type_ok "$artifact_type" || { echo "brain repo: --type must be skill|script|hook|prompt|runbook|config|template|other" >&2; return 1; }
+  case "$review" in pending|approved) : ;; *) echo "brain repo: --review must be pending|approved" >&2; return 1 ;; esac
+  case "$author" in user|agent) : ;; *) echo "brain repo: --author must be user|agent" >&2; return 1 ;; esac
+  case "$scope" in personal|team|global) : ;; *) echo "brain repo: --scope must be personal|team|global" >&2; return 1 ;; esac
+  [ -n "$summary_file" ] && [ ! -f "$summary_file" ] && { echo "brain repo: summary file not found: $summary_file" >&2; return 1; }
+  require_s3 || return 1
+
+  [ -z "$title" ] && title="$(basename "$file")"
+  [ -z "$repo" ] && repo=$(git rev-parse --show-toplevel 2>/dev/null | xargs basename 2>/dev/null || echo "")
+  [ -z "$project" ] && project="$(basename "$(pwd)")"
+  [ -z "$language" ] && language="$(detect_artifact_language "$file")"
+
+  local sha size mime text_snippet
+  sha=$(sha_file "$file")
+  size=$(wc -c < "$file" | tr -d ' ')
+  mime=$(file_mime "$file")
+  text_snippet=""
+  if is_textual_file "$file" "$mime"; then
+    text_snippet="$(read_text_snippet "$file" 12000)"
+  fi
+
+  if [ -n "$summary_file" ]; then
+    summary="$(cat "$summary_file")"
+  fi
+  if [ -z "$summary" ]; then
+    if [ -n "$text_snippet" ]; then
+      summary="Reusable ${artifact_type} artifact published from ${file}. It is indexed for team search and preserved in the BrainTrust artifact repository."
+    else
+      summary="Reusable ${artifact_type} artifact published from ${file}. Original binary/non-text content is preserved in the BrainTrust artifact repository."
+    fi
+  fi
+
+  local date_path rel_key s3_uri existing artifact_id tags_json meta_initial meta_final
+  date_path=$(date +%Y/%m/%d)
+  rel_key="${S3_PREFIX:-artifacts}/${OWNER_ID}/${project:-unscoped}/repository/${date_path}/${sha}-$(basename "$file")"
+  s3_uri=$(s3_uri_for_key "$rel_key")
+  tags_json=$(tags_to_json "$tags")
+
+  existing=$(rest "artifacts?source_system=eq.${source_system}&sha256=eq.${sha}&select=id,storage_key&limit=1" 2>/dev/null || echo "[]")
+  artifact_id=$(echo "$existing" | jq -r '.[0].id // empty')
+  if [ -z "$artifact_id" ]; then
+    s3_put_file "$file" "$rel_key" "$mime"
+    meta_initial=$(jq -n \
+      --arg at "$artifact_type" --arg title "$title" --arg summary "$summary" \
+      --arg language "$language" --arg runtime "$runtime" --arg platform "$platform" \
+      --arg version "$version" --arg license "$license" --arg created_for "$created_for" \
+      --arg usage_notes "$usage_notes" --arg origin_chat "$origin_chat" --arg review "$review" \
+      --argjson tags "$tags_json" \
+      '{artifact_type:$at,title:$title,summary:$summary,language:(if $language=="" then null else $language end),
+        runtime:(if $runtime=="" then null else $runtime end),
+        platform:(if $platform=="" then null else $platform end),
+        version:(if $version=="" then null else $version end),
+        license:(if $license=="" then null else $license end),
+        created_for:(if $created_for=="" then null else $created_for end),
+        usage_notes:(if $usage_notes=="" then null else $usage_notes end),
+        origin_chat:(if $origin_chat=="" then null else $origin_chat end),
+        review_status:$review,tags:$tags}')
+    artifact_id=$(rest artifacts -d "$(jq -n \
+      --arg ss "$source_system" --arg sp "$file" --arg pj "${project:-}" --arg sc "$scope" \
+      --arg o "$OWNER_ID" --arg sh "$sha" --arg mt "$mime" --arg su "$s3_uri" --arg sk "$rel_key" \
+      --argjson sz "$size" --argjson meta "$meta_initial" --arg rp "${repo:-}" --arg tn "$tool" \
+      '{source_system:$ss,source_path:$sp,source_session_id:null,
+        project:(if $pj=="" then null else $pj end),
+        repo:(if $rp=="" then null else $rp end),repo_root:null,session_group:null,
+        scope:$sc,owner_id:$o,sha256:$sh,size_bytes:$sz,mime_type:$mt,
+        storage_uri:$su,storage_key:$sk,tool_name:$tn,meta:$meta}')" | jq -r '.[0].id // .id // empty')
+  fi
+  [ -z "$artifact_id" ] && { echo "brain repo: failed to create or find artifact row" >&2; return 1; }
+
+  local sha_prefix recall_prompt entry_content emb entry_id actual_review
+  sha_prefix="${sha:0:12}"
+  recall_prompt="brain recall \"artifact:${title} ${repo:-none} ${artifact_type} ${sha_prefix}\" ${project:-}"
+
+  meta_final=$(jq -n \
+    --arg at "$artifact_type" --arg title "$title" --arg summary "$summary" \
+    --arg language "$language" --arg runtime "$runtime" --arg platform "$platform" \
+    --arg version "$version" --arg license "$license" --arg created_for "$created_for" \
+    --arg usage_notes "$usage_notes" --arg origin_chat "$origin_chat" --arg review "$review" \
+    --arg recall "$recall_prompt" --arg aid "$artifact_id" --arg sha "$sha" \
+    --argjson tags "$tags_json" \
+    '{artifact_type:$at,title:$title,summary:$summary,language:(if $language=="" then null else $language end),
+      runtime:(if $runtime=="" then null else $runtime end),
+      platform:(if $platform=="" then null else $platform end),
+      version:(if $version=="" then null else $version end),
+      license:(if $license=="" then null else $license end),
+      created_for:(if $created_for=="" then null else $created_for end),
+      usage_notes:(if $usage_notes=="" then null else $usage_notes end),
+      origin_chat:(if $origin_chat=="" then null else $origin_chat end),
+      review_status:$review,tags:$tags,recall_prompt:$recall,artifact_id:$aid,sha256:$sha}')
+  rest "artifacts?id=eq.${artifact_id}" -X PATCH -d "$(jq -n --argjson meta "$meta_final" '{meta:$meta}')" >/dev/null
+
+  entry_content=$(cat <<EOF
+# ${title}
+
+Type: ${artifact_type}
+Project: ${project:-}
+Repo: ${repo:-}
+Path: ${file}
+Artifact ID: ${artifact_id}
+SHA256: ${sha}
+
+## Summary
+${summary}
+
+## Usage Notes
+${usage_notes:-No usage notes provided.}
+
+## Recall Prompt
+${recall_prompt}
+Then run: brain repo show ${artifact_id}
+
+## Tags
+$(echo "$tags_json" | jq -r 'join(", ")')
+
+## Excerpt
+${text_snippet:0:4000}
+EOF
+)
+  emb=$(embed "$entry_content")
+  local existing_entry
+  existing_entry=$(rest "artifact_links?artifact_id=eq.${artifact_id}&relationship=eq.indexed_by&select=entry_id&limit=1" 2>/dev/null || echo "[]")
+  entry_id=$(echo "$existing_entry" | jq -r '.[0].entry_id // empty')
+  local entry_payload
+  entry_payload=$(jq -n \
+    --arg c "$entry_content" --arg t "Artifact: ${title}" --argjson e "$emb" \
+    --arg p "${project:-}" --arg s "$scope" --arg o "$OWNER_ID" --arg au "$author" \
+    --arg h "$sha" --arg rp "${repo:-}" --arg tn "$tool" --arg aid "$artifact_id" \
+    --arg at "$artifact_type" --arg sp "$file" --arg recall "$recall_prompt" --arg review "$review" \
+    --argjson tags "$tags_json" \
+    '{content:$c,title:$t,embedding:$e,kind:"artifact",scope:$s,owner_id:$o,author:$au,
+      content_hash:$h,project:(if $p=="" then null else $p end),
+      repo:(if $rp=="" then null else $rp end),tool_name:$tn,tags:$tags,review:$review,
+      source_system:"repository",meta:{artifact_id:$aid,artifact_type:$at,source_path:$sp,recall_prompt:$recall}}')
+  if [ -n "$entry_id" ]; then
+    BT_QUIET=1 rest "entries?id=eq.${entry_id}" -X PATCH -d "$entry_payload" >/dev/null || {
+      entry_payload=$(echo "$entry_payload" | jq '.kind = "document"')
+      rest "entries?id=eq.${entry_id}" -X PATCH -d "$entry_payload" >/dev/null
+    }
+  else
+    local entry_res
+    entry_res=$(rest entries -d "$entry_payload" 2>/dev/null || true)
+    entry_id=$(echo "$entry_res" | jq -r '.[0].id // .id // empty')
+    if [ -z "$entry_id" ]; then
+      entry_payload=$(echo "$entry_payload" | jq '.kind = "document"')
+      entry_id=$(rest entries -d "$entry_payload" | jq -r '.[0].id // .id // empty')
+    fi
+  fi
+  if [ -n "$entry_id" ]; then
+    actual_review=$(rest "entries?id=eq.${entry_id}&select=review&limit=1" | jq -r '.[0].review // empty')
+    if [ "$actual_review" != "$review" ]; then
+      rest "entries?id=eq.${entry_id}" -X PATCH -d "$(jq -n --arg r "$review" '{review:$r}')" >/dev/null || true
+    fi
+    if [ "$existing_entry" = "[]" ]; then
+      rest artifact_links -d "$(jq -n --arg aid "$artifact_id" --arg eid "$entry_id" --arg o "$OWNER_ID" \
+        '{artifact_id:$aid,entry_id:$eid,relationship:"indexed_by",owner_id:$o,meta:{source:"brain repo publish"}}')" >/dev/null || true
+    fi
+  fi
+
+  BT_QUIET=1 rest log -d "$(jq -n --arg s "Published artifact: ${title}" --arg p "${project:-}" --arg o "$OWNER_ID" \
+    --arg aid "$artifact_id" --arg eid "${entry_id:-}" --arg at "$artifact_type" \
+    '{kind:"ingest",summary:$s,owner_id:$o,project:(if $p=="" then null else $p end),
+      entry_id:(if $eid=="" then null else $eid end),data:{artifact_id:$aid,artifact_type:$at}}')" >/dev/null 2>&1 || true
+
+  echo "published: ${artifact_id}  ${title}"
+  [ -n "${entry_id:-}" ] && echo "memory:    ${entry_id}"
+  echo "recall:    ${recall_prompt}"
+  echo "show:      brain repo show ${artifact_id}"
+  otel_span_end _otel_repo_publish 1 "" "bt.artifact_type=${artifact_type}" "bt.artifact_id=${artifact_id}"
+}
+
+cmd_repo_search() {
+  local q="" p="" repo="" artifact_type="" n=20 review="" owner="" tag=""
+  local -a q_parts=()
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -p|--project) p="$2"; shift 2 ;;
+      -r|--repo) repo="$2"; shift 2 ;;
+      --type) artifact_type="$2"; shift 2 ;;
+      --review) review="$2"; shift 2 ;;
+      --owner) owner="$2"; shift 2 ;;
+      --tag) tag="$2"; shift 2 ;;
+      -n|--limit) n="$2"; shift 2 ;;
+      *) q_parts+=("$1"); shift ;;
+    esac
+  done
+  q="${q_parts[*]}"
+  local path="artifacts?source_system=eq.repository&select=id,created_at,project,repo,owner_id,source_path,sha256,size_bytes,mime_type,storage_uri,tool_name,meta&order=created_at.desc&limit=500"
+  [ -n "$p" ] && path+="&project=eq.${p}"
+  [ -n "$repo" ] && path+="&repo=eq.${repo}"
+  [ -n "$owner" ] && path+="&owner_id=eq.${owner}"
+  rest "$path" | jq -r --arg q "$q" --arg t "$artifact_type" --arg review "$review" --arg tag "$tag" --argjson n "$n" '
+    def hay: ([.source_path,.repo,.project,.owner_id,.meta.title,.meta.summary,.meta.artifact_type,(.meta.tags // [])[]] | map(. // "") | join(" ") | ascii_downcase);
+    [.[] | select(($t == "" or .meta.artifact_type == $t)
+      and ($review == "" or .meta.review_status == $review)
+      and ($tag == "" or ((.meta.tags // []) | index($tag)))
+      and ($q == "" or (hay | contains($q | ascii_downcase))))][0:$n][]
+    | "\(.created_at|.[0:16]) \(.id) [\(.meta.artifact_type // "other")] \(.project // "-") repo=\(.repo // "-") - \(.meta.title // (.source_path|split("/")[-1]))\n  \(.meta.summary // "")\n  recall: \(.meta.recall_prompt // "")\n---"'
+}
+
+cmd_repo_show() {
+  local id="${1:-}" json=0
+  shift 2>/dev/null || true
+  while [[ $# -gt 0 ]]; do
+    case "$1" in --json) json=1; shift ;; *) shift ;; esac
+  done
+  [ -z "$id" ] && { echo "Usage: brain repo show ARTIFACT_ID [--json]" >&2; return 1; }
+  local artifact links entry_id entry="{}"
+  artifact=$(rest "artifacts?id=eq.${id}&select=id,created_at,source_system,source_path,project,repo,scope,owner_id,sha256,size_bytes,mime_type,storage_uri,storage_key,tool_name,meta&limit=1")
+  [ "$artifact" = "[]" ] && { echo "Artifact not found: $id" >&2; return 1; }
+  links=$(rest "artifact_links?artifact_id=eq.${id}&relationship=eq.indexed_by&select=entry_id&limit=1" 2>/dev/null || echo "[]")
+  entry_id=$(echo "$links" | jq -r '.[0].entry_id // empty')
+  if [ -n "$entry_id" ]; then
+    entry=$(rest "entries?id=eq.${entry_id}&select=id,title,review,content,created_at&limit=1" 2>/dev/null | jq '.[0] // {}')
+  fi
+  if [ "$json" -eq 1 ]; then
+    jq -n --argjson artifact "$(echo "$artifact" | jq '.[0]')" --argjson entry "$entry" '{artifact:$artifact,entry:$entry}'
+    return 0
+  fi
+  jq -r --argjson entry "$entry" '.[0] as $a |
+    "Artifact: \($a.meta.title // ($a.source_path|split("/")[-1]))",
+    "ID:       \($a.id)",
+    "Type:     \($a.meta.artifact_type // "other")",
+    "Project:  \($a.project // "-")",
+    "Repo:     \($a.repo // "-")",
+    "Owner:    \($a.owner_id)",
+    "Review:   \($a.meta.review_status // "-")",
+    "SHA256:   \($a.sha256)",
+    "Path:     \($a.source_path)",
+    "Storage:  \($a.storage_uri // "-")",
+    "",
+    "Summary:",
+    ($a.meta.summary // ""),
+    "",
+    "Usage:",
+    ($a.meta.usage_notes // "No usage notes provided."),
+    "",
+    "Recall:",
+    ($a.meta.recall_prompt // ""),
+    "Then run: brain repo show \($a.id)",
+    "",
+    "Linked memory: \($entry.id // "-")  review=\($entry.review // "-")"' <<< "$artifact"
+}
+
+cmd_repo() {
+  local sub="${1:-search}"; shift 2>/dev/null || true
+  case "$sub" in
+    publish) cmd_repo_publish "$@" ;;
+    search|ls|list) cmd_repo_search "$@" ;;
+    show|get-info) cmd_repo_show "$@" ;;
+    get|download) cmd_artifacts_get "$@" ;;
+    *)
+      cat << 'RHELP'
+brain repo — reusable scripts/skills artifact repository
+
+  brain repo publish PATH --type TYPE [--title T] [--summary S|--summary-file F] [-p project] [-r repo] [--tags a,b]
+  brain repo search "query" [--type skill] [-p project] [-r repo] [--tag tag] [--review pending|approved]
+  brain repo show ARTIFACT_ID [--json]
+  brain repo get ARTIFACT_ID [output-file]
+
+Types: skill, script, hook, prompt, runbook, config, template, other
+RHELP
+      ;;
+  esac
+}
+
+# ============================================================
+# skills — discovery shim over `brain repo` for skill artifacts
+# ============================================================
+#
+# Why this exists: `brain recall <q>` queries the entries table only.
+# Skill artifacts live in the artifacts table and only surface via
+# `brain repo search --type skill`. New users don't know that. The
+# `brain skills` verbs make discovery natural: list/find/get with
+# --type skill baked in.
+
+cmd_skills_list() {
+  cmd_repo_search --type skill --review approved -n "${1:-50}"
+}
+
+cmd_skills_find() {
+  local q="" n=20 p=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -n|--limit) n="$2"; shift 2 ;;
+      -p|--project) p="$2"; shift 2 ;;
+      -h|--help) echo "Usage: brain skills find <query> [-p project] [-n limit]" >&2; return 0 ;;
+      *) [ -z "$q" ] && q="$1" || q="$q $1"; shift ;;
+    esac
+  done
+  [ -z "$q" ] && { echo "Usage: brain skills find <query> [-p project] [-n limit]" >&2; return 1; }
+  if [ -n "$p" ]; then
+    cmd_repo_search "$q" --type skill --review approved -p "$p" -n "$n"
+  else
+    cmd_repo_search "$q" --type skill --review approved -n "$n"
+  fi
+}
+
+cmd_skills_get() {
+  # Download a skill artifact to a tempfile and PRINT a `cp` instruction.
+  # We deliberately do NOT auto-write to ~/.claude/skills/ — that would
+  # cross a supply-chain trust boundary (anyone with publish rights
+  # could overwrite a user's local skill). Show the user the path,
+  # let them install it themselves.
+  local id="${1:-}"
+  [ -z "$id" ] && { echo "Usage: brain skills get ARTIFACT_ID" >&2; return 1; }
+  local tmp
+  tmp="$(mktemp -t brain-skill-XXXXXX)"
+  if cmd_artifacts_get "$id" "$tmp" >/dev/null 2>&1; then
+    echo "Skill artifact downloaded to: $tmp"
+    echo
+    echo "To install (review the file first):"
+    echo "  cat $tmp"
+    echo "  # If safe, install with:"
+    echo "  mkdir -p ~/.claude/skills/Utilities/<SkillName>"
+    echo "  cp $tmp ~/.claude/skills/Utilities/<SkillName>/SKILL.md"
+  else
+    rm -f "$tmp"
+    echo "brain skills get: failed to download artifact $id" >&2
+    return 1
+  fi
+}
+
+# Resolve where a published source_path should land on THIS machine.
+# Publishers store an absolute path from their own home, e.g.
+#   /home/alice/.claude/skills/Utilities/JiraQA/SKILL.md
+# We re-root it under the installing user's ~/.claude/skills so the
+# Category/Name/SKILL.md structure is preserved regardless of whose
+# machine published it.
+skills_local_target() {
+  local source_path="$1"
+  case "$source_path" in
+    */.claude/skills/*) echo "${HOME}/.claude/skills/${source_path#*/.claude/skills/}" ;;
+    *) echo "" ;;  # not a skills artifact — caller skips it
+  esac
+}
+
+cmd_skills_install() {
+  # Bulk "pull all latest" — install or update every approved skill
+  # artifact whose newest published version differs from (or is missing
+  # on) this machine.
+  #
+  # Dedup: there can be many artifact rows for the same logical skill
+  # (one per published version). We key on source_path and keep only the
+  # most-recently-created row per key.
+  #
+  # Trust note: this WRITES into ~/.claude/skills. It only touches paths
+  # under ~/.claude/skills/ (re-rooted from the artifact's source_path),
+  # never anywhere else. Use --dry-run first if unsure.
+  local query="" project="" force=0 dry=0 yes=0
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      -p|--project) project="$2"; shift 2 ;;
+      -f|--force)   force=1; shift ;;
+      --dry-run|-n) dry=1; shift ;;
+      -y|--yes)     yes=1; shift ;;
+      -h|--help)
+        cat << 'IHELP'
+Usage: brain skills install [QUERY] [-p project] [--dry-run] [--force] [--yes]
+
+Installs the LATEST approved version of every published skill into
+~/.claude/skills/<Category>/<Name>/SKILL.md, creating directories as
+needed. Skips skills already up to date (matching SHA256).
+
+  [QUERY]       optional substring filter (matches title/path/tags)
+  -p PROJECT    only skills from a given project
+  --dry-run     show what would change without writing
+  --force       reinstall even if the local copy already matches
+  --yes         skip the confirmation prompt
+IHELP
+        return 0 ;;
+      *) [ -z "$query" ] && query="$1" || query="$query $1"; shift ;;
+    esac
+  done
+
+  require_s3 || return 1
+
+  # Pull all repository skill artifacts (approved only), newest first.
+  local path="artifacts?source_system=eq.repository&select=id,created_at,project,source_path,sha256,storage_key,meta&order=created_at.desc&limit=2000"
+  [ -n "$project" ] && path+="&project=eq.${project}"
+
+  local rows
+  rows=$(rest "$path") || { echo "brain skills install: failed to query artifacts" >&2; return 1; }
+
+  # Filter to approved skills, optionally by query, then dedup to the
+  # newest row per source_path. Emit TSV: id<TAB>sha256<TAB>source_path<TAB>title
+  local latest
+  latest=$(jq -r --arg q "$query" '
+    def hay: ([.source_path,.project,.meta.title,.meta.summary,(.meta.tags // [])[]]
+              | map(. // "") | join(" ") | ascii_downcase);
+    # Dedup FIRST (always to the newest version per skill), THEN filter.
+    # Filtering before dedup could pick a stale older version whose
+    # summary happens to match the query when the newest one does not.
+    [ .[]
+      | select(.meta.artifact_type == "skill"
+        and .meta.review_status == "approved"
+        and (.source_path | test("/\\.claude/skills/"))) ]
+    | group_by(.source_path)
+    | map(max_by(.created_at))
+    | map(select($q == "" or (hay | contains($q | ascii_downcase))))
+    | .[]
+    | [.id, .sha256, .source_path, (.meta.title // (.source_path|split("/")[-1]))]
+    | @tsv
+  ' <<< "$rows")
+
+  if [ -z "$latest" ]; then
+    echo "No approved skills matched${query:+ \"$query\"}."
+    return 0
+  fi
+
+  # Classify each into NEW / UPDATE / OK.
+  local -a to_install=()
+  local n_new=0 n_upd=0 n_ok=0
+  while IFS=$'\t' read -r id sha src title; do
+    [ -z "$id" ] && continue
+    local target; target="$(skills_local_target "$src")"
+    [ -z "$target" ] && continue
+    if [ ! -f "$target" ]; then
+      echo "  NEW    $title"
+      to_install+=("${id}"$'\t'"${target}"$'\t'"${title}")
+      n_new=$((n_new+1))
+    else
+      local local_sha; local_sha="$(sha256sum "$target" 2>/dev/null | awk '{print $1}')"
+      if [ "$force" -eq 1 ] || [ "$local_sha" != "$sha" ]; then
+        echo "  UPDATE $title"
+        to_install+=("${id}"$'\t'"${target}"$'\t'"${title}")
+        n_upd=$((n_upd+1))
+      else
+        n_ok=$((n_ok+1))
+      fi
+    fi
+  done <<< "$latest"
+
+  echo
+  echo "Summary: ${n_new} new, ${n_upd} to update, ${n_ok} already current."
+
+  if [ "${#to_install[@]}" -eq 0 ]; then
+    echo "Everything is up to date."
+    return 0
+  fi
+
+  if [ "$dry" -eq 1 ]; then
+    echo "(dry run — nothing written)"
+    return 0
+  fi
+
+  if [ "$yes" -ne 1 ]; then
+    printf 'Install %d skill(s) into ~/.claude/skills/? [y/N] ' "${#to_install[@]}"
+    local ans; read -r ans
+    case "$ans" in y|Y|yes|YES) ;; *) echo "Aborted."; return 1 ;; esac
+  fi
+
+  local ok=0 fail=0
+  local rec
+  for rec in "${to_install[@]}"; do
+    local id target title
+    id="${rec%%$'\t'*}"; rec="${rec#*$'\t'}"
+    target="${rec%%$'\t'*}"; title="${rec#*$'\t'}"
+    mkdir -p "$(dirname "$target")"
+    if cmd_artifacts_get "$id" "$target" >/dev/null 2>&1; then
+      echo "  installed: $title"
+      ok=$((ok+1))
+    else
+      echo "  FAILED:    $title ($id)" >&2
+      fail=$((fail+1))
+    fi
+  done
+
+  echo
+  echo "Done: ${ok} installed, ${fail} failed."
+  [ "$fail" -eq 0 ]
+}
+
+cmd_skills() {
+  local sub="${1:-list}"; shift 2>/dev/null || true
+  case "$sub" in
+    list) cmd_skills_list "$@" ;;
+    find|search) cmd_skills_find "$@" ;;
+    get|download) cmd_skills_get "$@" ;;
+    install|update|pull|sync) cmd_skills_install "$@" ;;
+    *)
+      cat << 'SHELP'
+brain skills — discover, download, and install skill artifacts published to brain
+
+  brain skills list [LIMIT]                    list approved skill artifacts
+  brain skills find <query> [-p project] [-n N]   search skills by query
+  brain skills get ARTIFACT_ID                 download one skill (prints install instructions)
+  brain skills install [QUERY] [--dry-run] [--force] [--yes]
+                                               install/update the LATEST version of all
+                                               (or matching) approved skills into
+                                               ~/.claude/skills/<Category>/<Name>/SKILL.md
+
+Skills are published via `brain repo publish PATH --type skill`. The
+list/find/get verbs are discovery shims (filtered to --type skill
+--review approved). `install` is the bulk "pull all latest" path:
+it dedups to the newest version per skill, skips up-to-date copies,
+and writes only under ~/.claude/skills/.
+SHELP
+      ;;
+  esac
+}
+
+
+sync_upsert_state() {
+  local source="$1" project="$2" status="$3" stats_json="$4" err="$5"
+  local existing
+  existing=$(rest "sync_state?source_system=eq.${source}&owner_id=eq.${OWNER_ID}&project=eq.${project}&select=id&limit=1" 2>/dev/null || echo "[]")
+  local id
+  id=$(echo "$existing" | jq -r '.[0].id // empty')
+
+  local payload
+  payload=$(jq -n \
+    --arg s "$source" --arg o "$OWNER_ID" --arg p "$project" \
+    --arg st "$status" --arg e "$err" --argjson stats "$stats_json" \
+    '{source_system:$s,owner_id:$o,project:(if $p=="" then null else $p end),status:$st,last_run_at:(now|todateiso8601),stats:$stats,error:(if $e=="" then null else $e end)}')
+
+  if [ -n "$id" ]; then
+    rest "sync_state?id=eq.${id}" -X PATCH -d "$payload" >/dev/null
+  else
+    rest sync_state -d "$payload" >/dev/null
+  fi
+}
+
+sync_store_artifact() {
+  otel_span_start _otel_artifact "brain.sync.artifact"
+  local file="$1" source="$2" project="$3" scope="$4" dry_run="$5" repo="$6" tool="$7"
+  local path sha size mime rel_key s3_uri session_id
+  path="$file"
+  sha=$(sha_file "$file")
+  size=$(wc -c < "$file" | tr -d ' ')
+  mime=$(file_mime "$file")
+
+  # extract session_id from path patterns
+  session_id=""
+  case "$file" in
+    */.claude/projects/*/subagents/*)
+      session_id=$(basename "$(dirname "$(dirname "$file")")")
+      ;;
+    */.claude/projects/*/*.jsonl)
+      session_id=$(basename "$file" .jsonl)
+      ;;
+    */.cursor/projects/*/agent-transcripts/*/*)
+      session_id=$(basename "$(dirname "$file")")
+      ;;
+    */.cursor/chats/*/*/*)
+      session_id=$(basename "$(dirname "$(dirname "$file")")")
+      ;;
+  esac
+
+  local dup
+  dup=$(rest "artifacts?source_system=eq.${source}&sha256=eq.${sha}&select=id&limit=1" 2>/dev/null || echo "[]")
+  local dup_id
+  dup_id=$(echo "$dup" | jq -r '.[0].id // empty')
+  if [ -n "$dup_id" ]; then
+    echo "skip duplicate: $path"
+    otel_span_end _otel_artifact 1 "${_otel_sync_span_id:-}" "bt.file=$(basename "$path")" "bt.status=skipped"
+    return 10
+  fi
+
+  local date_path
+  date_path=$(date +%Y/%m/%d)
+  rel_key="${S3_PREFIX:-artifacts}/${OWNER_ID}/${project:-unscoped}/${source}/${date_path}/${sha}-$(basename "$file")"
+  s3_uri=$(s3_uri_for_key "$rel_key")
+
+  if [ "$dry_run" = "0" ]; then
+    s3_put_file "$file" "$rel_key" "$mime"
+  fi
+
+  local artifact_id=""
+  local meta
+  meta=$(jq -n --arg p "$path" --arg m "$mime" --arg sid "${session_id:-}" --arg tn "${tool:-}" \
+    '{source_path:$p,mime:$m,session_id:(if $sid=="" then null else $sid end),tool_name:(if $tn=="" then null else $tn end)}')
+
+  if [ "$dry_run" = "0" ]; then
+    artifact_id=$(rest artifacts -d "$(jq -n \
+      --arg ss "$source" --arg sp "$path" --arg pj "${project:-}" --arg sc "$scope" \
+      --arg o "$OWNER_ID" --arg sh "$sha" --arg mt "$mime" \
+      --arg su "$s3_uri" --arg sk "$rel_key" --argjson sz "$size" --argjson meta "$meta" \
+      --arg rp "${repo:-}" --arg rr "" --arg sg "${session_id:-}" --arg tn "${tool:-}" --arg sid "${session_id:-}" \
+      '{source_system:$ss,source_path:$sp,source_session_id:(if $sid=="" then null else $sid end),
+        project:(if $pj=="" then null else $pj end),
+        repo:(if $rp=="" then null else $rp end),repo_root:(if $rr=="" then null else $rr end),
+        session_group:(if $sg=="" then null else $sg end),
+        scope:$sc,owner_id:$o,sha256:$sh,size_bytes:$sz,mime_type:$mt,
+        storage_uri:$su,storage_key:$sk,tool_name:(if $tn=="" then null else $tn end),meta:$meta}')" \
+      | jq -r '.[0].id // .id // empty')
+  fi
+
+  # index textual content into entries for hybrid search
+  if is_textual_file "$file" "$mime"; then
+    local snippet
+    snippet=$(python3 -c "import pathlib,sys; p=pathlib.Path(sys.argv[1]); b=p.read_bytes()[:12000]; print(b.decode('utf-8','replace'))" "$file")
+    [ -n "$snippet" ] && [ "$dry_run" = "0" ] && rest entries -d "$(jq -n \
+      --arg c "$snippet" --arg t "Artifact: $(basename "$file")" \
+      --arg k "document" --arg p "${project:-}" --arg s "$scope" --arg o "$OWNER_ID" \
+      --arg h "$sha" --arg sp "$file" --arg aid "${artifact_id:-}" \
+      --arg ss "$source" --arg sid "${session_id:-}" --arg rp "${repo:-}" --arg tn "${tool:-}" \
+      '{content:$c,title:$t,kind:$k,scope:$s,owner_id:$o,author:"agent",content_hash:$h,
+        source_system:$ss,
+        source_session_id:(if $sid=="" then null else $sid end),
+        repo:(if $rp=="" then null else $rp end),
+        tool_name:(if $tn=="" then null else $tn end),
+        project:(if $p=="" then null else $p end),
+        meta:{source_path:$sp,artifact_id:(if $aid=="" then null else $aid end)}}')" >/dev/null || true
+  fi
+
+  [ "$dry_run" = "1" ] && echo "dry-run uploaded: $path -> $s3_uri" || echo "synced: $path"
+  otel_span_end _otel_artifact 1 "${_otel_sync_span_id:-}" "bt.file=$(basename "$path")" "bt.size_bytes=${size}" "bt.tool=${tool:-}"
+  return 0
+}
+
+sync_collect_files() {
+  local source="$1"
+  case "$source" in
+    pai)
+      [ -d "$HOME/.claude/MEMORY" ] && find "$HOME/.claude/MEMORY" -type f
+      [ -d "$HOME/.claude/projects" ] && find "$HOME/.claude/projects" -type f -name "*.jsonl"
+      ;;
+    cursor)
+      [ "${SYNC_CURSOR_ENABLED:-0}" = "1" ] || return 0
+      [ -d "$HOME/.cursor/projects" ] && find "$HOME/.cursor/projects" -type f
+      [ -d "$HOME/.cursor/chats" ] && find "$HOME/.cursor/chats" -type f
+      [ -d "$HOME/.cursor/ai-tracking" ] && find "$HOME/.cursor/ai-tracking" -type f
+      [ -d "$HOME/Library/Application Support/Cursor/User/globalStorage/anysphere.cursor-retrieval" ] && find "$HOME/Library/Application Support/Cursor/User/globalStorage/anysphere.cursor-retrieval" -type f
+      ;;
+  esac
+}
+
+detect_repo_from_path() {
+  local file="$1" source="$2"
+  case "$source" in
+    pai)
+      # PAI project dirs: -Users-Matthew-DSN-GitHub-RepoName
+      local dir
+      dir=$(echo "$file" | grep -oE '\.claude/projects/[^/]+' | head -1)
+      if [ -n "$dir" ]; then
+        echo "$dir" | sed 's|.*-||'
+        return
+      fi
+      # MEMORY/WORK slugs often contain project name
+      dir=$(echo "$file" | grep -oE 'MEMORY/WORK/[^/]+' | head -1)
+      if [ -n "$dir" ]; then
+        echo "$dir" | sed 's|MEMORY/WORK/[0-9_-]*||'
+        return
+      fi
+      ;;
+    cursor)
+      # Cursor project dirs: Users-Matthew-DSN-GitHub-RepoName
+      local dir
+      dir=$(echo "$file" | grep -oE '\.cursor/projects/[^/]+' | head -1)
+      if [ -n "$dir" ]; then
+        echo "$dir" | sed 's|.*-||'
+        return
+      fi
+      ;;
+  esac
+  echo ""
+}
+
+detect_tool_from_source() {
+  local source="$1" file="$2"
+  case "$source" in
+    pai)
+      case "$file" in
+        */subagents/*) echo "claude-subagent" ;;
+        */.claude/projects/*) echo "claude-code" ;;
+        */MEMORY/WORK/*) echo "pai-algorithm" ;;
+        */MEMORY/LEARNING/*) echo "pai-learning" ;;
+        */MEMORY/STATE/*) echo "pai-state" ;;
+        *) echo "pai" ;;
+      esac
+      ;;
+    cursor)
+      case "$file" in
+        */agent-transcripts/*) echo "cursor-agent" ;;
+        */chats/*) echo "cursor-chat" ;;
+        */ai-tracking/*) echo "cursor-tracking" ;;
+        */cursor-retrieval/*) echo "cursor-checkpoints" ;;
+        *) echo "cursor" ;;
+      esac
+      ;;
+    *) echo "$source" ;;
+  esac
+}
+
+cmd_sync_run() {
+  otel_span_start _otel_sync "brain.sync"
+  local source="pai" project="" scope="personal" dry_run=0 repo=""
+  while [[ $# -gt 0 ]]; do
+    case "$1" in
+      --source) source="$2"; shift 2 ;;
+      -p|--project) project="$2"; shift 2 ;;
+      -s|--scope) scope="$2"; shift 2 ;;
+      -r|--repo) repo="$2"; shift 2 ;;
+      --dry-run) dry_run=1; shift ;;
+      *) shift ;;
+    esac
+  done
+
+  require_s3 || return 1
+  [ -n "$project" ] || project="$(basename "$(pwd)")"
+  [ -z "$repo" ] && repo=$(git rev-parse --show-toplevel 2>/dev/null | xargs basename 2>/dev/null || echo "")
+
+  local sources=()
+  if [ "$source" = "all" ]; then
+    sources=(pai cursor)
+  else
+    sources=("$source")
+  fi
+
+  for src in "${sources[@]}"; do
+    local discovered=0 synced=0 skipped=0 failed=0
+    sync_upsert_state "$src" "$project" "running" '{}' '' || true
+
+    while IFS= read -r file; do
+      [ -f "$file" ] || continue
+      discovered=$((discovered + 1))
+
+      # auto-detect repo and tool from file path if not overridden
+      local file_repo="${repo}"
+      [ -z "$file_repo" ] && file_repo=$(detect_repo_from_path "$file" "$src")
+      local file_tool
+      file_tool=$(detect_tool_from_source "$src" "$file")
+
+      if sync_store_artifact "$file" "$src" "$project" "$scope" "$dry_run" "$file_repo" "$file_tool"; then
+        synced=$((synced + 1))
+      else
+        rc=$?
+        if [ "$rc" -eq 10 ]; then
+          skipped=$((skipped + 1))
+        else
+          failed=$((failed + 1))
+        fi
+      fi
+    done < <(sync_collect_files "$src")
+
+    local stats
+    stats=$(jq -n --argjson d "$discovered" --argjson s "$synced" --argjson k "$skipped" --argjson f "$failed" \
+      --arg rp "${repo:-}" '{discovered:$d,synced:$s,skipped:$k,failed:$f,repo:(if $rp=="" then null else $rp end)}')
+    if [ "$failed" -gt 0 ]; then
+      sync_upsert_state "$src" "$project" "failed" "$stats" "one or more files failed" || true
+    else
+      sync_upsert_state "$src" "$project" "ok" "$stats" '' || true
+    fi
+
+    cmd_log "Sync ${src}: discovered=${discovered} synced=${synced} skipped=${skipped} failed=${failed}" -k ingest -p "$project" -d "$stats" >/dev/null 2>&1 || true
+    echo "sync ${src}: discovered=${discovered} synced=${synced} skipped=${skipped} failed=${failed}"
+  done
+  otel_span_end _otel_sync 1 "" "bt.source=${source}" "bt.discovered=${discovered}" "bt.synced=${synced}"
+}
+
+cmd_sync() {
+  local sub="${1:-}"; shift 2>/dev/null || true
+  case "$sub" in
+    run) cmd_sync_run "$@" ;;
+    *)
+      cat << 'SHELP'
+brain sync
+
+  brain sync run [--source pai|cursor|all] [-p project] [-r repo] [-s scope] [--dry-run]
+
+Defaults:
+  source=pai
+  scope=personal
+  repo=auto-detected from git
+
+Notes:
+  - S3_BUCKET is required in ~/.braintrust/config
+  - Cursor sync requires SYNC_CURSOR_ENABLED=1
+  - Repo auto-detected from git if not specified; also inferred from file paths
+  - Tool name auto-detected from file location (claude-code, cursor-agent, etc.)
+SHELP
+      ;;
+  esac
+}
+
+# ============================================================
+# archive — context window preservation
+# ============================================================
+
+_archive_extract_patterns() {
+  # Pattern-based extraction when no LLM available
+  local content="$1" out=""
+
+  local decisions
+  decisions=$(echo "$content" | grep -i "decid\|decision\|agreed\|conclusion\|we'll go with\|chose to\|settled on" | head -10)
+  [ -n "$decisions" ] && out+="DECISIONS:"$'\n'"$(echo "$decisions" | sed 's/^/- /')"$'\n\n'
+
+  local errors
+  errors=$(echo "$content" | grep -i "error\|Error\|failed\|FAILED\|exception" | sort -u | head -10)
+  [ -n "$errors" ] && out+="ERRORS:"$'\n'"$(echo "$errors" | sed 's/^/- /')"$'\n\n'
+
+  local commands
+  commands=$(echo "$content" | grep -E '^\$|^>|dotnet |npm |bun |git |docker |aws |gh |msbuild' | head -15)
+  [ -n "$commands" ] && out+="COMMANDS:"$'\n'"$(echo "$commands" | sed 's/^/- /')"$'\n\n'
+
+  local files
+  files=$(echo "$content" | grep -oE '[a-zA-Z0-9_/.-]+\.(cs|ts|js|json|xml|csproj|sln|md|sql|yml|config)' | sort -u | head -20)
+  [ -n "$files" ] && out+="FILES:"$'\n'"$(echo "$files" | sed 's/^/- /')"$'\n\n'
+
+  local todos
+  todos=$(echo "$content" | grep -i "todo\|TODO\|fixme\|need to\|still need\|open question\|unresolved" | head -10)
+  [ -n "$todos" ] && out+="OPEN:"$'\n'"$(echo "$todos" | sed 's/^/- /')"$'\n\n'
+
+  [ -z "$out" ] && out="(no patterns extracted — session may have been too short)"
+  echo "$out"
+}
+
+cmd_archive() {
+  otel_span_start _otel_archive "brain.archive"
+  local subcmd="${1:-}"; shift 2>/dev/null || true
+
+  case "$subcmd" in
+    full)
+      # Archive raw transcript → personal scope
+      local project="" session_name=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in -p|--project) project="$2"; shift 2;; -s|--session) session_name="$2"; shift 2;; *) shift;; esac
+      done
+      local content; content=$(cat)
+      [ -z "$content" ] && { echo "Usage: <transcript> | brain archive full [-p project] [-s name]" >&2; return 1; }
+
+      local ts=$(date +%Y%m%d-%H%M%S)
+      local title="Session archive: ${session_name:-${ts}}"
+      local words=$(echo "$content" | wc -w | tr -d ' ')
+
+      echo "Archiving: ${title} (${words} words)"
+
+      local tmpfile=$(mktemp /tmp/bt-archive-XXXXXX.md)
+      printf "# %s\n\nArchived: %s | Words: %s | Project: %s\n\n---\n\n%s" \
+        "$title" "$ts" "$words" "${project:-unspecified}" "$content" > "$tmpfile"
+
+      cmd_ingest "$tmpfile" -t "$title" -s personal ${project:+-p "$project"} 2>&1 | sed 's/^/  /'
+      rm -f "$tmpfile"
+
+      cmd_log "Archived: ${session_name:-${ts}} (${words} words)" \
+        -k milestone ${project:+-p "$project"} \
+        -d "{\"words\":${words},\"type\":\"full\"}" 2>/dev/null
+      echo "  Stored in personal scope."
+      otel_span_end _otel_archive 1 "" "bt.archive_type=full" "bt.words=${words}"
+      ;;
+
+    rescue)
+      # Extract key context → team scope, raw → personal scope
+      local project="" session_name=""
+      while [[ $# -gt 0 ]]; do
+        case "$1" in -p|--project) project="$2"; shift 2;; -s|--session) session_name="$2"; shift 2;; *) shift;; esac
+      done
+      local content; content=$(cat)
+      [ -z "$content" ] && { echo "Usage: <transcript> | brain archive rescue [-p project] [-s name]" >&2; return 1; }
+
+      local ts=$(date +%Y%m%d-%H%M%S)
+      local words=$(echo "$content" | wc -w | tr -d ' ')
+      echo "Rescuing context: ${session_name:-${ts}} (${words} words)"
+
+      # Background: archive full transcript to personal
+      local tmpfull=$(mktemp /tmp/bt-full-XXXXXX.md)
+      echo "$content" > "$tmpfull"
+      (cmd_ingest "$tmpfull" -t "Session: ${session_name:-${ts}}" -s personal ${project:+-p "$project"} > /dev/null 2>&1; rm -f "$tmpfull") &
+
+      # Foreground: extract rescue
+      local rescue=""
+      if command -v opencode &>/dev/null; then
+        echo "  Extracting via LLM..."
+        rescue=$(opencode run -q "You are a context compression specialist. Extract ONLY actionable knowledge from this transcript. Format as: TASK STATE (1-3 sentences), DECISIONS (bullet list), KEY OUTPUTS (bullet list), OPEN QUESTIONS (bullet list), NEXT STEP (one sentence). Be terse. Transcript: $(echo "$content" | head -c 12000)" 2>/dev/null || true)
+      fi
+
+      if [ -z "$rescue" ] || [ ${#rescue} -lt 50 ]; then
+        echo "  Pattern-based extraction..."
+        rescue=$(_archive_extract_patterns "$content")
+      fi
+
+      # Store rescue as team finding
+      local rescue_title="Context rescue: ${session_name:-${ts}}"
+      cmd_capture "$rescue" -t "$rescue_title" -s team -k finding ${project:+-p "$project"} 2>&1 | sed 's/^/  /'
+
+      cmd_log "Rescued: ${session_name:-${ts}} (${words} words)" \
+        -k milestone ${project:+-p "$project"} \
+        -d "{\"words\":${words},\"rescue_chars\":${#rescue},\"type\":\"rescue\"}" 2>/dev/null
+
+      echo ""
+      echo "  Rescue → team scope (searchable by all)"
+      echo "  Full transcript → personal scope (background)"
+      echo "  To continue: brain search \"${session_name:-rescue}\" ${project:+-p $project}"
+      otel_span_end _otel_archive 1 "" "bt.archive_type=rescue" "bt.words=${words}"
+      ;;
+
+    auto)
+      # Auto-detect active session and rescue
+      echo "Scanning for active session..."
+      local transcript="" project=""
+
+      # PAI MEMORY/WORK
+      if [ -d "$HOME/.claude/MEMORY/WORK" ]; then
+        local work_dir
+        work_dir=$(ls -td "$HOME/.claude/MEMORY/WORK"/*/ 2>/dev/null | head -1)
+        if [ -n "$work_dir" ] && [ -f "${work_dir}/THREAD.md" ]; then
+          transcript=$(cat "${work_dir}/THREAD.md")
+          project=$(basename "$work_dir" | sed 's/^[0-9_-]*//')
+          echo "  Found PAI session: $(basename "$work_dir")"
+        fi
+      fi
+
+      # Claude projects directory
+      if [ -z "$transcript" ] && [ -d "$HOME/.claude/projects" ]; then
+        local latest
+        latest=$(find "$HOME/.claude/projects" -name "*.md" -mmin -30 -type f 2>/dev/null | head -1)
+        if [ -n "$latest" ] && [ -f "$latest" ]; then
+          transcript=$(cat "$latest")
+          project=$(basename "$(dirname "$latest")")
+          echo "  Found Claude session: $(basename "$latest")"
+        fi
+      fi
+
+      # OpenCode API
+      if [ -z "$transcript" ] && curl -sf http://localhost:4096/health > /dev/null 2>&1; then
+        local sid
+        sid=$(curl -sf http://localhost:4096/session 2>/dev/null | jq -r '.[0].id // empty' 2>/dev/null)
+        if [ -n "$sid" ]; then
+          transcript=$(curl -sf "http://localhost:4096/session/${sid}/messages" 2>/dev/null \
+            | jq -r '.[] | "\(.role): \(.content // "")"' 2>/dev/null)
+          project=$(basename "$(pwd)")
+          echo "  Found OpenCode session: ${sid}"
+        fi
+      fi
+
+      if [ -z "$transcript" ]; then
+        echo "  No active session found." >&2
+        return 1
+      fi
+
+      local wc=$(echo "$transcript" | wc -w | tr -d ' ')
+      [ "$wc" -lt 200 ] && { echo "  Session too short (${wc} words). Skipping."; return 0; }
+
+      echo "$transcript" | cmd_archive rescue -p "${project:-}" -s "auto-$(date +%H%M%S)"
+      ;;
+
+    *)
+      cat << 'AHELP'
+brain archive — Context window preservation
+
+  <transcript> | brain archive full [-p project] [-s session-name]
+    Save raw transcript → personal scope (chunked, searchable)
+
+  <transcript> | brain archive rescue [-p project] [-s session-name]
+    Extract decisions/findings → team scope + raw → personal scope
+
+  brain archive auto
+    Auto-detect active session and rescue (for hooks/cron)
+
+Full = everything, your eyes only.
+Rescue = key context extracted, shared with team.
+Auto = let brain figure out where the session is.
+AHELP
+      ;;
+  esac
+}
+
+# ============================================================
+# version
+# ============================================================
+cmd_version() {
+  echo "brain ${BRAIN_VERSION}"
+}
+
+# ============================================================
+# help
+# ============================================================
+# ============================================================
+# task — user-facing Task List (task_items + task_entries)
+# ============================================================
+cmd_task() {
+  otel_span_start _otel_task "brain.task"
+  local sub="${1:-list}"; shift 2>/dev/null || true
+  case "$sub" in
+    add)            _task_add "$@" ;;
+    list|ls)        _task_list "$@" ;;
+    next)           _task_next "$@" ;;
+    streams)        _task_streams "$@" ;;
+    status)         _task_status "$@" ;;
+    done)           _task_status "$@" done ;;
+    start)          _task_status "$@" doing ;;
+    reopen)         _task_status "$@" todo ;;
+    move)           _task_move "$@" ;;
+    assign)         _task_assign "$@" ;;
+    block)          _task_block block "$@" ;;
+    unblock)        _task_block unblock "$@" ;;
+    edit)           _task_edit "$@" ;;
+    rm|delete)      _task_rm "$@" ;;
+    capture)        _task_capture "$@" ;;
+    link)           _task_link "$@" ;;
+    entries)        _task_entries "${1:-}" ;;
+    show)           _task_show "${1:-}" ;;
+    graduate)       _task_graduate "$@" ;;
+    cycle)          _task_cycle "$@" ;;
+    estimate|points) _task_estimate "$@" ;;
+    burndown)       _task_burndown "$@" ;;
+    velocity)       _task_velocity "$@" ;;
+    due)            _task_due ;;
+    tag)            _task_tag tag "$1" "$2" ;;
+    untag)          _task_tag untag "$1" "$2" ;;
+    flow)           _task_flow "$@" ;;
+    subtasks|children) _task_subtasks "$1" ;;
+    help|"")        _task_help ;;
+    *)              echo "brain task: unknown subcommand '$sub'" >&2; _task_help; otel_span_end _otel_task 0 "unknown subcommand"; return 1 ;;
+  esac
+  otel_span_end _otel_task 1 "" "bt.task_sub=${sub}"
+}
+
+_task_help() {
+  cat << 'TH'
+brain task — user-facing to-do list (workstreams, ordering, captures)
+
+  brain task add "TITLE" [-w workstream] [-P p0|p1|p2|p3] [--due YYYY-MM-DD]
+                         [-s personal|team|global] [-p project] [--body TEXT] [--agent]
+  brain task list [-w workstream] [--status S] [-P priority] [-p project] [--all] [--sort order|priority|due] [-n N]
+  brain task next [-w workstream] [-n N]          actionable, dependency-aware, ranked
+  brain task due                                  reminder-due + overdue tasks
+  brain task assign ID --to OWNER                 delegate a task to a teammate
+  brain task tag ID t1,t2 | untag ID t1            manage tags; list --tag T filters
+  brain task flow -w WS [--days N]                cumulative-flow (arrivals/done/WIP)
+  brain task add ... --parent ID                  create a sub-task
+  brain task subtasks ID | list --children-of ID  view sub-tasks (parents show k/n)
+  brain task next|list [--mine | --assignee OWNER]        filter by assignee
+  brain task add ... [--recur daily|weekly|monthly] [--remind N]   recurring + reminder offset
+  brain task streams                              list workstreams with open/total counts
+  brain task start ID... | done ID... | reopen ID... | status ID... STATUS   (bulk ok)
+  brain task move ID [--before OTHER_ID] [--after OTHER_ID]
+  brain task block ID --on OTHER_ID | unblock ID --on OTHER_ID   (block warns on cycles)
+  brain task edit ID [-t TITLE] [-P pri] [--due DATE] [-w ws] [--body TEXT]
+  brain task rm ID [--force]
+  brain task capture ID "TEXT" [--rel note|finding|decision|context|result] [-k kind] [-s scope] [--agent]
+  brain task link ID ENTRY_ID [--rel ...]         link an existing brain entry
+  brain task entries ID                           list brain captures on a task
+  brain task show ID                              task header + captured history
+  brain task graduate ID [-t TITLE] [-p project]  promote task body to a durable entry
+
+  Burndown:
+  brain task cycle add "NAME" --target YYYY-MM-DD [--starts DATE] [-w ws]
+  brain task cycle list
+  brain task cycle close ID [--rollover [NEW_CYCLE_ID]]   close, roll unfinished forward
+  brain task cycle assign CYCLE_ID TASK_ID [TASK_ID...]   (bulk)
+  brain task add ... [--estimate N] [--cycle CYCLE_ID]   (estimate defaults to 1)
+  brain task estimate ID POINTS
+  brain task burndown CYCLE_ID | -w WORKSTREAM    daily remaining points + ideal line
+  brain task velocity [-w workstream]             completed points per recent cycle
+TH
+}
+
+# mirror a task into an embedded entries row (kind=task) so `brain search` finds it.
+# args: <full_task_id> <title> <body> <scope> <project> <author>
+# Creates a fresh entry each call and links it via task_set_search_entry; if a prior
+# mirror existed, archive it (best-effort). Degrades gracefully on embed failure.
+_task_mirror() {
+  local tid="$1" title="$2" body="$3" scope="$4" proj="$5" au="$6"
+  local content="$title"; [ -n "$body" ] && content="${title}"$'\n'"${body}"
+  # archive any existing mirror so search isn't polluted by stale copies
+  local old; old=$(rest "task_items?id=eq.${tid}&select=search_entry_id" 2>/dev/null | jq -r '.[0].search_entry_id // empty')
+  [ -n "$old" ] && rest "entries?id=eq.${old}" -X PATCH -d '{"review":"archived"}' >/dev/null 2>&1 || true
+  # create the embedded mirror via the normal capture path (kind=task)
+  local cap_args=(-t "$title" -k task -s "$scope")
+  [ "$au" = agent ] && cap_args+=(--agent)
+  [ -n "$proj" ] && cap_args+=(-p "$proj")
+  local eid; eid=$(printf '%s' "$content" | cmd_capture "$content" "${cap_args[@]}" 2>/dev/null | awk 'NR==1{print $1}')
+  if [ -z "$eid" ] || [[ ! "$eid" =~ ^[0-9a-f-]{8,} ]]; then
+    echo "  (warn: task not indexed for search — embed/capture unavailable)" >&2; return 0
+  fi
+  rpc task_set_search_entry "$(jq -n --arg t "$tid" --arg e "$eid" '{p_task_id:$t,p_entry_id:$e}')" >/dev/null 2>&1 || true
+}
+
+# add → rpc task_add
+_task_add() {
+  local title="" ws="" pr="p2" due="" scope="personal" proj="" body="" au="user" est="1" cyc="" recur="" remind="" parent="" autocomplete=""
+  while [[ $# -gt 0 ]]; do case "$1" in
+    -w|--workstream) ws="$2"; shift 2;;
+    -P|--priority) pr="$2"; shift 2;;
+    --due) due="$2"; shift 2;;
+    -s|--scope) scope="$2"; shift 2;;
+    -p|--project) proj="$2"; shift 2;;
+    --body) body="$2"; shift 2;;
+    --estimate|--points) est="$2"; shift 2;;
+    --cycle) cyc="$2"; shift 2;;
+    --recur) recur="$2"; shift 2;;
+    --remind) remind="$2"; shift 2;;
+    --parent) parent="$2"; shift 2;;
+    --auto-complete) autocomplete="true"; shift;;
+    --agent) au="agent"; shift;;
+    *) title="$1"; shift;;
+  esac; done
+  [ -z "$title" ] && { echo "Usage: brain task add \"TITLE\" [-w ws] [-P pri] [--due DATE] [--estimate N] [--cycle ID] [--recur daily|weekly|monthly] [--remind N] [--parent ID]" >&2; return 1; }
+  # F6: a sub-task inherits its parent's workstream when -w omitted
+  if [ -n "$parent" ]; then
+    parent=$(_task_resolve_id "$parent")
+    [ -z "$ws" ] && ws=$(rest "task_items?id=eq.${parent}&select=workstream" 2>/dev/null | jq -r '.[0].workstream // "inbox"')
+  fi
+  [ -z "$ws" ] && ws="inbox"
+  local res; res=$(rpc task_add "$(jq -n --arg t "$title" --arg w "$ws" --arg pr "$pr" \
+    --arg d "$due" --arg s "$scope" --arg p "$proj" --arg b "$body" --arg au "$au" \
+    --argjson e "$est" --arg c "$cyc" \
+    '{p_title:$t,p_workstream:$w,p_priority:$pr,
+      p_due:(if $d=="" then null else $d end),p_scope:$s,
+      p_project:(if $p=="" then null else $p end),
+      p_body:(if $b=="" then null else $b end),p_author:$au,
+      p_estimate:$e,p_cycle:(if $c=="" then null else $c end)}')")
+  local full; full=$(echo "$res" | jq -r '(if type=="array" then .[0] else . end).id')
+  echo "$res" | jq -r '(if type=="array" then .[0] else . end) | "\(.id[0:8])  [\(.workstream)]  \(.priority)  \(.status)  est:\(.estimate)  \(.title)"'
+  # F1/F2/F6: set recurrence/reminder/parent directly (not part of task_add RPC signature)
+  if [ -n "$full" ] && [ "$full" != null ] && { [ -n "$recur" ] || [ -n "$remind" ] || [ -n "$parent" ] || [ -n "$autocomplete" ]; }; then
+    local patch='{}'
+    [ -n "$recur" ]  && patch=$(jq -n --argjson p "$patch" --arg r "$recur" --arg a "${due:-$(date +%F)}" '$p + {recurrence:$r, recur_anchor:$a}')
+    [ -n "$remind" ] && patch=$(jq -n --argjson p "$patch" --argjson n "$remind" '$p + {remind_offset_days:$n}')
+    [ -n "$parent" ] && patch=$(jq -n --argjson p "$patch" --arg pid "$parent" '$p + {parent_id:$pid}')
+    [ -n "$autocomplete" ] && patch=$(jq -n --argjson p "$patch" '$p + {auto_complete:true}')
+    rest "task_items?id=eq.${full}" -X PATCH -d "$patch" >/dev/null 2>&1 || true
+  fi
+  # O1: index the task for semantic search (embedded mirror entry)
+  [ -n "$full" ] && [ "$full" != null ] && _task_mirror "$full" "$title" "$body" "$scope" "$proj" "$au"
+  # O3: surface task creation in brain timeline
+  cmd_log "task added [${ws}]: ${title}" -k milestone ${proj:+-p "$proj"} >/dev/null 2>&1 || true
+}
+
+# subtasks → rpc task_subtasks (children + progress)
+_task_subtasks() {
+  local pid="$1"
+  [ -z "$pid" ] && { echo "Usage: brain task subtasks ID" >&2; return 1; }
+  pid=$(_task_resolve_id "$pid")
+  local rows; rows=$(rpc task_subtasks "$(jq -n --arg p "$pid" '{p_parent:$p}')")
+  local n d; n=$(echo "$rows" | jq 'length'); d=$(echo "$rows" | jq '[.[]|select(.status=="done" or .status=="cancelled")]|length')
+  echo "Subtasks (${d}/${n} done):"
+  echo "$rows" | jq -r '.[] | "  \(.id[0:8])  \(.priority)  \(.status)" + (if .assignee_id then " @\(.assignee_id)" else "" end) + "  \(.title)"'
+}
+
+# due → reminder-due + overdue tasks (manual surface; no scheduler needed)
+_task_due() {
+  rpc due_reminders "$(jq -n '{p_stamp:false}')" \
+  | jq -r '.[] | (if .overdue then "‼OVERDUE" else "⏰due-soon" end) + "  \(.id[0:8])  [\(.workstream)]  \(.priority)  \(.due_date)  \(.title)"'
+}
+
+# list → rpc task_list (with --sort, blocked/due markers, assignee filter)
+_task_list() {
+  local ws="" st="" pr="" proj="" inc="false" n=100 sort="order" assignee="" tag="" parent=""
+  while [[ $# -gt 0 ]]; do case "$1" in
+    -w|--workstream) ws="$2"; shift 2;;
+    --status) st="$2"; shift 2;;
+    -P|--priority) pr="$2"; shift 2;;
+    -p|--project) proj="$2"; shift 2;;
+    --all) inc="true"; shift;;
+    --sort) sort="$2"; shift 2;;
+    --assignee) assignee="$2"; shift 2;;
+    --mine) assignee="${OWNER_ID:-}"; shift;;
+    --tag) tag="$2"; shift 2;;
+    --children-of) parent=$(_task_resolve_id "$2"); shift 2;;
+    -n|--limit) n="$2"; shift 2;;
+    *) shift;;
+  esac; done
+  rpc task_list "$(jq -n --arg w "$ws" --arg st "$st" --arg pr "$pr" --arg p "$proj" \
+    --argjson inc "$inc" --argjson n "$n" --arg sort "$sort" --arg asg "$assignee" --arg tg "$tag" --arg par "$parent" \
+    '{p_workstream:(if $w=="" then null else $w end),
+      p_status:(if $st=="" then null else $st end),
+      p_priority:(if $pr=="" then null else $pr end),
+      p_project:(if $p=="" then null else $p end),
+      p_include_done:$inc,n:$n,p_sort:$sort,
+      p_assignee:(if $asg=="" then null else $asg end),
+      p_tag:(if $tg=="" then null else $tg end),
+      p_parent:(if $par=="" then null else $par end)}')" \
+  | jq -r '.[] |
+      (if .blocked then "⛔" else "◷" end) + " " + (.id[0:8])
+      + "  [" + .workstream + "]  " + .priority + "  " + .status
+      + "  " + (.due_date // "-")
+      + (if .due_state=="overdue" then " ‼OVERDUE" elif .due_state=="due_soon" then " ⏰soon" else "" end)
+      + (if .assignee_id then " @" + .assignee_id else "" end)
+      + (if (.tags // []) | length > 0 then " #" + ((.tags // []) | join(" #")) else "" end)
+      + (if (.subtask_count // 0) > 0 then "  (" + (.done_subtasks|tostring) + "/" + (.subtask_count|tostring) + ")" else "" end)
+      + "  " + .title'
+}
+
+# tag / untag → PATCH tags[]
+_task_tag() {
+  local mode="$1" id="$2" csv="$3"
+  [ -z "$id" ] || [ -z "$csv" ] && { echo "Usage: brain task $mode ID tag1[,tag2]" >&2; return 1; }
+  id=$(_task_resolve_id "$id")
+  local cur; cur=$(rest "task_items?id=eq.${id}&select=tags" 2>/dev/null | jq -r '.[0].tags // []')
+  local next
+  if [ "$mode" = "tag" ]; then
+    next=$(jq -n --argjson c "$cur" --arg s "$csv" '($c + ($s|split(",")|map(gsub("^\\s+|\\s+$";"")))) | unique')
+  else
+    next=$(jq -n --argjson c "$cur" --arg s "$csv" '$c - ($s|split(",")|map(gsub("^\\s+|\\s+$";"")))')
+  fi
+  rest "task_items?id=eq.${id}" -X PATCH -d "$(jq -n --argjson t "$next" '{tags:$t}')" >/dev/null \
+    && echo "Task ${id:0:8} tags → $(echo "$next" | jq -r 'join(", ")')"
+}
+
+# flow → rpc cumulative_flow (CFD: arrivals vs completions vs WIP)
+_task_flow() {
+  local ws="" days=30
+  while [[ $# -gt 0 ]]; do case "$1" in
+    -w|--workstream) ws="$2"; shift 2;;
+    --days) days="$2"; shift 2;;
+    *) shift;;
+  esac; done
+  [ -z "$ws" ] && { echo "Usage: brain task flow -w WORKSTREAM [--days N]" >&2; return 1; }
+  local rows; rows=$(rpc cumulative_flow "$(jq -n --arg w "$ws" --argjson d "$days" '{p_workstream:$w,p_days:$d}')")
+  echo "$rows" | jq -r '.[] | "\(.day)  created:\(.created_cum)  done:\(.done_cum)  wip:\(.wip)"'
+  # ASCII WIP sparkline (open work over time)
+  local wip; wip=$(echo "$rows" | jq -c '[.[].wip]')
+  python3 -c '
+import sys, json
+v=json.loads(sys.argv[1])
+if not v: sys.exit(0)
+b="▁▂▃▄▅▆▇█"; m=max(v) or 1
+print("  WIP "+"".join(b[min(7,int(x/m*7))] for x in v)+"  (now "+str(v[-1])+")")
+' "$wip" 2>/dev/null || true
+}
+
+# next → rpc task_next (actionable, dependency-aware, ranked, assignee filter)
+_task_next() {
+  local ws="" n=5 assignee=""
+  while [[ $# -gt 0 ]]; do case "$1" in
+    -w|--workstream) ws="$2"; shift 2;;
+    -n|--limit) n="$2"; shift 2;;
+    --assignee) assignee="$2"; shift 2;;
+    --mine) assignee="${OWNER_ID:-}"; shift;;
+    *) shift;;
+  esac; done
+  rpc task_next "$(jq -n --arg w "$ws" --argjson n "$n" --arg asg "$assignee" \
+    '{p_workstream:(if $w=="" then null else $w end),n:$n,
+      p_assignee:(if $asg=="" then null else $asg end)}')" \
+  | jq -r '.[] | "→ \(.id[0:8])  [\(.workstream)]  \(.priority)  \(.due_date // "-")"
+      + (if .due_state=="overdue" then " ‼OVERDUE" elif .due_state=="due_soon" then " ⏰soon" else "" end)
+      + (if .assignee_id then " @\(.assignee_id)" else "" end)
+      + "  \(.title)"'
+}
+
+# assign → rpc task_assign
+_task_assign() {
+  local id="$1"; shift 2>/dev/null || true
+  local to=""
+  while [[ $# -gt 0 ]]; do case "$1" in --to) to="$2"; shift 2;; *) shift;; esac; done
+  [ -z "$id" ] || [ -z "$to" ] && { echo "Usage: brain task assign ID --to OWNER_ID" >&2; return 1; }
+  id=$(_task_resolve_id "$id")
+  rpc task_assign "$(jq -n --arg t "$id" --arg a "$to" '{p_task_id:$t,p_assignee:$a}')" >/dev/null \
+    && echo "Task ${id:0:8} assigned → @${to}"
+}
+
+# streams → aggregate over caller-scoped task_list (RLS-correct, matches `task list`)
+_task_streams() {
+  rpc task_list "$(jq -n '{p_workstream:null,p_status:null,p_priority:null,
+      p_project:null,p_include_done:true,n:100000,p_sort:"order"}')" \
+  | jq -r 'group_by(.workstream)[] |
+      "\(.[0].workstream)\t\([.[]|select(.status!="done" and .status!="cancelled")]|length) open / \(length) total"' \
+  | column -t -s $'\t'
+}
+
+# resolve a possibly-truncated task id (the CLI displays 8-char prefixes) to a
+# full UUID. Echoes the full id, or the input unchanged if already a full UUID /
+# no unique match. uuid columns have no LIKE operator, so we match prefix in jq.
+_task_resolve_id() {
+  local id="$1"
+  case "$id" in
+    ????????-????-????-????-????????????) echo "$id"; return 0;;  # already full UUID
+  esac
+  local hits
+  hits=$(rest "task_items?select=id" 2>/dev/null \
+    | jq -r --arg p "$id" '.[].id | select(startswith($p))' 2>/dev/null)
+  local n; n=$(printf '%s\n' "$hits" | grep -c . || true)
+  if [ "$n" = "1" ]; then echo "$hits"; else echo "$id"; fi  # ambiguous/none → pass through
+}
+
+# status/done/start → event-emitting RPC + timeline log (O3). Supports BULK ids.
+_task_status() {
+  local st="${!#}"             # last arg is the status (for internal start/done sugar)
+  # When called as `_task_status ID STATUS` (one id) OR `_task_status ID... STATUS`,
+  # everything before the last arg is an id list.
+  local ids=("${@:1:$#-1}")
+  [ ${#ids[@]} -eq 0 ] || [ -z "$st" ] && { echo "Usage: brain task status ID... STATUS" >&2; return 1; }
+  local id full ok=0
+  for id in "${ids[@]}"; do
+    full=$(_task_resolve_id "$id")
+    if rpc task_set_status "$(jq -n --arg i "$full" --arg s "$st" '{p_id:$i,p_status:$s}')" >/dev/null 2>&1; then
+      echo "Task ${full:0:8} → ${st}"
+      cmd_log "task ${full:0:8} → ${st}" -k milestone --status "$([ "$st" = done ] && echo pass || echo pending)" >/dev/null 2>&1 || true
+      # O1: keep the search mirror in sync — archive when closed, restore when reopened
+      local meid; meid=$(rest "task_items?id=eq.${full}&select=search_entry_id" 2>/dev/null | jq -r '.[0].search_entry_id // empty')
+      if [ -n "$meid" ]; then
+        case "$st" in
+          done|cancelled) rest "entries?id=eq.${meid}" -X PATCH -d '{"review":"archived"}' >/dev/null 2>&1 || true;;
+          *)              rest "entries?id=eq.${meid}" -X PATCH -d '{"review":"approved"}' >/dev/null 2>&1 || true;;
+        esac
+      fi
+      ok=$((ok+1))
+    else
+      echo "task ${id}: not found or not owned (status unchanged)" >&2
+    fi
+  done
+  [ "$ok" -gt 0 ]
+}
+
+# move → rpc task_reorder
+_task_move() {
+  local id="$1"; shift 2>/dev/null || true
+  local before="" after=""
+  while [[ $# -gt 0 ]]; do case "$1" in
+    --before) before="$2"; shift 2;;
+    --after) after="$2"; shift 2;;
+    *) shift;;
+  esac; done
+  [ -z "$id" ] && { echo "Usage: brain task move ID [--before OTHER] [--after OTHER]" >&2; return 1; }
+  id=$(_task_resolve_id "$id"); [ -n "$before" ] && before=$(_task_resolve_id "$before"); [ -n "$after" ] && after=$(_task_resolve_id "$after")
+  rpc task_reorder "$(jq -n --arg i "$id" --arg b "$before" --arg a "$after" \
+    '{p_id:$i,p_before:(if $b=="" then null else $b end),
+      p_after:(if $a=="" then null else $a end)}')" \
+  | jq -r '(if type=="array" then .[0] else . end) | "Moved \(.id[0:8]) → order_key \(.order_key)"'
+}
+
+# block/unblock → PATCH blocked_by[]
+_task_block() {
+  local mode="$1" id="$2"; shift 2 2>/dev/null || true
+  local on=""
+  while [[ $# -gt 0 ]]; do case "$1" in --on) on="$2"; shift 2;; *) shift;; esac; done
+  [ -z "$id" ] || [ -z "$on" ] && { echo "Usage: brain task $mode ID --on OTHER_ID" >&2; return 1; }
+  id=$(_task_resolve_id "$id"); on=$(_task_resolve_id "$on")
+  if [ "$mode" = "block" ]; then
+    # cycle warning (G1): would "$id blocked_by $on" close a dependency loop?
+    # i.e. does $on already (transitively) depend on $id?
+    local cyc; cyc=$(rpc task_depends_on "$(jq -n --arg n "$on" --arg t "$id" \
+      '{p_node:$n,p_target:$t}')" | jq -r 'if type=="array" then .[0] else . end')
+    [ "$cyc" = "true" ] && echo "⚠ warning: ${on:0:8} already depends on ${id:0:8} — this creates a dependency cycle (allowed, not enforced)" >&2
+  fi
+  local cur; cur=$(rest "task_items?id=eq.${id}&select=blocked_by" | jq -r '.[0].blocked_by // []')
+  local next
+  if [ "$mode" = "block" ]; then
+    next=$(jq -n --argjson c "$cur" --arg o "$on" '($c + [$o]) | unique')
+  else
+    next=$(jq -n --argjson c "$cur" --arg o "$on" '$c - [$o]')
+  fi
+  rest "task_items?id=eq.${id}" -X PATCH -d "$(jq -n --argjson b "$next" '{blocked_by:$b}')" >/dev/null \
+    && echo "Task ${id:0:8} ${mode}ed on ${on:0:8}"
+}
+
+# edit → PATCH provided fields
+_task_edit() {
+  local id="$1"; shift 2>/dev/null || true
+  local patch='{}'
+  while [[ $# -gt 0 ]]; do case "$1" in
+    -t|--title) patch=$(jq -n --argjson p "$patch" --arg v "$2" '$p + {title:$v}'); shift 2;;
+    -P|--priority) patch=$(jq -n --argjson p "$patch" --arg v "$2" '$p + {priority:$v}'); shift 2;;
+    --due) patch=$(jq -n --argjson p "$patch" --arg v "$2" '$p + {due_date:$v}'); shift 2;;
+    -w|--workstream) patch=$(jq -n --argjson p "$patch" --arg v "$2" '$p + {workstream:$v}'); shift 2;;
+    --body) patch=$(jq -n --argjson p "$patch" --arg v "$2" '$p + {body:$v}'); shift 2;;
+    --recur) patch=$(jq -n --argjson p "$patch" --arg v "$2" '$p + (if $v=="none" or $v=="" then {recurrence:null} else {recurrence:$v} end)'); shift 2;;
+    --auto-complete) patch=$(jq -n --argjson p "$patch" --arg v "$2" '$p + {auto_complete:($v=="on" or $v=="true")}'); shift 2;;
+    --remind) patch=$(jq -n --argjson p "$patch" --argjson v "$2" '$p + {remind_offset_days:$v}'); shift 2;;
+    *) shift;;
+  esac; done
+  [ -z "$id" ] || [ "$patch" = "{}" ] && { echo "Usage: brain task edit ID [-t T] [-P pri] [--due D] [-w ws] [--body B] [--recur daily|weekly|monthly|none] [--remind N]" >&2; return 1; }
+  id=$(_task_resolve_id "$id")
+  rest "task_items?id=eq.${id}" -X PATCH -d "$patch" >/dev/null && echo "Edited ${id:0:8}"
+  # O1: if title or body changed, refresh the search mirror
+  if echo "$patch" | jq -e 'has("title") or has("body")' >/dev/null 2>&1; then
+    local row; row=$(rest "task_items?id=eq.${id}&select=title,body,scope,project,author" 2>/dev/null | jq -r '.[0]')
+    _task_mirror "$id" \
+      "$(echo "$row" | jq -r '.title')" \
+      "$(echo "$row" | jq -r '.body // ""')" \
+      "$(echo "$row" | jq -r '.scope')" \
+      "$(echo "$row" | jq -r '.project // ""')" \
+      "$(echo "$row" | jq -r '.author')"
+  fi
+}
+
+# rm → DELETE
+_task_rm() {
+  local id="" force=0
+  while [[ $# -gt 0 ]]; do case "$1" in
+    --force) force=1; shift;;
+    *) id="$1"; shift;;
+  esac; done
+  [ -z "$id" ] && { echo "Usage: brain task rm ID [--force]" >&2; return 1; }
+  id=$(_task_resolve_id "$id")
+  if [ "$force" = "1" ]; then
+    # O1: delete the search mirror entry first (FK is SET NULL, so it'd orphan otherwise)
+    local meid; meid=$(rest "task_items?id=eq.${id}&select=search_entry_id" 2>/dev/null | jq -r '.[0].search_entry_id // empty')
+    [ -n "$meid" ] && rest "entries?id=eq.${meid}" -X DELETE >/dev/null 2>&1 || true
+    # hard delete — CASCADES away task_events, destroying burndown history. Explicit only.
+    rest "task_items?id=eq.${id}" -X DELETE >/dev/null && echo "Deleted ${id:0:8} (history purged)"
+  else
+    # default: soft-cancel via the event-emitting RPC so burndown history is preserved
+    rpc task_set_status "$(jq -n --arg i "$id" '{p_id:$i,p_status:"cancelled"}')" >/dev/null \
+      && echo "Cancelled ${id:0:8} (use --force to hard-delete)"
+    # archive the mirror so a cancelled task drops out of search
+    local meid2; meid2=$(rest "task_items?id=eq.${id}&select=search_entry_id" 2>/dev/null | jq -r '.[0].search_entry_id // empty')
+    [ -n "$meid2" ] && rest "entries?id=eq.${meid2}" -X PATCH -d '{"review":"archived"}' >/dev/null 2>&1 || true
+  fi
+}
+
+# capture → brain capture + rpc task_link_entry
+_task_capture() {
+  local tid="$1"; shift 2>/dev/null || true
+  local text="" rel="note" kind="thought" scope="personal" agent=""
+  while [[ $# -gt 0 ]]; do case "$1" in
+    --rel) rel="$2"; shift 2;;
+    -k|--kind) kind="$2"; shift 2;;
+    -s|--scope) scope="$2"; shift 2;;
+    --agent) agent="--agent"; shift;;
+    *) text="$1"; shift;;
+  esac; done
+  [ -z "$tid" ] || [ -z "$text" ] && { echo "Usage: brain task capture ID \"TEXT\" [--rel R] [-k kind] [-s scope]" >&2; return 1; }
+  tid=$(_task_resolve_id "$tid")
+  local cap_args=(-k "$kind" -s "$scope")
+  [ -n "$agent" ] && cap_args+=("$agent")
+  local eid; eid=$(cmd_capture "$text" "${cap_args[@]}" | awk 'NR==1{print $1}')
+  [ -z "$eid" ] && { echo "brain task capture: capture failed" >&2; return 1; }
+  rpc task_link_entry "$(jq -n --arg t "$tid" --arg e "$eid" --arg r "$rel" \
+    '{p_task_id:$t,p_entry_id:$e,p_rel:$r}')" >/dev/null
+  echo "Captured ${eid:0:8} (${rel}) → task ${tid:0:8}"
+}
+
+# link → rpc task_link_entry (existing entry)
+_task_link() {
+  local tid="$1" eid="$2"; shift 2 2>/dev/null || true
+  local rel="note"
+  while [[ $# -gt 0 ]]; do case "$1" in --rel) rel="$2"; shift 2;; *) shift;; esac; done
+  [ -z "$tid" ] || [ -z "$eid" ] && { echo "Usage: brain task link ID ENTRY_ID [--rel R]" >&2; return 1; }
+  tid=$(_task_resolve_id "$tid")
+  rpc task_link_entry "$(jq -n --arg t "$tid" --arg e "$eid" --arg r "$rel" \
+    '{p_task_id:$t,p_entry_id:$e,p_rel:$r}')" >/dev/null \
+    && echo "Linked ${eid:0:8} (${rel}) → task ${tid:0:8}"
+}
+
+# entries → rpc task_entries_list
+_task_entries() {
+  local tid="$1"
+  [ -z "$tid" ] && { echo "Usage: brain task entries ID" >&2; return 1; }
+  tid=$(_task_resolve_id "$tid")
+  rpc task_entries_list "$(jq -n --arg t "$tid" '{p_task_id:$t}')" \
+  | jq -r '.[] | "\(.relationship)\t\(.kind)\t\(.review)\t\(.title // (.content|.[0:60]))"' \
+  | column -t -s $'\t'
+}
+
+# show → task header + captured history
+_task_show() {
+  local tid="$1"
+  [ -z "$tid" ] && { echo "Usage: brain task show ID" >&2; return 1; }
+  tid=$(_task_resolve_id "$tid")
+  rest "task_items?id=eq.${tid}" \
+  | jq -r '.[0] | "Task \(.id[0:8])  [\(.workstream)]  \(.priority)  \(.status)\n  \(.title)",
+      (if .due_date then "  due: \(.due_date)" else empty end),
+      (if .assignee_id then "  assignee: \(.assignee_id)" else empty end),
+      (if .recurrence then "  recurs: \(.recurrence) (next \(.recur_anchor // "?"))" else empty end),
+      (if .body then "  \(.body)" else empty end),
+      (if ((.blocked_by // []) | length) > 0 then "  blocked_by: " + ((.blocked_by // []) | map(.[0:8]) | join(", ")) else empty end)'
+  # F6: list children inline if any
+  local kids; kids=$(rpc task_subtasks "$(jq -n --arg p "$tid" '{p_parent:$p}')" 2>/dev/null)
+  if [ "$(echo "$kids" | jq 'length' 2>/dev/null)" -gt 0 ] 2>/dev/null; then
+    echo "  ── subtasks ──"
+    echo "$kids" | jq -r '.[] | "  \(.id[0:8])  \(.status)  \(.title)"'
+  fi
+  echo "  ── captures ──"
+  _task_entries "$tid" | sed 's/^/  /'
+}
+
+# graduate → capture body as finding + link as 'graduated'
+_task_graduate() {
+  local tid="$1"; shift 2>/dev/null || true
+  local title="" proj=""
+  while [[ $# -gt 0 ]]; do case "$1" in
+    -t|--title) title="$2"; shift 2;;
+    -p|--project) proj="$2"; shift 2;;
+    *) shift;;
+  esac; done
+  [ -z "$tid" ] && { echo "Usage: brain task graduate ID [-t TITLE] [-p project]" >&2; return 1; }
+  tid=$(_task_resolve_id "$tid")
+  local body; body=$(rest "task_items?id=eq.${tid}&select=title,body" \
+    | jq -r '.[0] | (.body // .title)')
+  [ -z "$title" ] && title=$(rest "task_items?id=eq.${tid}&select=title" | jq -r '.[0].title')
+  # build capture args as an array so a project name with spaces can't word-split
+  local cap_args=(-t "$title" -k finding -s team --agent)
+  [ -n "$proj" ] && cap_args+=(-p "$proj")
+  local eid; eid=$(cmd_capture "$body" "${cap_args[@]}" | awk 'NR==1{print $1}')
+  [ -z "$eid" ] && { echo "brain task graduate: capture failed" >&2; return 1; }
+  rpc task_link_entry "$(jq -n --arg t "$tid" --arg e "$eid" \
+    '{p_task_id:$t,p_entry_id:$e,p_rel:"graduated"}')" >/dev/null
+  echo "Graduated task ${tid:0:8} → entry ${eid:0:8} (canonical)"
+}
+
+# ---- burndown: cycles, estimates, the burndown chart, velocity ----
+
+# resolve a possibly-truncated cycle id to a full UUID (uuid cols have no LIKE).
+_task_resolve_cycle() {
+  local id="$1"
+  case "$id" in
+    ????????-????-????-????-????????????) echo "$id"; return 0;;
+  esac
+  local hits; hits=$(rest "task_cycles?select=id" 2>/dev/null \
+    | jq -r --arg p "$id" '.[].id | select(startswith($p))' 2>/dev/null)
+  local n; n=$(printf '%s\n' "$hits" | grep -c . || true)
+  if [ "$n" = "1" ]; then echo "$hits"; else echo "$id"; fi
+}
+
+# cycle add|list|close
+_task_cycle() {
+  local sub="${1:-list}"; shift 2>/dev/null || true
+  case "$sub" in
+    add)
+      local name="" target="" starts="" ws="" scope="personal"
+      while [[ $# -gt 0 ]]; do case "$1" in
+        --target) target="$2"; shift 2;;
+        --starts) starts="$2"; shift 2;;
+        -w|--workstream) ws="$2"; shift 2;;
+        -s|--scope) scope="$2"; shift 2;;
+        *) name="$1"; shift;;
+      esac; done
+      [ -z "$name" ] || [ -z "$target" ] && { echo "Usage: brain task cycle add \"NAME\" --target YYYY-MM-DD [--starts DATE] [-w ws]" >&2; return 1; }
+      rpc cycle_add "$(jq -n --arg n "$name" --arg t "$target" --arg s "$starts" --arg w "$ws" --arg sc "$scope" \
+        '{p_name:$n,p_target:$t,p_starts:(if $s=="" then null else $s end),
+          p_workstream:(if $w=="" then null else $w end),p_scope:$sc}')" \
+      | jq -r '(if type=="array" then .[0] else . end) | "\(.id[0:8])  \(.name)  \(.starts_on)→\(.target_date)  [\(.status)]"'
+      ;;
+    list|ls)
+      rest "task_cycles?select=id,name,workstream,starts_on,target_date,status&order=target_date.desc" \
+      | jq -r '.[] | "\(.id[0:8])  \(.name)  [\(.workstream // "-")]  \(.starts_on)→\(.target_date)  \(.status)"'
+      ;;
+    close)
+      local id="$1"; shift 2>/dev/null || true
+      local rollover="" do_roll=0
+      while [[ $# -gt 0 ]]; do case "$1" in
+        --rollover) do_roll=1; [ -n "${2:-}" ] && [[ "$2" != -* ]] && { rollover="$2"; shift; }; shift;;
+        *) shift;;
+      esac; done
+      [ -z "$id" ] && { echo "Usage: brain task cycle close ID [--rollover [NEW_CYCLE_ID]]" >&2; return 1; }
+      id=$(_task_resolve_cycle "$id"); [ -n "$rollover" ] && rollover=$(_task_resolve_cycle "$rollover")
+      if [ "$do_roll" = "1" ]; then
+        local moved; moved=$(rpc cycle_close "$(jq -n --arg c "$id" --arg r "$rollover" \
+          '{p_cycle_id:$c,p_rollover_to:(if $r=="" then null else $r end)}')" | jq -r 'if type=="array" then .[0] else . end')
+        echo "Cycle ${id:0:8} closed; rolled over ${moved:-0} open task(s)${rollover:+ → ${rollover:0:8}}"
+      else
+        rpc cycle_close "$(jq -n --arg c "$id" '{p_cycle_id:$c,p_rollover_to:null}')" >/dev/null \
+          && echo "Cycle ${id:0:8} closed"
+      fi
+      ;;
+    assign)
+      # bulk: brain task cycle assign CYCLE_ID TASK_ID [TASK_ID...]
+      local cid="$1"; shift 2>/dev/null || true
+      [ -z "$cid" ] || [ $# -eq 0 ] && { echo "Usage: brain task cycle assign CYCLE_ID TASK_ID [TASK_ID...]" >&2; return 1; }
+      cid=$(_task_resolve_cycle "$cid")
+      local tid full
+      for tid in "$@"; do
+        full=$(_task_resolve_id "$tid")
+        rpc cycle_assign "$(jq -n --arg t "$full" --arg c "$cid" '{p_task_id:$t,p_cycle_id:$c}')" >/dev/null 2>&1 \
+          && echo "Task ${full:0:8} → cycle ${cid:0:8}" \
+          || echo "task ${tid}: assign failed (not found or not owned)" >&2
+      done
+      ;;
+    *) echo "Usage: brain task cycle add|list|close|assign ..." >&2; return 1;;
+  esac
+}
+
+# estimate ID N → task_set_estimate
+_task_estimate() {
+  local id="$1" pts="$2"
+  [ -z "$id" ] || [ -z "$pts" ] && { echo "Usage: brain task estimate ID POINTS" >&2; return 1; }
+  id=$(_task_resolve_id "$id")
+  rpc task_set_estimate "$(jq -n --arg i "$id" --argjson p "$pts" '{p_id:$i,p_estimate:$p}')" >/dev/null \
+    && echo "Task ${id:0:8} estimate → ${pts}"
+}
+
+# burndown CYCLE_ID | -w WORKSTREAM → daily remaining points + ASCII sparkline
+_task_burndown() {
+  local cid="" ws=""
+  while [[ $# -gt 0 ]]; do case "$1" in
+    -w|--workstream) ws="$2"; shift 2;;
+    *) cid="$1"; shift;;
+  esac; done
+  [ -z "$cid" ] && [ -z "$ws" ] && { echo "Usage: brain task burndown CYCLE_ID | -w WORKSTREAM" >&2; return 1; }
+  local rows
+  if [ -n "$ws" ]; then
+    rows=$(rpc burndown_ws "$(jq -n --arg w "$ws" '{p_workstream:$w}')")
+  else
+    rows=$(rpc burndown "$(jq -n --arg c "$cid" '{p_cycle_id:$c}')")
+  fi
+  echo "$rows" | jq -r '.[] | "\(.day)  rem:\(.remaining_points)  ideal:\(.ideal_points)  (\(.remaining_count) tasks)"'
+  # best-effort ASCII sparkline of remaining_points — pass the array as argv[1]
+  # (NOT via stdin; the python3 -c script must not have its stdin shadowed).
+  local pts; pts=$(echo "$rows" | jq -c '[.[].remaining_points]')
+  python3 -c '
+import sys, json
+vals=json.loads(sys.argv[1])
+if not vals: sys.exit(0)
+blocks="▁▂▃▄▅▆▇█"
+mx=max(vals) or 1
+line="".join(blocks[min(7,int(v/mx*7))] for v in vals)
+print("  "+line+"  (remaining points "+str(vals[0])+"→"+str(vals[-1])+")")
+' "$pts" 2>/dev/null || true
+}
+
+# velocity → completed points per cycle
+_task_velocity() {
+  local ws=""
+  while [[ $# -gt 0 ]]; do case "$1" in -w|--workstream) ws="$2"; shift 2;; *) shift;; esac; done
+  rpc velocity "$(jq -n --arg w "$ws" '{p_workstream:(if $w=="" then null else $w end),n:6}')" \
+  | jq -r '.[] | "\(.name)  \(.target_date)  \(.completed)/\(.committed) pts"'
+}
+
+cmd_help() {
+  cat << 'H'
+brain — Brain Trust CLI
+
+  brain search "query" [-p project] [-s scope] [-r repo] [-n limit]
+  brain capture "text" [-t title] [-p project] [-s scope] [-k kind] [--review S] [--agent]
+  brain ingest FILE [-t title] [-p project]
+  brain browse [-n limit] [-p project] [-s scope] [-k kind] [-r repo]
+  brain expand ID [radius]
+  brain sessions list [-p project] [-r repo] [--source pai|cursor] [-n limit]
+  brain sessions show SESSION_ID [-n limit]
+  brain log "summary" [-k type] [--status pass|fail] [-p project]
+  brain timeline [-n limit] [-p project] [-k type] [--since DATE]
+  brain recall "topic" [project]          OBSERVE: personal + team + events
+  brain task add|list|streams|start|done|move|capture|link|entries|show|graduate ...   user to-do list
+  echo "text" | brain learn "title" [project] [--explain]  LEARN: stdin → team (--explain wraps in teaching prose)
+  brain review [list|show|approve|reject|approve-all|reject-all|noise] ...   manage pending queue
+  brain provision ID "Name" [admin|member|agent]
+  brain auth status [--json]|health [--json]|doctor [--json] [--check]|refresh-metadata [--json]|broker-status [--json]|repair
+                                    inspect or repair managed Brain runtime credentials
+  brain key rotate               rotate managed Brain runtime key via broker
+  brain stats
+  brain version                  Print CLI version
+  brain sync run [--source pai|cursor|all] [-p project] [-r repo] [--dry-run]
+  brain artifacts search [query] [-p project] [-s scope] [-r repo] [--tool T] [-n limit]
+  brain artifacts get ARTIFACT_ID [output-file]
+  brain repo publish PATH --type TYPE [--title T] [--summary S|--summary-file F] [-p project] [-r repo] [--tags a,b]
+  brain repo search "query" [--type skill] [-p project] [-r repo] [--tag tag] [--review pending|approved]
+  brain repo show ARTIFACT_ID [--json]
+  brain repo get ARTIFACT_ID [output-file]
+  brain skills list [LIMIT]                    list approved skill artifacts
+  brain skills find <query> [-p project]       search skills (find what's published to brain)
+  brain skills get ARTIFACT_ID                 download a skill artifact (prints install instructions)
+  brain skills install [query] [--dry-run] [--force] [--yes]   pull+install LATEST of all (or matching) skills
+
+Archive (context window preservation):
+  <transcript> | brain archive full [-p project] [-s session]
+  <transcript> | brain archive rescue [-p project] [-s session]
+  brain archive auto
+
+Session/repo/tool tracking:
+  --repo/-r   Filter by repository name (auto-detected from git on sync)
+  --tool      Filter by tool name (cursor-agent, claude-code, pai-algorithm, etc.)
+
+Config: ~/.braintrust/config
+H
+}
+
+# ---- main ----
+case "${1:-help}" in
+  version|--version|-v) cmd_version; exit 0;;
+  auth) shift; cmd_auth "$@"; exit $?;;
+  key) shift; cmd_key "$@"; exit $?;;
+esac
+init
+otel_init
+case "${1:-help}" in
+  search)    shift; cmd_search "$@";;
+  capture)   shift; cmd_capture "$@";;
+  ingest)    shift; cmd_ingest "$@";;
+  browse)    shift; cmd_browse "$@";;
+  expand)    shift; cmd_expand "$@";;
+  sessions)  shift; cmd_sessions "$@";;
+  log)       shift; cmd_log "$@";;
+  timeline)  shift; cmd_timeline "$@";;
+  recall)    shift; cmd_recall "$@";;
+  task)      shift; cmd_task "$@";;
+  jira)      shift; cmd_jira "$@";;
+  learn)     shift; cmd_learn "$@";;
+  review)    shift; cmd_review "$@";;
+  provision) shift; cmd_provision "$@";;
+  auth)      shift; cmd_auth "$@";;
+  key)       shift; cmd_key "$@";;
+  version|--version|-v) cmd_version;;
+  stats)     cmd_stats;;
+  sync)      shift; cmd_sync "$@";;
+  artifacts) shift; cmd_artifacts "$@";;
+  repo)      shift; cmd_repo "$@";;
+  skills)    shift; cmd_skills "$@";;
+  archive)   shift; cmd_archive "$@";;
+  help|*)    cmd_help;;
+esac

@@ -2,5 +2,13 @@
   "name": "@opencortex/memory",
   "version": "0.1.0",
   "private": true,
-  "description": "Postgres memory schema, search, artifacts, and scopes for OpenCortex"
+  "description": "Postgres memory schema, search, artifacts, and scopes for OpenCortex",
+  "type": "module",
+  "scripts": {
+    "check": "node scripts/check-migrations.mjs",
+    "migrate": "node scripts/migrate.mjs"
+  },
+  "engines": {
+    "node": ">=22"
+  }
 }
