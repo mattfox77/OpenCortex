@@ -4,33 +4,25 @@ set -euo pipefail
 # Publish an OpenCortex skill bundle that install-server.sh stages for user
 # provisioning on every deploy (see ensure_skills() there).
 #
-# The bundle is a tar.gz with a top-level `skills/` directory, uploaded to the
-# deploy bucket at <prefix>/skills/opencortex-skills.tar.gz. Optional legacy PAI
-# content is included only when explicitly configured.
+# The bundle is a tar.gz with a top-level `skills/` directory. Write it to a
+# local path, then publish that archive through the deployment channel for the
+# target environment. Optional legacy PAI content is included only when
+# explicitly configured.
 #
 # Usage:
-#   OPENCORTEX_DEPLOY_BUCKET=opencortex-deploy \
 #   OPENCORTEX_SKILLS_SOURCE=./skills \
+#   OPENCORTEX_SKILLS_BUNDLE_PATH=./opencortex-skills.tar.gz \
 #   scripts/publish-skills.sh
 #
 # Env:
-#   OPENCORTEX_DEPLOY_BUCKET      (required) target S3 bucket
-#   OPENCORTEX_DEPLOY_PREFIX      (default: deploy/opencortex)
 #   OPENCORTEX_SKILLS_SOURCE      (required) dir with skill packs
+#   OPENCORTEX_SKILLS_BUNDLE_PATH (default: ./opencortex-skills.tar.gz)
 #   OPENCORTEX_LEGACY_PAI_SOURCE  (optional) legacy PAI dir
-#   AWS_REGION                    (default: us-east-1)
-#   AWS_PROFILE                   (optional) profile used for the upload
 
-bucket="${OPENCORTEX_DEPLOY_BUCKET:-${DIWAN_DEPLOY_BUCKET:-}}"
-prefix="${OPENCORTEX_DEPLOY_PREFIX:-${DIWAN_DEPLOY_PREFIX:-deploy/opencortex}}"
 skills_src="${OPENCORTEX_SKILLS_SOURCE:-${DIWAN_SKILLS_SOURCE:-}}"
+bundle_path="${OPENCORTEX_SKILLS_BUNDLE_PATH:-${DIWAN_SKILLS_BUNDLE_PATH:-./opencortex-skills.tar.gz}}"
 pai_src="${OPENCORTEX_LEGACY_PAI_SOURCE:-${DIWAN_PAI_SOURCE:-}}"
-region="${AWS_REGION:-us-east-1}"
 
-if [ -z "$bucket" ]; then
-  echo "OPENCORTEX_DEPLOY_BUCKET is required" >&2
-  exit 2
-fi
 if [ -z "$skills_src" ]; then
   echo "OPENCORTEX_SKILLS_SOURCE is required" >&2
   exit 2
@@ -62,10 +54,8 @@ if [ -d "$pai_src" ]; then
   fi
 fi
 
-tar -czf "$tmp/opencortex-skills.tar.gz" -C "$tmp/bundle" skills $( [ -d "$tmp/bundle/PAI" ] && echo PAI )
-
-key="${prefix}/skills/opencortex-skills.tar.gz"
-aws s3 cp "$tmp/opencortex-skills.tar.gz" "s3://${bucket}/${key}" --region "$region"
+mkdir -p "$(dirname "$bundle_path")"
+tar -czf "$bundle_path" -C "$tmp/bundle" skills $( [ -d "$tmp/bundle/PAI" ] && echo PAI )
 
 packs="$(ls "$tmp/bundle/skills" | wc -l | tr -d ' ')"
-echo "published ${packs} skill packs$( [ -d "$tmp/bundle/PAI" ] && echo ' + PAI') to s3://${bucket}/${key}"
+echo "wrote ${packs} skill packs$( [ -d "$tmp/bundle/PAI" ] && echo ' + PAI') to ${bundle_path}"

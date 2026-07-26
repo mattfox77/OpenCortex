@@ -54,12 +54,12 @@ describe('server installer', () => {
       'https://acli.atlassian.com/linux/latest/acli_linux_amd64',
     );
     expect(installer).toContain(
-      'https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip',
+      'for required in node npm npx git jq gh acli',
     );
-    expect(installer).toContain(
-      'for required in node npm npx git jq gh acli aws',
-    );
-    expect(installer).toContain('aws-cli/2');
+    expect(installer).not.toContain('awscli');
+    expect(installer).not.toContain('aws-cli/2');
+    expect(installer).toContain('OPENCORTEX_SKILLS_BUNDLE_PATH');
+    expect(installer).toContain('OPENCORTEX_SKILLS_BUNDLE_URL');
     expect(installer).toContain('/usr/local/bin/brain');
     expect(installer).toContain('/opt/braintrust/dist/brain');
     expect(installer).toContain('continuing without /usr/local/bin/brain');

@@ -71,8 +71,8 @@ ensure_rsync() {
 }
 
 # Per-user code sessions expect Node.js/npm/npx, git, jq, GitHub (gh),
-# Atlassian (acli), AWS CLI v2, and Brain Trust (brain) on PATH. Install them
-# system-wide so every Diwan Linux user's session shell can use them.
+# Atlassian (acli), and Brain Trust (brain) on PATH. Install them system-wide
+# so every Diwan Linux user's session shell can use them.
 # Idempotent: skips anything already present.
 ensure_clis() {
   local arch
@@ -86,20 +86,6 @@ ensure_clis() {
   esac
 
   ensure_apt_packages ca-certificates curl gnupg unzip git jq python3 make g++
-
-  # AWS CLI v2 (the distro v1 package lacks newer service commands such as
-  # `bedrock`). Replace only if v2 is not already installed.
-  if ! aws --version 2>/dev/null | grep -q "aws-cli/2"; then
-    local awszip tmp
-    case "$arch" in
-      amd64) awszip="https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" ;;
-      arm64) awszip="https://awscli.amazonaws.com/awscli-exe-linux-aarch64.zip" ;;
-    esac
-    tmp="$(mktemp -d)"
-    curl -fsSL "$awszip" -o "$tmp/awscliv2.zip"
-    ( cd "$tmp" && unzip -q awscliv2.zip && ./aws/install --update )
-    rm -rf "$tmp"
-  fi
 
   # GitHub CLI via the official apt repository. Always configure the official
   # repo before install so an old distro gh package is upgraded on deploy.
@@ -147,16 +133,12 @@ ensure_clis() {
     exit 1
   fi
 
-  for required in node npm npx git jq gh acli aws; do
+  for required in node npm npx git jq gh acli; do
     if ! command -v "$required" >/dev/null 2>&1; then
       echo "required CLI missing after install: $required" >&2
       exit 1
     fi
   done
-  if ! aws --version 2>/dev/null | grep -q "aws-cli/2"; then
-    echo "required AWS CLI v2 missing after install" >&2
-    exit 1
-  fi
 }
 
 ensure_brain_cli() {
@@ -303,38 +285,41 @@ provision_persisted_session_users() {
 
 # Stage the OpenCortex skill bundle so provision-diwan-user.sh can seed it into
 # every user's ~/.opencode/skills and ~/.codex/skills. The bundle is maintained
-# out-of-band and stored in the deploy bucket at
-# <prefix>/skills/opencortex-skills.tar.gz. Optional legacy PAI content is
-# unpacked only when the bundle carries it explicitly.
+# out-of-band and supplied as a local tarball or HTTPS URL. Optional legacy PAI
+# content is unpacked only when the bundle carries it explicitly.
 #
-# Best-effort: a missing bundle, no S3 access, or no aws CLI must NOT fail the
-# install. If a fetch fails but the staged skills directory already exists, the
-# existing copy is kept.
+# Best-effort: a missing or unreachable bundle must NOT fail the install. If a
+# fetch fails but the staged skills directory already exists, the existing copy
+# is kept.
 ensure_skills() {
-  local bucket="${OPENCORTEX_DEPLOY_BUCKET:-${DIWAN_DEPLOY_BUCKET:-}}"
-  local prefix="${OPENCORTEX_DEPLOY_PREFIX:-${DIWAN_DEPLOY_PREFIX:-deploy/opencortex}}"
-  local region="${AWS_REGION:-us-east-1}"
+  local bundle_path="${OPENCORTEX_SKILLS_BUNDLE_PATH:-${DIWAN_SKILLS_BUNDLE_PATH:-}}"
+  local bundle_url="${OPENCORTEX_SKILLS_BUNDLE_URL:-${DIWAN_SKILLS_BUNDLE_URL:-}}"
   local dest="${OPENCORTEX_SKILLS_STAGING_DIR:-${DIWAN_BRAIN_DIR:-/opt/opencortex/skills}}"
 
-  if [ -z "$bucket" ]; then
-    echo "ensure_skills: OPENCORTEX_DEPLOY_BUCKET not set; skipping skills staging." >&2
-    return 0
-  fi
-  if ! command -v aws >/dev/null 2>&1; then
-    echo "ensure_skills: aws CLI not available; skipping skills staging." >&2
+  if [ -z "$bundle_path" ] && [ -z "$bundle_url" ]; then
+    echo "ensure_skills: no skill bundle path or URL configured; skipping skills staging." >&2
     return 0
   fi
 
-  local key="${prefix}/skills/opencortex-skills.tar.gz"
   local tmp
   tmp="$(mktemp -d)"
-  # Use the instance role via IMDS; clear any ambient creds so we don't pick up
-  # a shadowing role from the surrounding environment.
-  if env -u AWS_ACCESS_KEY_ID -u AWS_SECRET_ACCESS_KEY -u AWS_SESSION_TOKEN \
-        -u AWS_SECURITY_TOKEN -u AWS_PROFILE -u AWS_DEFAULT_REGION \
-        -u AWS_REGION -u AWS_SHARED_CREDENTIALS_FILE \
-        aws s3 cp "s3://${bucket}/${key}" "${tmp}/skills.tar.gz" \
-        --region "$region" >/dev/null 2>&1; then
+  local archive="${tmp}/skills.tar.gz"
+  local fetched=0
+
+  if [ -n "$bundle_path" ]; then
+    if [ -f "$bundle_path" ]; then
+      cp "$bundle_path" "$archive"
+      fetched=1
+    else
+      echo "ensure_skills: skill bundle path not found: ${bundle_path}" >&2
+    fi
+  elif curl -fsSL --retry 3 "$bundle_url" -o "$archive"; then
+    fetched=1
+  else
+    echo "ensure_skills: unable to fetch skill bundle URL: ${bundle_url}" >&2
+  fi
+
+  if [ "$fetched" -eq 1 ]; then
     if tar -xzf "${tmp}/skills.tar.gz" -C "${tmp}" 2>/dev/null \
        && [ -d "${tmp}/skills" ]; then
       mkdir -p "$dest"
@@ -349,7 +334,7 @@ ensure_skills() {
       echo "ensure_skills: bundle malformed; leaving existing ${dest}/skills in place." >&2
     fi
   else
-    echo "ensure_skills: no skills bundle at s3://${bucket}/${key}; leaving existing ${dest}/skills in place." >&2
+    echo "ensure_skills: leaving existing ${dest}/skills in place." >&2
   fi
   rm -rf "${tmp}"
 }
