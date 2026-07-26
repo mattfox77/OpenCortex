@@ -1,4 +1,5 @@
 import { Connection, Client } from '@temporalio/client';
+import type { Duration } from '@temporalio/common';
 import {
   cortexTask,
   cortexMonitor,
@@ -95,7 +96,7 @@ export async function cancelTask(workflowId: string) {
 // --- Start a long-running monitor ---
 export async function startMonitor(params: {
   description: string;
-  interval?: string;
+  interval?: Duration;
 }) {
   const client = await getClient();
   const workflowId = `cortex-monitor-${Date.now()}`;

@@ -1,0 +1,6 @@
+{
+  "name": "@opencortex/skills",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Versioned skill bundle publishing and provisioning for OpenCortex"
+}

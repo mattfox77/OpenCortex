@@ -9,6 +9,7 @@ import {
   workflowInfo,
 } from '@temporalio/workflow';
 
+import type { Duration } from '@temporalio/common';
 import type * as activities from '../activities';
 
 // --- Activity proxies ---
@@ -54,6 +55,8 @@ export interface CortexTaskInput {
   maxIterations?: number;
 }
 
+type ApprovalDecision = { approved: boolean; notes?: string };
+
 // ================================================================
 // MAIN WORKFLOW: cortexTask
 // A durable, crash-proof task loop with brain-powered context.
@@ -65,7 +68,7 @@ export async function cortexTask(input: CortexTaskInput): Promise<string> {
   let phase = 'initializing';
   let currentStep = '';
   let approvalPending = false;
-  let approvalResult: { approved: boolean; notes?: string } | null = null;
+  let approvalResult: ApprovalDecision | null = null;
   let cancelled = false;
   let stepsCompleted = 0;
   const totalSteps = input.maxIterations || 10;
@@ -143,13 +146,14 @@ export async function cortexTask(input: CortexTaskInput): Promise<string> {
     // Wait up to 24 hours
     const gotApproval = await condition(() => approvalResult !== null, '24 hours');
 
-    if (!gotApproval || !approvalResult?.approved) {
+    const decision = approvalResult as ApprovalDecision | null;
+    if (!gotApproval || !decision?.approved) {
       await infra.updateLedger({
         workflowId: info.workflowId,
         status: 'cancelled',
-        output: { reason: approvalResult?.notes || 'Approval timeout' },
+        output: { reason: decision?.notes || 'Approval timeout' },
       });
-      return `Task cancelled: ${approvalResult?.notes || 'approval timeout'}`;
+      return `Task cancelled: ${decision?.notes || 'approval timeout'}`;
     }
   }
 
@@ -232,7 +236,7 @@ export async function cortexTask(input: CortexTaskInput): Promise<string> {
 // ================================================================
 export async function cortexMonitor(config: {
   watchDescription: string;
-  checkInterval: string;
+  checkInterval: Duration;
   maxRuns?: number;
 }): Promise<void> {
   let runCount = 0;

@@ -17,6 +17,14 @@ function supabase(): SupabaseClient {
 const OPENROUTER_API_KEY = process.env.OPENROUTER_API_KEY!;
 const OPENROUTER_BASE = 'https://openrouter.ai/api/v1';
 
+type EmbeddingResponse = {
+  data: Array<{ embedding: number[] }>;
+};
+
+type ChatCompletionResponse = {
+  choices: Array<{ message: { content: string } }>;
+};
+
 // ================================================================
 // ACTIVITY: Execute a CLI command via Claude Code
 // ================================================================
@@ -220,7 +228,7 @@ async function getEmbedding(text: string): Promise<number[]> {
     throw new Error(`Embedding failed: ${r.status} ${msg}`);
   }
 
-  const d = await r.json();
+  const d = await r.json() as EmbeddingResponse;
   return d.data[0].embedding;
 }
 
@@ -244,7 +252,7 @@ async function extractMetadata(text: string): Promise<Record<string, unknown>> {
         ],
       }),
     });
-    const d = await r.json();
+    const d = await r.json() as ChatCompletionResponse;
     return JSON.parse(d.choices[0].message.content);
   } catch {
     return { topics: ['uncategorized'], type: 'observation' };

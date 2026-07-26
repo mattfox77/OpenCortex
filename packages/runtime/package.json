@@ -1,0 +1,6 @@
+{
+  "name": "@opencortex/runtime",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Identity, session routing, chat, and provisioning for OpenCortex"
+}

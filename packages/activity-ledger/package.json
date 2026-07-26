@@ -1,0 +1,6 @@
+{
+  "name": "@opencortex/activity-ledger",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Optional activity, attribution, and billing rollups for OpenCortex"
+}

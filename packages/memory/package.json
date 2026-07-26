@@ -1,0 +1,6 @@
+{
+  "name": "@opencortex/memory",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Postgres memory schema, search, artifacts, and scopes for OpenCortex"
+}

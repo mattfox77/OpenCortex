@@ -1,0 +1,6 @@
+{
+  "name": "@opencortex/workbench",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Workbench provider adapters for OpenCortex"
+}

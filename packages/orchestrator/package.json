@@ -1,0 +1,31 @@
+{
+  "name": "@opencortex/orchestrator",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Temporal workflows, activities, and worker runtime for OpenCortex",
+  "main": "src/worker.ts",
+  "scripts": {
+    "worker": "ts-node src/worker.ts",
+    "task": "ts-node scripts/start-task.ts",
+    "monitor": "ts-node scripts/start-task.ts --monitor",
+    "build": "tsc -p tsconfig.json",
+    "check": "tsc -p tsconfig.json --noEmit",
+    "clean": "rm -rf dist"
+  },
+  "dependencies": {
+    "@supabase/supabase-js": "^2.49.0",
+    "@temporalio/activity": "^1.11.0",
+    "@temporalio/client": "^1.11.0",
+    "@temporalio/worker": "^1.11.0",
+    "@temporalio/workflow": "^1.11.0",
+    "dotenv": "^16.4.0"
+  },
+  "devDependencies": {
+    "@types/node": "^22.0.0",
+    "ts-node": "^10.9.0",
+    "typescript": "^5.7.0"
+  },
+  "engines": {
+    "node": ">=22.0.0"
+  }
+}

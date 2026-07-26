@@ -9,6 +9,7 @@
  */
 
 import { startTask, startMonitor } from '../src/client';
+import type { Duration } from '@temporalio/common';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -39,7 +40,7 @@ Options:
   let brainContext: string | undefined;
   let maxIterations = 10;
   let isMonitor = false;
-  let interval = '30 minutes';
+  let interval: Duration = '30 minutes';
   const descParts: string[] = [];
 
   for (let i = 0; i < args.length; i++) {
@@ -50,7 +51,7 @@ Options:
       case '--brain': brainContext = args[++i]; break;
       case '--iterations': maxIterations = parseInt(args[++i]); break;
       case '--monitor': isMonitor = true; break;
-      case '--interval': interval = args[++i]; break;
+      case '--interval': interval = args[++i] as Duration; break;
       default: descParts.push(args[i]);
     }
   }

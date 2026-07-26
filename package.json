@@ -1,40 +1,31 @@
 {
-  "name": "open-cortex",
+  "name": "opencortex",
   "version": "0.1.0",
-  "description": "Distributed AI CLI orchestration for Open Brain — durable execution, shared context, multi-machine coordination",
-  "main": "src/worker.ts",
+  "private": true,
+  "description": "Self-hosted AI engineering control plane",
+  "packageManager": "bun@1.3.13",
+  "workspaces": [
+    "packages/runtime",
+    "packages/memory",
+    "packages/workbench",
+    "packages/activity-ledger",
+    "packages/skills",
+    "packages/ui"
+  ],
   "scripts": {
-    "worker": "ts-node src/worker.ts",
-    "task": "ts-node scripts/start-task.ts",
-    "monitor": "ts-node scripts/start-task.ts --monitor",
-    "build": "tsc",
-    "clean": "rm -rf dist"
+    "build": "npm --prefix packages/orchestrator run build",
+    "check": "npm --prefix packages/orchestrator run check && node scripts/config-inventory.mjs",
+    "config:inventory": "node scripts/config-inventory.mjs",
+    "orchestrator:worker": "npm --prefix packages/orchestrator run worker",
+    "orchestrator:task": "npm --prefix packages/orchestrator run task",
+    "orchestrator:monitor": "npm --prefix packages/orchestrator run monitor"
   },
   "keywords": [
-    "open-brain",
+    "opencortex",
     "temporal",
     "ai-agents",
-    "distributed",
-    "orchestration",
-    "claude-code",
-    "mcp",
-    "durable-execution"
+    "control-plane",
+    "self-hosted"
   ],
-  "license": "MIT",
-  "dependencies": {
-    "@supabase/supabase-js": "^2.49.0",
-    "@temporalio/activity": "^1.11.0",
-    "@temporalio/client": "^1.11.0",
-    "@temporalio/worker": "^1.11.0",
-    "@temporalio/workflow": "^1.11.0",
-    "dotenv": "^16.4.0"
-  },
-  "devDependencies": {
-    "@types/node": "^22.0.0",
-    "ts-node": "^10.9.0",
-    "typescript": "^5.7.0"
-  },
-  "engines": {
-    "node": ">=20.0.0"
-  }
+  "license": "MIT"
 }
