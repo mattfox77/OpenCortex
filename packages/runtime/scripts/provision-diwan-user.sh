@@ -96,20 +96,7 @@ install -d -o "$user" -g "$user" "$home/.aws" "$home/.azure" "$home/.ssh"
 chown -R "$user:$user" "$home/.config" "$home/.opencode" "$home/.codex" "$home/.braintrust" "$home/.local" "$home/.cache"
 chmod 700 "$home/.aws" "$home/.azure" "$home/.ssh" "$home/.braintrust" "$home/.config/gh" "$home/.config/acli"
 
-brain_skills_source="${DIWAN_BRAIN_SKILLS_SOURCE:-}"
-if [ -z "$brain_skills_source" ]; then
-  for candidate in \
-    /opt/braintrust/skills \
-    /home/mfox-dsn/.claude/skills \
-    /home/mfox-dsn/repos/pai-opencode/.opencode/skills \
-    /home/mfox-dsn/repos/dyson-brain-trust/.opencode/skills
-  do
-    if [ -d "$candidate" ]; then
-      brain_skills_source="$candidate"
-      break
-    fi
-  done
-fi
+skills_source="${OPENCORTEX_SKILLS_DIR:-${DIWAN_BRAIN_SKILLS_SOURCE:-/opt/opencortex/skills/skills}}"
 
 seed_skills() {
   local source="$1"
@@ -126,23 +113,14 @@ seed_skills() {
   chown -R "$user:$user" "$target"
 }
 
-seed_skills "$brain_skills_source" "$home/.opencode/skills"
-seed_skills "$brain_skills_source" "$home/.codex/skills"
+seed_skills "$skills_source" "$home/.opencode/skills"
+seed_skills "$skills_source" "$home/.codex/skills"
 
-brain_pai_source="${DIWAN_BRAIN_PAI_SOURCE:-}"
-if [ -z "$brain_pai_source" ]; then
-  for candidate in /opt/braintrust/PAI /home/mfox-dsn/.claude/PAI
-  do
-    if [ -d "$candidate" ]; then
-      brain_pai_source="$candidate"
-      break
-    fi
-  done
-fi
+legacy_pai_source="${OPENCORTEX_LEGACY_PAI_DIR:-${DIWAN_BRAIN_PAI_SOURCE:-}}"
 
-if [ -d "$brain_pai_source" ]; then
-  seed_skills "$brain_pai_source" "$home/.opencode/skills/PAI"
-  seed_skills "$brain_pai_source" "$home/.codex/skills/PAI"
+if [ -d "$legacy_pai_source" ]; then
+  seed_skills "$legacy_pai_source" "$home/.opencode/skills/PAI"
+  seed_skills "$legacy_pai_source" "$home/.codex/skills/PAI"
   if [ -f "$home/.opencode/skills/PAI/SKILL.md" ]; then
     sed -i '1{/^<!-- PAI SKILL.md/d;}' "$home/.opencode/skills/PAI/SKILL.md"
   fi

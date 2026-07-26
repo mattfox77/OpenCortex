@@ -1,36 +1,38 @@
 #!/usr/bin/env bash
 set -euo pipefail
 
-# Publish the brain skills + PAI bundle that install-server.sh stages into
-# /opt/braintrust on every deploy (see ensure_skills() there).
+# Publish an OpenCortex skill bundle that install-server.sh stages for user
+# provisioning on every deploy (see ensure_skills() there).
 #
-# The bundle is a tar.gz with top-level `skills/` and `PAI/` directories,
-# uploaded to the deploy bucket at <prefix>/skills/diwan-skills.tar.gz — a key
-# under the deploy prefix so the EC2 instance role (which can read
-# <prefix>/*) can fetch it without an IAM change.
+# The bundle is a tar.gz with a top-level `skills/` directory, uploaded to the
+# deploy bucket at <prefix>/skills/opencortex-skills.tar.gz. Optional legacy PAI
+# content is included only when explicitly configured.
 #
 # Usage:
-#   DIWAN_DEPLOY_BUCKET=dsn-diwan-deploy-381492040186 \
-#   DIWAN_SKILLS_SOURCE=~/.claude/skills \
-#   DIWAN_PAI_SOURCE=~/.claude/PAI \
+#   OPENCORTEX_DEPLOY_BUCKET=opencortex-deploy \
+#   OPENCORTEX_SKILLS_SOURCE=./skills \
 #   scripts/publish-skills.sh
 #
 # Env:
-#   DIWAN_DEPLOY_BUCKET   (required) target S3 bucket
-#   DIWAN_DEPLOY_PREFIX   (default: deploy/diwan-runtime)
-#   DIWAN_SKILLS_SOURCE   (default: $HOME/.claude/skills) dir with skill packs
-#   DIWAN_PAI_SOURCE      (default: $HOME/.claude/PAI) PAI dir (optional)
-#   AWS_REGION            (default: us-east-1)
-#   AWS_PROFILE           (optional) profile used for the upload
+#   OPENCORTEX_DEPLOY_BUCKET      (required) target S3 bucket
+#   OPENCORTEX_DEPLOY_PREFIX      (default: deploy/opencortex)
+#   OPENCORTEX_SKILLS_SOURCE      (required) dir with skill packs
+#   OPENCORTEX_LEGACY_PAI_SOURCE  (optional) legacy PAI dir
+#   AWS_REGION                    (default: us-east-1)
+#   AWS_PROFILE                   (optional) profile used for the upload
 
-bucket="${DIWAN_DEPLOY_BUCKET:-}"
-prefix="${DIWAN_DEPLOY_PREFIX:-deploy/diwan-runtime}"
-skills_src="${DIWAN_SKILLS_SOURCE:-$HOME/.claude/skills}"
-pai_src="${DIWAN_PAI_SOURCE:-$HOME/.claude/PAI}"
+bucket="${OPENCORTEX_DEPLOY_BUCKET:-${DIWAN_DEPLOY_BUCKET:-}}"
+prefix="${OPENCORTEX_DEPLOY_PREFIX:-${DIWAN_DEPLOY_PREFIX:-deploy/opencortex}}"
+skills_src="${OPENCORTEX_SKILLS_SOURCE:-${DIWAN_SKILLS_SOURCE:-}}"
+pai_src="${OPENCORTEX_LEGACY_PAI_SOURCE:-${DIWAN_PAI_SOURCE:-}}"
 region="${AWS_REGION:-us-east-1}"
 
 if [ -z "$bucket" ]; then
-  echo "DIWAN_DEPLOY_BUCKET is required" >&2
+  echo "OPENCORTEX_DEPLOY_BUCKET is required" >&2
+  exit 2
+fi
+if [ -z "$skills_src" ]; then
+  echo "OPENCORTEX_SKILLS_SOURCE is required" >&2
   exit 2
 fi
 if [ ! -d "$skills_src" ]; then
@@ -60,10 +62,10 @@ if [ -d "$pai_src" ]; then
   fi
 fi
 
-tar -czf "$tmp/diwan-skills.tar.gz" -C "$tmp/bundle" skills $( [ -d "$tmp/bundle/PAI" ] && echo PAI )
+tar -czf "$tmp/opencortex-skills.tar.gz" -C "$tmp/bundle" skills $( [ -d "$tmp/bundle/PAI" ] && echo PAI )
 
-key="${prefix}/skills/diwan-skills.tar.gz"
-aws s3 cp "$tmp/diwan-skills.tar.gz" "s3://${bucket}/${key}" --region "$region"
+key="${prefix}/skills/opencortex-skills.tar.gz"
+aws s3 cp "$tmp/opencortex-skills.tar.gz" "s3://${bucket}/${key}" --region "$region"
 
 packs="$(ls "$tmp/bundle/skills" | wc -l | tr -d ' ')"
 echo "published ${packs} skill packs$( [ -d "$tmp/bundle/PAI" ] && echo ' + PAI') to s3://${bucket}/${key}"

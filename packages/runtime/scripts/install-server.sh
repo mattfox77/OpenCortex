@@ -301,24 +301,23 @@ provision_persisted_session_users() {
       done
 }
 
-# Stage the brain skills + PAI bundle into /opt/braintrust so that
-# provision-diwan-user.sh seeds them into every user's ~/.opencode/skills and
-# ~/.codex/skills. The bundle is maintained out-of-band and stored in the
-# deploy bucket at <prefix>/skills/diwan-skills.tar.gz (a tar.gz containing
-# top-level `skills/` and `PAI/` directories). Pulling it on every install
-# makes skills survive both deploys and instance replacement.
+# Stage the OpenCortex skill bundle so provision-diwan-user.sh can seed it into
+# every user's ~/.opencode/skills and ~/.codex/skills. The bundle is maintained
+# out-of-band and stored in the deploy bucket at
+# <prefix>/skills/opencortex-skills.tar.gz. Optional legacy PAI content is
+# unpacked only when the bundle carries it explicitly.
 #
 # Best-effort: a missing bundle, no S3 access, or no aws CLI must NOT fail the
-# install. If a fetch fails but /opt/braintrust/skills already exists, the
+# install. If a fetch fails but the staged skills directory already exists, the
 # existing copy is kept.
 ensure_skills() {
-  local bucket="${DIWAN_DEPLOY_BUCKET:-}"
-  local prefix="${DIWAN_DEPLOY_PREFIX:-deploy/diwan-runtime}"
+  local bucket="${OPENCORTEX_DEPLOY_BUCKET:-${DIWAN_DEPLOY_BUCKET:-}}"
+  local prefix="${OPENCORTEX_DEPLOY_PREFIX:-${DIWAN_DEPLOY_PREFIX:-deploy/opencortex}}"
   local region="${AWS_REGION:-us-east-1}"
-  local dest="${DIWAN_BRAIN_DIR:-/opt/braintrust}"
+  local dest="${OPENCORTEX_SKILLS_STAGING_DIR:-${DIWAN_BRAIN_DIR:-/opt/opencortex/skills}}"
 
   if [ -z "$bucket" ]; then
-    echo "ensure_skills: DIWAN_DEPLOY_BUCKET not set; skipping skills staging." >&2
+    echo "ensure_skills: OPENCORTEX_DEPLOY_BUCKET not set; skipping skills staging." >&2
     return 0
   fi
   if ! command -v aws >/dev/null 2>&1; then
@@ -326,7 +325,7 @@ ensure_skills() {
     return 0
   fi
 
-  local key="${prefix}/skills/diwan-skills.tar.gz"
+  local key="${prefix}/skills/opencortex-skills.tar.gz"
   local tmp
   tmp="$(mktemp -d)"
   # Use the instance role via IMDS; clear any ambient creds so we don't pick up
