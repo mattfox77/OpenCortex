@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# brain — Brain Trust CLI
+# brain — OpenCortex Memory compatibility CLI
 # ============================================================
 set -euo pipefail
 
@@ -1210,7 +1210,7 @@ cmd_provision() {
 # stats
 # ============================================================
 cmd_stats() {
-  echo "🧠 Brain Trust"
+  echo "OpenCortex Memory"
   echo ""
   echo "Entries:"
   rest "entries?select=kind&limit=100000" | jq -r '[group_by(.kind)[]|{k:.[0].kind,n:length}]|.[]|"  \(.k): \(.n)"' 2>/dev/null || echo "  (empty)"
@@ -1252,7 +1252,7 @@ cmd_auth_status() {
     fi
     return 0
   fi
-  echo "Brain Trust auth"
+  echo "OpenCortex Memory auth"
   echo "  config: ${BT_CONF}"
   if [ ! -f "$BT_CONF" ]; then
     echo "  status: missing"
@@ -1867,7 +1867,7 @@ CONF
     "$subject" "$email" "$owner_id" "${bt_url:-${BT_URL:-}}" "$key_prefix" \
     "entra-provisioned-key" "${AUTH_PROVISIONED_BY:-$requested_by}" "entra" "$rotation_due_at")"
   echo "Updated ${BT_CONF} for owner ${owner_id}"
-  echo "Updated ${DYSONCODE_AUTH_JSON} metadata for Brain Trust"
+  echo "Updated ${DYSONCODE_AUTH_JSON} metadata for OpenCortex Memory"
 }
 
 cmd_auth_repair_or_rotate() {
@@ -3661,7 +3661,7 @@ _task_velocity() {
 
 cmd_help() {
   cat << 'H'
-brain — Brain Trust CLI
+brain — OpenCortex Memory compatibility CLI
 
   brain search "query" [-p project] [-s scope] [-r repo] [-n limit]
   brain capture "text" [-t title] [-p project] [-s scope] [-k kind] [--review S] [--agent]

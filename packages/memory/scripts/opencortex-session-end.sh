@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# Brain Trust — Session End Hook
+# OpenCortex Memory — Session End Hook
 # ============================================================
 # Fires at session end. Decides whether this session is worth
 # archiving based on length and significance.

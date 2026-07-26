@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # ============================================================
-# Brain Trust — Pre-Compaction Hook (Claude Code)
+# OpenCortex Memory — Pre-Compaction Hook (Claude Code)
 # ============================================================
 # Register in ~/.claude/settings.json under hooks.Notification:
 #
@@ -9,7 +9,7 @@
 #       "matcher": "compact",
 #       "hooks": [{
 #         "type": "command",
-#         "command": "bash ~/.claude/hooks/braintrust-precompact.sh"
+#         "command": "bash ~/.claude/hooks/opencortex-precompact.sh"
 #       }]
 #     }]
 #   }
@@ -20,7 +20,7 @@
 #     "Stop": [{
 #       "hooks": [{
 #         "type": "command",
-#         "command": "bash ~/.claude/hooks/braintrust-session-end.sh '$TRANSCRIPT'"
+#         "command": "bash ~/.claude/hooks/opencortex-session-end.sh '$TRANSCRIPT'"
 #       }]
 #     }]
 #   }
