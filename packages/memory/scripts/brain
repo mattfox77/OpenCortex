@@ -106,23 +106,23 @@ init() {
   if [ ! -f "$BT_CONF" ]; then
     mkdir -p "$BT_DIR"
     cat > "$BT_CONF" << 'C'
-# Brain Trust config
+# OpenCortex memory config
 # BT_URL: PostgREST base URL (server sets this)
 BT_URL=
 BT_KEY=
 OWNER_ID=
-EMBED_PROVIDER=bedrock
-EMBED_REGION=us-east-1
-EMBED_URL=
+EMBED_PROVIDER=openai
+EMBED_URL=http://opencortex-embeddings:7997/v1/embeddings
 EMBED_KEY=
-EMBED_MODEL=amazon.titan-embed-text-v1
+EMBED_MODEL=nomic-ai/nomic-embed-text-v1.5
+EMBED_DIMENSIONS=768
 S3_BUCKET=
 S3_REGION=us-east-1
 S3_PREFIX=artifacts
 S3_KMS_KEY_ID=
 SYNC_CURSOR_ENABLED=0
 OTEL_ENDPOINT=
-OTEL_SERVICE_NAME=brain-trust
+OTEL_SERVICE_NAME=opencortex-memory
 C
     echo "Edit ${BT_CONF}" >&2; exit 1
   fi
@@ -140,56 +140,21 @@ C
 # ---- helpers ----
 
 embed() {
-  local provider="${EMBED_PROVIDER:-openrouter}"
+  local provider="${EMBED_PROVIDER:-openai}"
   local vec=""
 
   case "$provider" in
-    bedrock)
-      command -v aws >/dev/null 2>&1 || { echo "Install AWS CLI for EMBED_PROVIDER=bedrock" >&2; exit 1; }
-      local region="${EMBED_REGION:-${EMBED_AWS_REGION:-us-east-1}}"
-      local model="${EMBED_MODEL:-amazon.titan-embed-text-v1}"
-      local aws_profile="${EMBED_AWS_PROFILE:-${AWS_PROFILE:-}}"
-      local payload; payload=$(jq -n --arg t "$1" '{inputText:$t}')
-      local out; out=$(mktemp)
-      local -a aws_cmd=(aws bedrock-runtime invoke-model
-        --region "$region"
-        --model-id "$model"
-        --content-type "application/json"
-        --accept "application/json"
-        --cli-binary-format raw-in-base64-out
-        --body "$payload"
-        "$out")
-      [ -n "$aws_profile" ] && aws_cmd+=(--profile "$aws_profile")
-      local err; err=$(mktemp)
-      local rc=0
-      "${aws_cmd[@]}" >/dev/null 2>"$err" || rc=$?
-      if [ $rc -ne 0 ]; then
-        echo "brain: bedrock invoke-model failed (rc=$rc, model=$model, region=$region${aws_profile:+, profile=$aws_profile}):" >&2
-        sed 's/^/  /' "$err" >&2
-        case "$(cat "$err")" in
-          *"session has expired"*|*"Token has expired"*|*"SSO session"*)
-            echo "  hint: run 'aws sso login --profile ${aws_profile:-default}'" >&2
-            ;;
-          *"AccessDenied"*|*"not authorized"*)
-            echo "  hint: confirm Bedrock model access is enabled for $model in $region" >&2
-            ;;
-        esac
-        rm -f "$out" "$err"
-        exit 1
-      fi
-      vec=$(jq -c '.embedding // .embeddings[0] // empty' "$out")
-      rm -f "$out" "$err"
-      ;;
-    openrouter|*)
-      [ -z "${EMBED_KEY:-}" ] && { echo "Set EMBED_KEY in $BT_CONF" >&2; exit 1; }
-      local url="${EMBED_URL:-https://openrouter.ai/api/v1/embeddings}"
-      local model="${EMBED_MODEL:-openai/text-embedding-3-small}"
+    openai|openrouter|server|*)
+      local url="${EMBED_URL:-http://opencortex-embeddings:7997/v1/embeddings}"
+      local model="${EMBED_MODEL:-nomic-ai/nomic-embed-text-v1.5}"
+      local dimensions="${EMBED_DIMENSIONS:-768}"
       local resp; resp=$(mktemp)
       local http_code
-      http_code=$(curl -s -o "$resp" -w '%{http_code}' "$url" \
-        -H "Content-Type: application/json" \
-        -H "Authorization: Bearer ${EMBED_KEY}" \
-        -d "$(jq -n --arg t "$1" --arg m "$model" '{model:$m,input:$t,dimensions:1536}')") || http_code="000"
+      local -a curl_cmd=(curl -s -o "$resp" -w '%{http_code}' "$url"
+        -H "Content-Type: application/json")
+      [ -n "${EMBED_KEY:-}" ] && curl_cmd+=(-H "Authorization: Bearer ${EMBED_KEY}")
+      curl_cmd+=(-d "$(jq -n --arg t "$1" --arg m "$model" --argjson dimensions "$dimensions" '{model:$m,input:$t,dimensions:$dimensions}')")
+      http_code=$("${curl_cmd[@]}") || http_code="000"
       if [ "$http_code" != "200" ]; then
         echo "brain: embeddings API returned HTTP $http_code from $url (model=$model):" >&2
         sed 's/^/  /' "$resp" >&2
@@ -202,8 +167,9 @@ embed() {
   esac
 
   local dim; dim=$(echo "$vec" | jq 'length // 0')
-  [ "$dim" -eq 1536 ] || {
-    echo "brain: embedding dimension ${dim} != required 1536 (provider=${provider}, model=${EMBED_MODEL:-<unset>}). Vector was empty or wrong shape." >&2
+  local expected_dim="${EMBED_DIMENSIONS:-768}"
+  [ "$dim" -eq "$expected_dim" ] || {
+    echo "brain: embedding dimension ${dim} != required ${expected_dim} (provider=${provider}, model=${EMBED_MODEL:-<unset>}). Vector was empty or wrong shape." >&2
     exit 1
   }
   echo "$vec"
@@ -1853,17 +1819,17 @@ AUTH_MODE=entra-provisioned-key
 AUTH_PROVISIONED_BY=${AUTH_PROVISIONED_BY:-brain-cli}
 AUTH_IDENTITY_PROVIDER=entra
 EMBED_PROVIDER=${EMBED_PROVIDER:-server}
-EMBED_REGION=${EMBED_REGION:-us-east-1}
-EMBED_URL=${EMBED_URL:-}
+EMBED_URL=${EMBED_URL:-http://opencortex-embeddings:7997/v1/embeddings}
 EMBED_KEY=${EMBED_KEY:-}
-EMBED_MODEL=${EMBED_MODEL:-amazon.titan-embed-text-v1}
+EMBED_MODEL=${EMBED_MODEL:-nomic-ai/nomic-embed-text-v1.5}
+EMBED_DIMENSIONS=${EMBED_DIMENSIONS:-768}
 S3_BUCKET=${S3_BUCKET:-}
 S3_REGION=${S3_REGION:-us-east-1}
 S3_PREFIX=${S3_PREFIX:-artifacts}
 S3_KMS_KEY_ID=${S3_KMS_KEY_ID:-}
 SYNC_CURSOR_ENABLED=${SYNC_CURSOR_ENABLED:-0}
 OTEL_ENDPOINT=${OTEL_ENDPOINT:-}
-OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-brain-trust}
+OTEL_SERVICE_NAME=${OTEL_SERVICE_NAME:-opencortex-memory}
 CONF
   chmod 600 "$tmp"
   mv "$tmp" "$BT_CONF"
