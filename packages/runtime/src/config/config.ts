@@ -48,7 +48,7 @@ const schema = z.object({
   DIWAN_OPENCODE_BIN: z.string().default('/usr/local/bin/opencode'),
   DIWAN_PROVISION_USER_SCRIPT: z
     .string()
-    .default('/opt/diwan/scripts/provision-diwan-user.sh'),
+    .default('/opt/opencortex/scripts/provision-diwan-user.sh'),
   DIWAN_AWS_REGION: z.string().default('us-east-1'),
   DIWAN_SSM_TARGET_INSTANCE_ID: z.string().default(''),
   DIWAN_SSM_LOCAL_PORT_BASE: z.coerce.number().int().positive().default(5100),

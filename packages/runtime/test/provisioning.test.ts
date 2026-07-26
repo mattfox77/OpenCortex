@@ -5,6 +5,7 @@ import type { AppConfig } from '../src/config/config.js';
 
 const config = {
   DIWAN_WORKSPACE_ROOT: '/srv/diwan/workspaces',
+  DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-diwan-user.sh',
 } as AppConfig;
 
 describe('provisioning', () => {
@@ -30,8 +31,9 @@ describe('provisioning', () => {
     expect(commands.join('\n')).toContain('/home/mfox/.codex/skills');
     expect(commands.join('\n')).toContain('/home/mfox/.braintrust');
     expect(commands.join('\n')).toContain(
-      '/opt/diwan/scripts/provision-diwan-user.sh mfox',
+      '/opt/opencortex/scripts/provision-diwan-user.sh mfox',
     );
+    expect(commands.join('\n')).not.toContain('/home/mfox-dsn/.claude/skills');
     expect(commands.join('\n')).toContain('/home/mfox/.aws');
   });
 });

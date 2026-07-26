@@ -17,7 +17,7 @@ import type { AppConfig } from '../src/config/config.js';
 const config = {
   DIWAN_AWS_REGION: 'us-east-1',
   DIWAN_SSM_TARGET_INSTANCE_ID: 'i-abc123',
-  DIWAN_PROVISION_USER_SCRIPT: '/opt/diwan/scripts/provision-diwan-user.sh',
+  DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-diwan-user.sh',
 } as AppConfig;
 
 describe('AWS Session Manager sessions', () => {
@@ -46,7 +46,7 @@ describe('AWS Session Manager sessions', () => {
       'sudo',
       '-n',
       '/usr/bin/bash',
-      '/opt/diwan/scripts/provision-diwan-user.sh',
+      '/opt/opencortex/scripts/provision-diwan-user.sh',
       'grathke',
     ]);
   });
@@ -54,7 +54,7 @@ describe('AWS Session Manager sessions', () => {
   it('runs OpenCode as the mapped Linux user on the target instance', () => {
     const command = awsRemoteLaunchCommand(
       'mfox',
-      '/opt/diwan/scripts/provision-diwan-user.sh',
+      '/opt/opencortex/scripts/provision-diwan-user.sh',
       '/home/mfox/repos',
       "export HOME='/home/mfox' && export XDG_CONFIG_HOME='/home/mfox/.config' && export XDG_DATA_HOME='/home/mfox/.local/share' && export XDG_STATE_HOME='/home/mfox/.local/state' && export XDG_CACHE_HOME='/home/mfox/.cache' && mkdir -p '/home/mfox/repos'",
       [
@@ -70,7 +70,7 @@ describe('AWS Session Manager sessions', () => {
     );
 
     expect(command).toContain(
-      "'sudo' '-n' '/usr/bin/bash' '/opt/diwan/scripts/provision-diwan-user.sh' 'mfox' &&",
+      "'sudo' '-n' '/usr/bin/bash' '/opt/opencortex/scripts/provision-diwan-user.sh' 'mfox' &&",
     );
     expect(command).toContain(
       "install -d -o 'mfox' -g 'mfox' '/var/lib/diwan/code-session-logs'",

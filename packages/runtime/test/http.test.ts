@@ -46,7 +46,7 @@ function testConfig(): AppConfig {
     DIWAN_EXEC_MODE: 'dry-run',
     DIWAN_OPENCODE_PORT_BASE: 4100,
     DIWAN_OPENCODE_BIN: '/usr/local/bin/opencode',
-    DIWAN_PROVISION_USER_SCRIPT: '/opt/diwan/scripts/provision-diwan-user.sh',
+    DIWAN_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-diwan-user.sh',
     DIWAN_AWS_REGION: 'us-east-1',
     DIWAN_SSM_TARGET_INSTANCE_ID: '',
     DIWAN_SSM_LOCAL_PORT_BASE: 5100,
