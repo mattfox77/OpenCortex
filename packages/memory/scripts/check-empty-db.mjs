@@ -49,6 +49,7 @@ try {
       "echo \"created $table_count public tables\"",
     ].join("\n"),
   ]);
+  verifySearchPath();
 } finally {
   run(runtime, ["rm", "-f", container], { allowFailure: true });
 }
@@ -86,6 +87,63 @@ function waitForPostgres() {
     Atomics.wait(new Int32Array(new SharedArrayBuffer(4)), 0, 0, 1000);
   }
   throw new Error("Postgres did not become ready within 30 seconds");
+}
+
+function verifySearchPath() {
+  const vector = `[${Array.from({ length: 768 }, (_, index) => index === 0 ? "1" : "0").join(",")}]`;
+  const sql = `
+    INSERT INTO entries (content, title, embedding, kind, scope, owner_id, author, content_hash)
+    VALUES (
+      'OpenCortex fresh install searchable memory fixture',
+      'Fresh install search fixture',
+      '${vector}'::vector,
+      'thought',
+      'personal',
+      'fresh-owner',
+      'user',
+      'fresh-install-search-fixture'
+    );
+
+    SELECT id
+    FROM search(
+      'fresh install searchable memory',
+      '${vector}'::vector,
+      'fresh-owner',
+      5,
+      NULL,
+      NULL,
+      0.5,
+      false,
+      NULL
+    )
+    WHERE title = 'Fresh install search fixture'
+      AND scope = 'personal';
+  `;
+  const result = spawnSync(runtime, [
+    "exec",
+    "-i",
+    container,
+    "psql",
+    "-U",
+    "opencortex",
+    "-d",
+    "opencortex",
+    "--tuples-only",
+    "--no-align",
+    "--set",
+    "ON_ERROR_STOP=1",
+  ], {
+    input: sql,
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
+  if (!result.stdout.trim()) {
+    throw new Error("fresh-install hybrid search did not return the seeded 768-dim entry");
+  }
+  console.log("fresh-install hybrid search returned seeded 768-dim entry");
 }
 
 function run(command, args, options = {}) {

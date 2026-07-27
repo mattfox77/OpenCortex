@@ -38,6 +38,11 @@ systemctl --user start opencortex-otel.service
 joins `opencortex.network` and does not publish port `3000` to the host. Public
 memory access must go through the OpenCortex API layer.
 
+`opencortex-temporal` uses the same Postgres container, but stores Temporal data
+in `opencortex_temporal` and visibility data in
+`opencortex_temporal_visibility`. Memory application tables stay in
+`opencortex_memory`.
+
 `opencortex-dex` is the bundled OIDC issuer for local and staging profiles. The
 runtime uses the same OIDC implementation for Dex and external compliant issuers
 such as Google; configure `OPENCORTEX_OIDC_ISSUER` and client settings per

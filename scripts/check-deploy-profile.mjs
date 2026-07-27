@@ -45,6 +45,12 @@ const fileChecks = {
     "PublishPort=127.0.0.1:4318:4318",
     "PublishPort=127.0.0.1:4317:4317",
   ],
+  "opencortex-temporal.container": [
+    "ContainerName=opencortex-temporal",
+    "Environment=DB=postgres12",
+    "Environment=DBNAME=opencortex_temporal",
+    "Environment=VISIBILITY_DBNAME=opencortex_temporal_visibility",
+  ],
 };
 
 const failures = [];

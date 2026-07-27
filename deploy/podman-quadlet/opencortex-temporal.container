@@ -8,6 +8,8 @@ ContainerName=opencortex-temporal
 Image=docker.io/temporalio/auto-setup:1.25
 Network=opencortex.network
 Environment=DB=postgres12
+Environment=DBNAME=opencortex_temporal
+Environment=VISIBILITY_DBNAME=opencortex_temporal_visibility
 Environment=DB_PORT=5432
 Environment=POSTGRES_SEEDS=opencortex-memory-db
 Environment=POSTGRES_USER=opencortex
