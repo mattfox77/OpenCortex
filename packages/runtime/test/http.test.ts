@@ -217,6 +217,23 @@ describe('http app', () => {
     });
   });
 
+  it('accepts legacy auth cookies during the OpenCortex cookie rename window', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+
+    const response = await fetch(`${base}/diwan/api/me`, {
+      headers: {
+        Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
+      },
+    });
+
+    expect(response.status).toBe(200);
+    await expect(response.json()).resolves.toMatchObject({
+      user: { email: 'owner@acme.test' },
+    });
+  });
+
   it('exchanges OIDC auth codes with the configured token endpoint', async () => {
     const tokenBackend = await fakeOpenCode((_req, res) => {
       res.setHeader('Content-Type', 'application/json');
@@ -799,7 +816,7 @@ describe('http app', () => {
     }
     const base = `http://127.0.0.1:${address.port}`;
     const cookie = {
-      Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
+      Cookie: `opencortex.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
     };
     const projectPath = '/home/owner/repos/payments-core';
     const encodedProjectPath = Buffer.from(projectPath)
@@ -976,7 +993,7 @@ describe('http app', () => {
       `${base}/diwan/${workspaceToken}/session/ses_existing`,
       {
         headers: {
-          Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
+          Cookie: `opencortex.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
         },
         redirect: 'manual',
       },
@@ -1043,7 +1060,7 @@ describe('http app', () => {
     }
     const base = `http://127.0.0.1:${address.port}`;
     const cookie = {
-      Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
+      Cookie: `opencortex.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
     };
 
     const first = await fetch(
@@ -1210,7 +1227,7 @@ describe('http app', () => {
 
     const unrelated = await fetch(sessionPath, {
       headers: {
-        Cookie: `diwan.idToken=${encodeURIComponent('Dev unrelated@acme.test')}`,
+        Cookie: `opencortex.idToken=${encodeURIComponent('Dev unrelated@acme.test')}`,
       },
     });
     expect(unrelated.status).toBe(404);
@@ -1226,7 +1243,7 @@ describe('http app', () => {
 
     const shared = await fetch(sessionPath, {
       headers: {
-        Cookie: `diwan.idToken=${encodeURIComponent('Dev other@acme.test')}`,
+        Cookie: `opencortex.idToken=${encodeURIComponent('Dev other@acme.test')}`,
       },
     });
     // dry-run mode does not start an OpenCode backend, so an authorized proxy
@@ -1271,7 +1288,7 @@ describe('http app', () => {
     }
     const base = `http://127.0.0.1:${address.port}`;
     const cookie = {
-      Cookie: `diwan.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
+      Cookie: `opencortex.idToken=${encodeURIComponent('Dev owner@acme.test')}`,
     };
 
     const html = await fetch(`${base}/diwan/code/session/live/`, {

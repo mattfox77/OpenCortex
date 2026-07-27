@@ -4,7 +4,8 @@ import type { JWTPayload } from 'jose';
 import type { AppConfig } from '../config/config.js';
 import { assertAllowedEmailDomains, emailToLinuxUser } from './linuxUser.js';
 
-const authCookieName = 'diwan.idToken';
+const authCookieName = 'opencortex.idToken';
+const legacyAuthCookieName = 'diwan.idToken';
 
 interface OidcProviderMetadata {
   issuer: string;
@@ -28,7 +29,7 @@ function tokenFromRequest(req: Parameters<RequestHandler>[0]): string | null {
     return headerToken;
   }
   const cookies = req.cookies as Record<string, string | undefined> | undefined;
-  return cookies?.[authCookieName] ?? null;
+  return cookies?.[authCookieName] ?? cookies?.[legacyAuthCookieName] ?? null;
 }
 
 function groupsFrom(payload: JWTPayload, groupsClaim: string): string[] {
@@ -64,6 +65,9 @@ export function oidcAuth(config: AppConfig): RequestHandler {
           req.header('authorization') ??
           (req.cookies as Record<string, string | undefined> | undefined)?.[
             authCookieName
+          ] ??
+          (req.cookies as Record<string, string | undefined> | undefined)?.[
+            legacyAuthCookieName
           ] ??
           '';
         const devMatch = /^Dev\s+(.+@.+)$/i.exec(devCredential);

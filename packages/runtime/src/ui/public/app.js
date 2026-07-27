@@ -1,5 +1,13 @@
-const tokenKey = 'diwan.idToken';
-const accessTokenKey = 'diwan.accessToken';
+const tokenKey = 'opencortex.idToken';
+const accessTokenKey = 'opencortex.accessToken';
+const legacyTokenKey = 'diwan.idToken';
+const legacyAccessTokenKey = 'diwan.accessToken';
+const pkceKey = 'opencortex.pkce';
+const legacyPkceKey = 'diwan.pkce';
+const returnToKey = 'opencortex.returnTo';
+const legacyReturnToKey = 'diwan.returnTo';
+const authCookieName = 'opencortex.idToken';
+const legacyAuthCookieName = 'diwan.idToken';
 
 function currentBasePath() {
   const base = document.querySelector('base')?.getAttribute('href') ?? '/';
@@ -33,13 +41,14 @@ function base64UrlEncode(value) {
 }
 
 function syncAuthCookie() {
-  const token = sessionStorage.getItem(tokenKey);
+  const token = sessionStorage.getItem(tokenKey) ?? sessionStorage.getItem(legacyTokenKey);
   const secure = window.location.protocol === 'https:' ? '; Secure' : '';
+  document.cookie = `${legacyAuthCookieName}=; Path=${authCookiePath()}; SameSite=Strict; Max-Age=0${secure}`;
   if (!token) {
-    document.cookie = `diwan.idToken=; Path=${authCookiePath()}; SameSite=Strict; Max-Age=0${secure}`;
+    document.cookie = `${authCookieName}=; Path=${authCookiePath()}; SameSite=Strict; Max-Age=0${secure}`;
     return;
   }
-  document.cookie = `diwan.idToken=${encodeURIComponent(token)}; Path=${authCookiePath()}; SameSite=Strict${secure}`;
+  document.cookie = `${authCookieName}=${encodeURIComponent(token)}; Path=${authCookiePath()}; SameSite=Strict${secure}`;
 }
 
 function randomString(length = 64) {
@@ -64,13 +73,14 @@ async function authConfig() {
 }
 
 function hasStoredToken() {
-  return Boolean(sessionStorage.getItem(tokenKey));
+  return Boolean(sessionStorage.getItem(tokenKey) ?? sessionStorage.getItem(legacyTokenKey));
 }
 
 async function login() {
   const config = await authConfig();
   const verifier = randomString(48);
-  sessionStorage.setItem('diwan.pkce', verifier);
+  sessionStorage.setItem(pkceKey, verifier);
+  sessionStorage.removeItem(legacyPkceKey);
   const challenge = await sha256base64url(verifier);
   const params = new URLSearchParams({
     client_id: config.clientId,
@@ -91,7 +101,7 @@ async function handleCallback() {
   const code = params.get('code');
   if (!code) return;
 
-  const verifier = sessionStorage.getItem('diwan.pkce');
+  const verifier = sessionStorage.getItem(pkceKey) ?? sessionStorage.getItem(legacyPkceKey);
   if (!verifier) throw new Error('Missing PKCE verifier');
 
   const response = await fetch(apiUrl('/auth/token'), {
@@ -102,17 +112,21 @@ async function handleCallback() {
   if (!response.ok) throw new Error(await response.text());
   const tokens = await response.json();
   sessionStorage.setItem(tokenKey, tokens.idToken);
+  sessionStorage.removeItem(legacyTokenKey);
   if (tokens.accessToken) {
     sessionStorage.setItem(accessTokenKey, tokens.accessToken);
+    sessionStorage.removeItem(legacyAccessTokenKey);
   }
   syncAuthCookie();
-  sessionStorage.removeItem('diwan.pkce');
+  sessionStorage.removeItem(pkceKey);
+  sessionStorage.removeItem(legacyPkceKey);
   window.history.replaceState({}, document.title, authReturnPath());
 }
 
 function authReturnPath() {
-  const saved = sessionStorage.getItem('diwan.returnTo');
-  sessionStorage.removeItem('diwan.returnTo');
+  const saved = sessionStorage.getItem(returnToKey) ?? sessionStorage.getItem(legacyReturnToKey);
+  sessionStorage.removeItem(returnToKey);
+  sessionStorage.removeItem(legacyReturnToKey);
   if (saved?.startsWith(currentBasePath() + '/')) {
     return saved;
   }
@@ -121,7 +135,7 @@ function authReturnPath() {
 
 function authHeaders() {
   syncAuthCookie();
-  const token = sessionStorage.getItem(tokenKey);
+  const token = sessionStorage.getItem(tokenKey) ?? sessionStorage.getItem(legacyTokenKey);
   if (!token) return { 'Content-Type': 'application/json' };
   return {
     'Content-Type': 'application/json',
@@ -139,7 +153,8 @@ async function api(path, options = {}) {
     if (!redirectOnUnauthorized) {
       return undefined;
     }
-    sessionStorage.setItem('diwan.returnTo', window.location.pathname);
+    sessionStorage.setItem(returnToKey, window.location.pathname);
+    sessionStorage.removeItem(legacyReturnToKey);
     await login();
     return undefined;
   }
@@ -237,7 +252,12 @@ async function logout() {
   window.clearInterval(sessionNameRefreshTimer);
   sessionStorage.removeItem(tokenKey);
   sessionStorage.removeItem(accessTokenKey);
-  sessionStorage.removeItem('diwan.pkce');
+  sessionStorage.removeItem(legacyTokenKey);
+  sessionStorage.removeItem(legacyAccessTokenKey);
+  sessionStorage.removeItem(pkceKey);
+  sessionStorage.removeItem(legacyPkceKey);
+  sessionStorage.removeItem(returnToKey);
+  sessionStorage.removeItem(legacyReturnToKey);
   syncAuthCookie();
   setAuthenticated(undefined);
   const config = await authConfig().catch(() => undefined);
@@ -1417,12 +1437,14 @@ bindUiAction('#toggle-chat', 'click', () => {
 });
 
 bindUiAction('#sign-in', 'click', () => {
-  sessionStorage.setItem('diwan.returnTo', window.location.pathname);
+  sessionStorage.setItem(returnToKey, window.location.pathname);
+  sessionStorage.removeItem(legacyReturnToKey);
   void login();
 });
 
 bindUiAction('#auth-screen-sign-in', 'click', () => {
-  sessionStorage.setItem('diwan.returnTo', window.location.pathname);
+  sessionStorage.setItem(returnToKey, window.location.pathname);
+  sessionStorage.removeItem(legacyReturnToKey);
   void login();
 });
 
@@ -1459,6 +1481,8 @@ handleCallback()
     if (!me) {
       sessionStorage.removeItem(tokenKey);
       sessionStorage.removeItem(accessTokenKey);
+      sessionStorage.removeItem(legacyTokenKey);
+      sessionStorage.removeItem(legacyAccessTokenKey);
       syncAuthCookie();
     }
     setAuthenticated(currentUser);
