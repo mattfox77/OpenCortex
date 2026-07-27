@@ -17,13 +17,13 @@ async function run() {
   );
 
   // Register this worker in Cortex Memory
-  await supabase.from('worker_registry').upsert(
+  await supabase.from('workers').upsert(
     {
-      worker_name: WORKER_NAME,
-      worker_type: process.env.WORKER_TYPE || 'claude-code',
-      task_queues: TASK_QUEUES,
+      name: WORKER_NAME,
+      kind: process.env.WORKER_TYPE || 'opencode',
+      queues: TASK_QUEUES,
       capabilities: CAPABILITIES,
-      machine_info: {
+      machine: {
         hostname: os.hostname(),
         platform: os.platform(),
         arch: os.arch(),
@@ -31,9 +31,9 @@ async function run() {
         memory_gb: Math.round(os.totalmem() / 1e9),
       },
       status: 'online',
-      last_heartbeat: new Date().toISOString(),
+      heartbeat: new Date().toISOString(),
     },
-    { onConflict: 'worker_name' }
+    { onConflict: 'name' }
   );
 
   console.log(`🧠 Open Cortex Worker "${WORKER_NAME}" registered`);
@@ -43,9 +43,9 @@ async function run() {
   // Heartbeat to Cortex Memory every 30 seconds
   const heartbeat = setInterval(async () => {
     await supabase
-      .from('worker_registry')
-      .update({ last_heartbeat: new Date().toISOString(), status: 'online' })
-      .eq('worker_name', WORKER_NAME);
+      .from('workers')
+      .update({ heartbeat: new Date().toISOString(), status: 'online' })
+      .eq('name', WORKER_NAME);
   }, 30_000);
 
   // Connect to Temporal
@@ -73,9 +73,9 @@ async function run() {
     console.log('\n🛑 Shutting down...');
     clearInterval(heartbeat);
     await supabase
-      .from('worker_registry')
+      .from('workers')
       .update({ status: 'offline' })
-      .eq('worker_name', WORKER_NAME);
+      .eq('name', WORKER_NAME);
     for (const w of workers) w.shutdown();
   };
 

@@ -106,20 +106,22 @@ export async function executeCliCommand(params: {
 // ================================================================
 export async function searchBrain(query: string): Promise<string> {
   const embedding = await getEmbedding(query);
+  const ownerId = process.env.OPENCORTEX_OWNER_ID ?? process.env.OWNER_ID ?? 'system';
 
-  const { data, error } = await supabase().rpc('match_thoughts', {
-    query_embedding: embedding,
-    match_threshold: 0.4,
-    match_count: 5,
-    filter: {},
+  const { data, error } = await supabase().rpc('search', {
+    q: query,
+    q_embedding: embedding,
+    caller: ownerId,
+    n: 5,
+    include_pending: true,
   });
 
   if (error || !data?.length) return 'No relevant memory context found.';
 
   return data
     .map((t: any, i: number) =>
-      `[${i + 1}] (${(t.similarity * 100).toFixed(0)}% match, ` +
-      `${new Date(t.created_at).toLocaleDateString()})\n${t.content}`
+      `[${i + 1}] (${Math.round(Number(t.score ?? 0) * 100)}% match, ` +
+      `${t.kind ?? 'entry'}) ${t.title ?? '(untitled)'}\n${t.content}`
     )
     .join('\n\n');
 }
@@ -132,12 +134,38 @@ export async function captureToBrain(content: string): Promise<void> {
     getEmbedding(content),
     extractMetadata(content),
   ]);
+  const ownerId = process.env.OPENCORTEX_OWNER_ID ?? process.env.OWNER_ID ?? 'system';
+  const contentHash = sha256Hex(content);
 
-  const { error } = await supabase().from('thoughts').insert({
-    content,
-    embedding,
-    metadata: { ...metadata, source: 'opencortex' },
-  });
+  const existing = await supabase()
+    .from('entries')
+    .select('id')
+    .eq('content_hash', contentHash)
+    .eq('owner_id', ownerId)
+    .maybeSingle();
+
+  if (existing.error) {
+    console.error('Failed to lookup memory capture:', existing.error.message);
+    return;
+  }
+  if (existing.data?.id) {
+    return;
+  }
+
+  const { error } = await supabase()
+    .from('entries')
+    .insert({
+      content,
+      title: firstLineTitle(content),
+      embedding,
+      kind: 'thought',
+      scope: 'team',
+      owner_id: ownerId,
+      author: 'agent',
+      content_hash: contentHash,
+      source_system: 'opencortex',
+      meta: { ...metadata, source: 'opencortex' },
+    });
 
   if (error) {
     console.error('Failed to capture to memory:', error.message);
@@ -734,4 +762,12 @@ function inferMimeType(name: string): string {
     return 'text/plain';
   }
   return 'application/octet-stream';
+}
+
+function firstLineTitle(content: string): string {
+  const first = content
+    .split(/\r?\n/)
+    .map(line => line.trim())
+    .find(Boolean);
+  return (first ?? 'Memory capture').slice(0, 160);
 }
