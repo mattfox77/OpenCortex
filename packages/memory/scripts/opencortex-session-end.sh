@@ -11,7 +11,9 @@
 # For OpenCode, register as a plugin that fires on session close.
 # ============================================================
 
-command -v brain &>/dev/null || exit 0
+if [ -z "${OPENCORTEX_MEMORY_INGEST_CMD:-}" ] && ! command -v brain >/dev/null 2>&1; then
+  exit 0
+fi
 
 PROJECT=$(basename "$(pwd)")
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
@@ -48,18 +50,23 @@ WORD_COUNT=$(wc -w < "$TRANSCRIPT")
 
 # ---- Archive ----
 
-# Full transcript → personal scope (background, don't block session close)
-cat "$TRANSCRIPT" | brain archive full \
-  -p "$PROJECT" \
-  -s "session-${TIMESTAMP}" \
-  > /dev/null 2>&1 &
-
-# If session was significant (>2000 words), also do a rescue → team scope
-if [ "$WORD_COUNT" -gt 2000 ]; then
-  cat "$TRANSCRIPT" | brain archive rescue \
+if [ -n "${OPENCORTEX_MEMORY_INGEST_CMD:-}" ]; then
+  bash -lc "$OPENCORTEX_MEMORY_INGEST_CMD --file $(printf '%q' "$TRANSCRIPT") --project $(printf '%q' "$PROJECT") --session-id $(printf '%q' "session-${TIMESTAMP}") --source-system opencortex-session --scope personal --tool opencode" \
+    > /dev/null 2>&1 &
+else
+  # Full transcript -> personal scope (background, don't block session close)
+  cat "$TRANSCRIPT" | brain archive full \
     -p "$PROJECT" \
     -s "session-${TIMESTAMP}" \
     > /dev/null 2>&1 &
+
+  # If session was significant (>2000 words), also do a rescue -> team scope
+  if [ "$WORD_COUNT" -gt 2000 ]; then
+    cat "$TRANSCRIPT" | brain archive rescue \
+      -p "$PROJECT" \
+      -s "session-${TIMESTAMP}" \
+      > /dev/null 2>&1 &
+  fi
 fi
 
 # Sync PAI learnings if they exist

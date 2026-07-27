@@ -3,12 +3,14 @@ import type { Duration } from '@temporalio/common';
 import {
   cortexTask,
   cortexMonitor,
+  memoryIngestWorkflow,
   approveSignal,
   feedbackSignal,
   cancelSignal,
   statusQuery,
-} from './workflows/cortex';
+} from './workflows';
 import type { CortexTaskInput } from './workflows/cortex';
+import type { MemoryIngestInput } from './workflows/memoryIngest';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
@@ -114,4 +116,38 @@ export async function startMonitor(params: {
   console.log(`   Checking: ${params.description}`);
   console.log(`   Interval: ${params.interval || '30 minutes'}`);
   return workflowId;
+}
+
+// --- Start a memory ingest workflow ---
+export async function startMemoryIngest(
+  params: MemoryIngestInput & {
+    queue?: string;
+    workflowId?: string;
+  },
+) {
+  const client = await getClient();
+  const workflowId =
+    params.workflowId ??
+    `memory-ingest-${params.sourceSystem}-${params.sourceSessionId ?? Date.now()}`;
+
+  const handle = await client.workflow.start(memoryIngestWorkflow, {
+    taskQueue: params.queue || 'cortex-tasks',
+    workflowId,
+    args: [{
+      content: params.content,
+      artifactName: params.artifactName,
+      ownerId: params.ownerId,
+      sourceSystem: params.sourceSystem,
+      sourceSessionId: params.sourceSessionId,
+      project: params.project,
+      repo: params.repo,
+      scope: params.scope,
+      toolName: params.toolName,
+      mimeType: params.mimeType,
+      sourcePath: params.sourcePath,
+    }],
+  });
+
+  console.log(`✅ Started memory ingest workflow: ${workflowId}`);
+  return handle;
 }

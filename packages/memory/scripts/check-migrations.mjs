@@ -28,7 +28,12 @@ for (const [index, file] of files.entries()) {
 }
 
 const firstMigration = await readFile(join(migrationsDir, files[0]), "utf8");
-for (const required of ["CREATE EXTENSION IF NOT EXISTS vector", "CREATE TABLE IF NOT EXISTS entries"]) {
+for (const required of [
+  "CREATE EXTENSION IF NOT EXISTS vector",
+  "CREATE TABLE IF NOT EXISTS entries",
+  "embedding     vector(768)",
+  "q_embedding   vector(768)",
+]) {
   if (!firstMigration.includes(required)) {
     throw new Error(`Initial migration is missing required statement: ${required}`);
   }

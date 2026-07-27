@@ -17,7 +17,7 @@ CREATE TABLE IF NOT EXISTS entries (
   created_at    TIMESTAMPTZ DEFAULT now() NOT NULL,
   content       TEXT NOT NULL,
   title         TEXT,
-  embedding     vector(1536),
+  embedding     vector(768),
   fts           TSVECTOR GENERATED ALWAYS AS
                   (to_tsvector('english', coalesce(title, '') || ' ' || content)) STORED,
   kind          TEXT NOT NULL DEFAULT 'thought'
@@ -383,7 +383,7 @@ $$;
 
 CREATE OR REPLACE FUNCTION search(
   q             TEXT,
-  q_embedding   vector(1536),
+  q_embedding   vector(768),
   caller        TEXT,
   n             INTEGER DEFAULT 10,
   p             TEXT DEFAULT NULL,

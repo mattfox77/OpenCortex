@@ -1,6 +1,9 @@
 import { Context } from '@temporalio/activity';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { execFileSync } from 'child_process';
+import { createHash } from 'crypto';
+import { mkdirSync, writeFileSync } from 'fs';
+import { dirname, join } from 'path';
 
 // --- Shared memory client ---
 let _supabase: SupabaseClient;
@@ -30,10 +33,38 @@ const EMBEDDINGS_DIMENSIONS = Number(
 const EMBEDDINGS_KEY =
   process.env.OPENCORTEX_EMBEDDINGS_KEY ??
   process.env.EMBED_KEY;
+const OBJECTS_LOCAL_DIR =
+  process.env.OPENCORTEX_OBJECTS_LOCAL_DIR ??
+  process.env.OBJECT_STORE_LOCAL_DIR ??
+  '/var/lib/opencortex/objects';
+const OBJECTS_BUCKET =
+  process.env.OPENCORTEX_OBJECTS_BUCKET ??
+  process.env.OBJECT_STORE_BUCKET ??
+  'opencortex-artifacts';
+const OBJECTS_PREFIX =
+  process.env.OPENCORTEX_OBJECTS_PREFIX ??
+  process.env.OBJECT_STORE_PREFIX ??
+  'artifacts';
 
 type EmbeddingResponse = {
   data: Array<{ embedding: number[] }>;
 };
+
+export interface StoredArtifact {
+  artifactId: string;
+  sha256: string;
+  sizeBytes: number;
+  mimeType: string;
+  storageKey: string;
+  storageUri: string;
+  sourcePath: string;
+}
+
+export interface TextChunk {
+  index: number;
+  content: string;
+  heading?: string;
+}
 
 // ================================================================
 // ACTIVITY: Execute a CLI command via OpenCode
@@ -208,6 +239,324 @@ export async function notifyHuman(params: {
 }
 
 // ================================================================
+// ACTIVITY: Store original artifact for MemoryIngestWorkflow
+// ================================================================
+export async function storeOriginalArtifact(params: {
+  content: string;
+  artifactName: string;
+  ownerId: string;
+  sourceSystem: string;
+  workflowId: string;
+  runId: string;
+  sourceSessionId?: string;
+  project?: string;
+  repo?: string;
+  scope?: 'personal' | 'team' | 'global';
+  toolName?: string;
+  mimeType?: string;
+  sourcePath?: string;
+}): Promise<StoredArtifact> {
+  const sourcePath = params.sourcePath ?? params.artifactName;
+  const sha256 = sha256Hex(params.content);
+  const existing = await findArtifact(params.sourceSystem, sourcePath, sha256);
+  if (existing) {
+    return existing;
+  }
+
+  const storageKey = objectStorageKey({
+    ownerId: params.ownerId,
+    project: params.project,
+    sourceSystem: params.sourceSystem,
+    artifactName: params.artifactName,
+    sha256,
+  });
+  const storageUri = `file://${join(OBJECTS_LOCAL_DIR, storageKey)}`;
+  const objectPath = join(OBJECTS_LOCAL_DIR, storageKey);
+  mkdirSync(dirname(objectPath), { recursive: true });
+  writeFileSync(objectPath, params.content, { encoding: 'utf8' });
+
+  const mimeType = params.mimeType ?? inferMimeType(params.artifactName);
+  const insert = await supabase()
+    .from('artifacts')
+    .insert({
+      source_system: params.sourceSystem,
+      source_path: sourcePath,
+      source_session_id: params.sourceSessionId ?? null,
+      project: params.project ?? null,
+      repo: params.repo ?? null,
+      session_group: params.sourceSessionId ?? null,
+      scope: params.scope ?? 'personal',
+      owner_id: params.ownerId,
+      sha256,
+      size_bytes: Buffer.byteLength(params.content, 'utf8'),
+      mime_type: mimeType,
+      storage_uri: storageUri,
+      storage_key: storageKey,
+      tool_name: params.toolName ?? null,
+      meta: {
+        artifactName: params.artifactName,
+        workflowId: params.workflowId,
+        runId: params.runId,
+        objectStore: {
+          kind: 'local-file',
+          bucket: OBJECTS_BUCKET,
+          baseDir: OBJECTS_LOCAL_DIR,
+        },
+      },
+    })
+    .select('id,sha256,size_bytes,mime_type,storage_uri,storage_key,source_path')
+    .single();
+
+  if (insert.error) {
+    const raced = await findArtifact(params.sourceSystem, sourcePath, sha256);
+    if (raced) {
+      return raced;
+    }
+    throw new Error(`Artifact insert failed: ${insert.error.message}`);
+  }
+
+  return artifactRowToStored(insert.data);
+}
+
+// ================================================================
+// ACTIVITY: Extract text from artifact
+// ================================================================
+export async function extractArtifactText(params: {
+  content: string;
+  artifactId: string;
+  mimeType?: string;
+}): Promise<{ artifactId: string; text: string }> {
+  const normalized = params.content
+    .replace(/\u0000/g, '')
+    .replace(/\r\n/g, '\n')
+    .trim();
+  return {
+    artifactId: params.artifactId,
+    text: normalized,
+  };
+}
+
+// ================================================================
+// ACTIVITY: Chunk extracted text
+// ================================================================
+export async function chunkArtifactText(params: {
+  text: string;
+  artifactId: string;
+  maxChars?: number;
+}): Promise<{ artifactId: string; chunks: TextChunk[] }> {
+  const maxChars = params.maxChars ?? 4000;
+  const paragraphs = params.text.split(/\n{2,}/);
+  const chunks: TextChunk[] = [];
+  let current = '';
+  let heading: string | undefined;
+
+  for (const paragraph of paragraphs) {
+    const trimmed = paragraph.trim();
+    if (!trimmed) {
+      continue;
+    }
+    if (/^#{1,6}\s+\S/.test(trimmed)) {
+      heading = trimmed.replace(/^#{1,6}\s+/, '').slice(0, 160);
+    }
+    if (current && current.length + trimmed.length + 2 > maxChars) {
+      chunks.push({ index: chunks.length, content: current, ...(heading ? { heading } : {}) });
+      current = '';
+    }
+    if (trimmed.length > maxChars) {
+      for (let offset = 0; offset < trimmed.length; offset += maxChars) {
+        chunks.push({
+          index: chunks.length,
+          content: trimmed.slice(offset, offset + maxChars),
+          ...(heading ? { heading } : {}),
+        });
+      }
+      continue;
+    }
+    current = current ? `${current}\n\n${trimmed}` : trimmed;
+  }
+
+  if (current) {
+    chunks.push({ index: chunks.length, content: current, ...(heading ? { heading } : {}) });
+  }
+
+  if (chunks.length === 0) {
+    chunks.push({ index: 0, content: params.text || '(empty artifact)' });
+  }
+
+  return { artifactId: params.artifactId, chunks };
+}
+
+// ================================================================
+// ACTIVITY: Embed and insert memory chunks
+// ================================================================
+export async function writeMemoryChunks(params: {
+  artifact: StoredArtifact;
+  chunks: TextChunk[];
+  ownerId: string;
+  sourceSystem: string;
+  workflowId: string;
+  runId: string;
+  project?: string;
+  repo?: string;
+  scope?: 'personal' | 'team' | 'global';
+  sourceSessionId?: string;
+  toolName?: string;
+}): Promise<{ entryIds: string[] }> {
+  const entryIds: string[] = [];
+
+  for (const chunk of params.chunks) {
+    const contentHash = sha256Hex(`${params.artifact.sha256}:${chunk.index}:${chunk.content}`);
+    const existing = await supabase()
+      .from('entries')
+      .select('id')
+      .eq('content_hash', contentHash)
+      .eq('owner_id', params.ownerId)
+      .maybeSingle();
+    if (existing.error) {
+      throw new Error(`Entry lookup failed: ${existing.error.message}`);
+    }
+    if (existing.data?.id) {
+      entryIds.push(existing.data.id);
+      continue;
+    }
+
+    const embedding = await getEmbedding(chunk.content);
+    const inserted = await supabase()
+      .from('entries')
+      .insert({
+        content: chunk.content,
+        title: `${params.artifact.sourcePath}#${chunk.index + 1}`,
+        embedding,
+        kind: 'chunk',
+        chunk_index: chunk.index,
+        heading: chunk.heading ?? null,
+        project: params.project ?? null,
+        scope: params.scope ?? 'personal',
+        owner_id: params.ownerId,
+        author: 'agent',
+        content_hash: contentHash,
+        source_system: params.sourceSystem,
+        source_session_id: params.sourceSessionId ?? null,
+        repo: params.repo ?? null,
+        tool_name: params.toolName ?? null,
+        meta: {
+          artifactId: params.artifact.artifactId,
+          artifactSha256: params.artifact.sha256,
+          workflowId: params.workflowId,
+          runId: params.runId,
+          storageUri: params.artifact.storageUri,
+        },
+      })
+      .select('id')
+      .single();
+
+    if (inserted.error) {
+      throw new Error(`Entry insert failed: ${inserted.error.message}`);
+    }
+    entryIds.push(inserted.data.id);
+  }
+
+  return { entryIds };
+}
+
+// ================================================================
+// ACTIVITY: Link artifact to memory entries
+// ================================================================
+export async function linkArtifactEntries(params: {
+  artifactId: string;
+  entryIds: string[];
+  ownerId: string;
+  workflowId: string;
+  runId: string;
+}): Promise<void> {
+  for (const entryId of params.entryIds) {
+    const existing = await supabase()
+      .from('artifact_links')
+      .select('id')
+      .eq('artifact_id', params.artifactId)
+      .eq('entry_id', entryId)
+      .eq('relationship', 'indexed_by')
+      .maybeSingle();
+    if (existing.error) {
+      throw new Error(`Artifact link lookup failed: ${existing.error.message}`);
+    }
+    if (existing.data?.id) {
+      continue;
+    }
+    const inserted = await supabase()
+      .from('artifact_links')
+      .insert({
+        artifact_id: params.artifactId,
+        entry_id: entryId,
+        relationship: 'indexed_by',
+        owner_id: params.ownerId,
+        meta: {
+          workflowId: params.workflowId,
+          runId: params.runId,
+        },
+      });
+    if (inserted.error) {
+      throw new Error(`Artifact link insert failed: ${inserted.error.message}`);
+    }
+  }
+}
+
+// ================================================================
+// ACTIVITY: Write ingest audit event
+// ================================================================
+export async function writeIngestAuditEvent(params: {
+  artifactId: string;
+  entryIds: string[];
+  ownerId: string;
+  sourceSystem: string;
+  workflowId: string;
+  runId: string;
+  project?: string;
+  sourceSessionId?: string;
+}): Promise<{ logId: string }> {
+  const existing = await supabase()
+    .from('log')
+    .select('id')
+    .eq('kind', 'ingest')
+    .eq('owner_id', params.ownerId)
+    .contains('data', { workflowId: params.workflowId })
+    .maybeSingle();
+  if (existing.error) {
+    throw new Error(`Ingest audit lookup failed: ${existing.error.message}`);
+  }
+  if (existing.data?.id) {
+    return { logId: existing.data.id };
+  }
+
+  const inserted = await supabase()
+    .from('log')
+    .insert({
+      kind: 'ingest',
+      status: 'pass',
+      summary: `Ingested artifact ${params.artifactId} into ${params.entryIds.length} memory chunk(s)`,
+      project: params.project ?? null,
+      owner_id: params.ownerId,
+      worker: process.env.WORKER_NAME || 'opencortex-orchestrator',
+      data: {
+        artifactId: params.artifactId,
+        entryIds: params.entryIds,
+        sourceSystem: params.sourceSystem,
+        sourceSessionId: params.sourceSessionId ?? null,
+        workflowId: params.workflowId,
+        runId: params.runId,
+      },
+      entry_id: params.entryIds[0] ?? null,
+    })
+    .select('id')
+    .single();
+
+  if (inserted.error) {
+    throw new Error(`Ingest audit insert failed: ${inserted.error.message}`);
+  }
+  return { logId: inserted.data.id };
+}
+
+// ================================================================
 // Helpers
 // ================================================================
 async function getEmbedding(text: string): Promise<number[]> {
@@ -304,4 +653,85 @@ function inferMemoryType(text: string): string {
 
 function uniqueMatches(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+async function findArtifact(
+  sourceSystem: string,
+  sourcePath: string,
+  sha256: string,
+): Promise<StoredArtifact | undefined> {
+  const existing = await supabase()
+    .from('artifacts')
+    .select('id,sha256,size_bytes,mime_type,storage_uri,storage_key,source_path')
+    .eq('source_system', sourceSystem)
+    .eq('source_path', sourcePath)
+    .eq('sha256', sha256)
+    .maybeSingle();
+
+  if (existing.error) {
+    throw new Error(`Artifact lookup failed: ${existing.error.message}`);
+  }
+  return existing.data ? artifactRowToStored(existing.data) : undefined;
+}
+
+function artifactRowToStored(row: {
+  id: string;
+  sha256: string;
+  size_bytes: number;
+  mime_type: string | null;
+  storage_uri: string | null;
+  storage_key: string | null;
+  source_path: string;
+}): StoredArtifact {
+  return {
+    artifactId: row.id,
+    sha256: row.sha256,
+    sizeBytes: Number(row.size_bytes),
+    mimeType: row.mime_type ?? 'text/plain',
+    storageUri: row.storage_uri ?? '',
+    storageKey: row.storage_key ?? '',
+    sourcePath: row.source_path,
+  };
+}
+
+function sha256Hex(value: string): string {
+  return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function objectStorageKey(params: {
+  ownerId: string;
+  project?: string;
+  sourceSystem: string;
+  artifactName: string;
+  sha256: string;
+}): string {
+  const project = params.project ? safeObjectPathPart(params.project) : 'unscoped';
+  const sourceSystem = safeObjectPathPart(params.sourceSystem);
+  const ownerId = safeObjectPathPart(params.ownerId);
+  const artifactName = safeObjectPathPart(params.artifactName);
+  return [
+    safeObjectPathPart(OBJECTS_PREFIX),
+    ownerId,
+    project,
+    sourceSystem,
+    `${params.sha256}-${artifactName}`,
+  ].join('/');
+}
+
+function safeObjectPathPart(value: string): string {
+  return value
+    .replace(/\\/g, '/')
+    .split('/')
+    .filter(Boolean)
+    .join('-')
+    .replace(/[^A-Za-z0-9._-]/g, '-')
+    .replace(/-+/g, '-')
+    .slice(0, 180) || 'unnamed';
+}
+
+function inferMimeType(name: string): string {
+  if (/\.(md|markdown|txt|log|jsonl?|ya?ml)$/i.test(name)) {
+    return 'text/plain';
+  }
+  return 'application/octet-stream';
 }

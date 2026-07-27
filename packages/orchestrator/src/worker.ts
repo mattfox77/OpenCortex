@@ -60,7 +60,7 @@ async function run() {
         connection,
         namespace: process.env.TEMPORAL_NAMESPACE || 'default',
         taskQueue: queue,
-        workflowsPath: require.resolve('./workflows/cortex'),
+        workflowsPath: require.resolve('./workflows'),
         activities,
       })
     )
