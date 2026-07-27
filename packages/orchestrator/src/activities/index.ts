@@ -585,6 +585,49 @@ export async function writeIngestAuditEvent(params: {
 }
 
 // ================================================================
+// ACTIVITY: Populate rebuildable workflow projection
+// ================================================================
+export async function upsertWorkflowProjection(params: {
+  workflowId: string;
+  runId: string;
+  workflowType: string;
+  status: 'running' | 'completed' | 'failed' | 'cancelled';
+  ownerId: string;
+  summary: string;
+  project?: string;
+  sourceSystem?: string;
+  sourceSessionId?: string;
+  artifactId?: string;
+  entryIds?: string[];
+  data?: Record<string, unknown>;
+}): Promise<void> {
+  const upserted = await supabase()
+    .from('workflow_projection')
+    .upsert(
+      {
+        workflow_id: params.workflowId,
+        run_id: params.runId,
+        workflow_type: params.workflowType,
+        status: params.status,
+        owner_id: params.ownerId,
+        project: params.project ?? null,
+        source_system: params.sourceSystem ?? null,
+        source_session_id: params.sourceSessionId ?? null,
+        artifact_id: params.artifactId ?? null,
+        entry_ids: params.entryIds ?? [],
+        summary: params.summary,
+        data: params.data ?? {},
+        completed_at: params.status === 'completed' ? new Date().toISOString() : null,
+      },
+      { onConflict: 'workflow_id' },
+    );
+
+  if (upserted.error) {
+    throw new Error(`Workflow projection upsert failed: ${upserted.error.message}`);
+  }
+}
+
+// ================================================================
 // Helpers
 // ================================================================
 async function getEmbedding(text: string): Promise<number[]> {

@@ -9,6 +9,7 @@
     "task": "ts-node scripts/start-task.ts",
     "monitor": "ts-node scripts/start-task.ts --monitor",
     "ingest": "ts-node scripts/ingest-memory.ts",
+    "rebuild-projection": "ts-node scripts/rebuild-projection.ts",
     "build": "tsc -p tsconfig.json",
     "check": "tsc -p tsconfig.json --noEmit",
     "clean": "rm -rf dist"

@@ -27,6 +27,10 @@ export interface MemoryIngestResult {
   entryIds: string[];
   logId: string;
   chunkCount: number;
+  ownerId: string;
+  project?: string;
+  sourceSystem: string;
+  sourceSessionId?: string;
 }
 
 export async function memoryIngestWorkflow(
@@ -80,6 +84,24 @@ export async function memoryIngestWorkflow(
     workflowId,
     runId,
   });
+  await ingest.upsertWorkflowProjection({
+    workflowId,
+    runId,
+    workflowType: 'MemoryIngestWorkflow',
+    status: 'completed',
+    ownerId: input.ownerId,
+    project: input.project,
+    sourceSystem: input.sourceSystem,
+    sourceSessionId: input.sourceSessionId,
+    artifactId: artifact.artifactId,
+    entryIds: entries.entryIds,
+    summary: `Ingested ${input.artifactName} into ${entries.entryIds.length} memory chunk(s)`,
+    data: {
+      artifactName: input.artifactName,
+      storageUri: artifact.storageUri,
+      logId: audit.logId,
+    },
+  });
 
   return {
     workflowId,
@@ -88,5 +110,9 @@ export async function memoryIngestWorkflow(
     entryIds: entries.entryIds,
     logId: audit.logId,
     chunkCount: chunks.chunks.length,
+    ownerId: input.ownerId,
+    project: input.project,
+    sourceSystem: input.sourceSystem,
+    sourceSessionId: input.sourceSessionId,
   };
 }
