@@ -38,12 +38,15 @@ export async function withTraceSpan<T>(
   name: string,
   context: TraceContext | undefined,
   attributes: Record<string, string | number | boolean | null | undefined>,
-  run: () => Promise<T>,
+  run: (spanContext: TraceContext | undefined) => Promise<T>,
 ): Promise<T> {
   const startTimeUnixNano = unixNano();
   const spanId = randomHex(8);
+  const spanContext = context
+    ? { traceId: context.traceId, parentSpanId: spanId }
+    : undefined;
   try {
-    const result = await run();
+    const result = await run(spanContext);
     void emitSpan(name, context, spanId, startTimeUnixNano, 'ok', attributes);
     return result;
   } catch (error) {

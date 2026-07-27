@@ -6,6 +6,7 @@
 import { readFileSync } from 'fs';
 import { basename } from 'path';
 import { startMemoryIngest } from '../src/client';
+import { newTraceContext, withTraceSpan } from '../src/telemetry';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -61,20 +62,29 @@ async function main() {
 
   const content = file ? readFileSync(file, 'utf8') : readFileSync(0, 'utf8');
   const artifactName = file ? basename(file) : 'stdin-transcript.txt';
-  const handle = await startMemoryIngest({
-    content,
-    artifactName,
-    ownerId,
-    sourceSystem,
-    sourceSessionId,
-    project,
-    repo,
-    scope,
-    toolName,
-    sourcePath: file || artifactName,
-    queue,
+  const traceContext = newTraceContext();
+  const result = await withTraceSpan('opencortex.memory.ingest_request', traceContext, {
+    'memory.owner_id': ownerId,
+    'memory.source_system': sourceSystem,
+    'memory.source_session_id': sourceSessionId,
+    'memory.artifact_name': artifactName,
+  }, async (requestTraceContext) => {
+    const handle = await startMemoryIngest({
+      content,
+      artifactName,
+      ownerId,
+      sourceSystem,
+      sourceSessionId,
+      project,
+      repo,
+      scope,
+      toolName,
+      sourcePath: file || artifactName,
+      queue,
+      traceContext: requestTraceContext ?? traceContext,
+    });
+    return handle.result();
   });
-  const result = await handle.result();
   console.log(JSON.stringify(result, null, 2));
 }
 

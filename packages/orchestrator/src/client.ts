@@ -11,7 +11,7 @@ import {
 } from './workflows';
 import type { CortexTaskInput } from './workflows/cortex';
 import type { MemoryIngestInput } from './workflows/memoryIngest';
-import { newTraceContext } from './telemetry';
+import { newTraceContext, withTraceSpan } from './telemetry';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
@@ -132,24 +132,29 @@ export async function startMemoryIngest(
     `memory-ingest-${params.sourceSystem}-${params.sourceSessionId ?? Date.now()}`;
   const traceContext = params.traceContext ?? newTraceContext();
 
-  const handle = await client.workflow.start(memoryIngestWorkflow, {
-    taskQueue: params.queue || 'cortex-tasks',
-    workflowId,
-    args: [{
-      content: params.content,
-      artifactName: params.artifactName,
-      ownerId: params.ownerId,
-      sourceSystem: params.sourceSystem,
-      sourceSessionId: params.sourceSessionId,
-      project: params.project,
-      repo: params.repo,
-      scope: params.scope,
-      toolName: params.toolName,
-      mimeType: params.mimeType,
-      sourcePath: params.sourcePath,
-      traceContext,
-    }],
-  });
+  const handle = await withTraceSpan('opencortex.memory.start_ingest_workflow', traceContext, {
+    'workflow.id': workflowId,
+    'workflow.type': 'MemoryIngestWorkflow',
+    'memory.owner_id': params.ownerId,
+    'memory.source_system': params.sourceSystem,
+  }, async (workflowTraceContext) => client.workflow.start(memoryIngestWorkflow, {
+      taskQueue: params.queue || 'cortex-tasks',
+      workflowId,
+      args: [{
+        content: params.content,
+        artifactName: params.artifactName,
+        ownerId: params.ownerId,
+        sourceSystem: params.sourceSystem,
+        sourceSessionId: params.sourceSessionId,
+        project: params.project,
+        repo: params.repo,
+        scope: params.scope,
+        toolName: params.toolName,
+        mimeType: params.mimeType,
+        sourcePath: params.sourcePath,
+        traceContext: workflowTraceContext ?? traceContext,
+      }],
+    }));
 
   console.log(`✅ Started memory ingest workflow: ${workflowId}`);
   console.log(`   Trace: ${traceContext.traceId}`);
