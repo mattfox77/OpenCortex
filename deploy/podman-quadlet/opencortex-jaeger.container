@@ -1,0 +1,16 @@
+[Unit]
+Description=OpenCortex Jaeger trace viewer
+After=opencortex-network-network.service
+Wants=opencortex-network-network.service
+
+[Container]
+ContainerName=opencortex-jaeger
+Image=docker.io/jaegertracing/all-in-one:1.76.0
+Network=opencortex.network
+PublishPort=127.0.0.1:16686:16686
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target

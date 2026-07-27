@@ -13,6 +13,8 @@ const requiredFiles = [
   "opencortex-temporal.container",
   "opencortex-temporal-ui.container",
   "opencortex-dex.container",
+  "opencortex-jaeger.container",
+  "opencortex-otel.container",
 ];
 
 const fileChecks = {
@@ -30,6 +32,18 @@ const fileChecks = {
     "Image=docker.io/michaelf34/infinity:latest-cpu",
     "Exec=v2 --model-id nomic-ai/nomic-embed-text-v1.5 --port 7997",
     "PublishPort=127.0.0.1:7997:7997",
+  ],
+  "opencortex-jaeger.container": [
+    "ContainerName=opencortex-jaeger",
+    "Image=docker.io/jaegertracing/all-in-one:1.76.0",
+    "PublishPort=127.0.0.1:16686:16686",
+  ],
+  "opencortex-otel.container": [
+    "ContainerName=opencortex-otel",
+    "Image=docker.io/otel/opentelemetry-collector:0.157.0",
+    "Volume=%h/.config/opencortex/otel-collector.yaml:/etc/otelcol/config.yaml:ro,Z",
+    "PublishPort=127.0.0.1:4318:4318",
+    "PublishPort=127.0.0.1:4317:4317",
   ],
 };
 

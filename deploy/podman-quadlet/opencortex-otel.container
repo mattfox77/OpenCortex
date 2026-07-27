@@ -1,0 +1,19 @@
+[Unit]
+Description=OpenCortex OpenTelemetry collector
+After=opencortex-jaeger.service
+Requires=opencortex-jaeger.service
+
+[Container]
+ContainerName=opencortex-otel
+Image=docker.io/otel/opentelemetry-collector:0.157.0
+Network=opencortex.network
+Volume=%h/.config/opencortex/otel-collector.yaml:/etc/otelcol/config.yaml:ro,Z
+PublishPort=127.0.0.1:4318:4318
+PublishPort=127.0.0.1:4317:4317
+Exec=--config=/etc/otelcol/config.yaml
+
+[Service]
+Restart=always
+
+[Install]
+WantedBy=default.target
