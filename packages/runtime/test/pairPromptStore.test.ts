@@ -1,4 +1,4 @@
-import { mkdtempSync } from "node:fs";
+import { mkdirSync, mkdtempSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { describe, expect, it } from "vitest";
@@ -89,8 +89,40 @@ describe("PairPromptStore", () => {
 
     const second = new PairPromptStore(dir);
     expect(second.get(draft.id)).toMatchObject({
+      sessionId: "sess-1",
       status: "ready",
       reviewSnapshotText: "persist me"
     });
+    expect(second.get(draft.id)).not.toHaveProperty("diwanSessionId");
+  });
+
+  it("loads legacy prompt drafts that used diwanSessionId", () => {
+    const dir = mkdtempSync(join(tmpdir(), "diwan-pair-"));
+    const eventsPath = join(dir, "pair-prompts", "drafts.jsonl");
+    mkdirSync(join(dir, "pair-prompts"), { recursive: true });
+    const draft = {
+      id: "pair-legacy",
+      channelId: "session-channel",
+      diwanSessionId: "sess-1",
+      createdAt: "2026-06-10T00:00:00.000Z",
+      createdByEmail: "owner@acme.test",
+      createdByLinuxUser: "owner",
+      status: "editing",
+      draftText: "legacy draft",
+      retryCount: 0
+    };
+    writeFileSync(
+      eventsPath,
+      `${JSON.stringify({ type: "created", draft })}\n`,
+      "utf8"
+    );
+
+    const prompts = new PairPromptStore(dir);
+    expect(prompts.get("pair-legacy")).toMatchObject({
+      sessionId: "sess-1",
+      draftText: "legacy draft"
+    });
+    expect(prompts.listForSession("sess-1")).toHaveLength(1);
+    expect(prompts.get("pair-legacy")).not.toHaveProperty("diwanSessionId");
   });
 });

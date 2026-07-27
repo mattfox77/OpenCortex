@@ -1009,7 +1009,7 @@ function resolveDraftAccess(
     return undefined;
   }
   const draft = pairPrompts.get(draftId);
-  if (!draft || draft.diwanSessionId !== resolved.session.id) {
+  if (!draft || draft.sessionId !== resolved.session.id) {
     return undefined;
   }
   return { ...resolved, draft };

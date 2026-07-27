@@ -16,7 +16,7 @@ export type PairPromptStatus =
 export interface PairPromptDraft {
   id: string;
   channelId: string;
-  diwanSessionId: string;
+  sessionId: string;
   opencodeSessionId?: string;
   createdAt: string;
   createdByEmail: string;
@@ -39,8 +39,13 @@ export interface PairPromptDraft {
   openCodeMessageId?: string;
 }
 
+type StoredPairPromptDraft = Omit<PairPromptDraft, 'sessionId'> & {
+  sessionId?: string;
+  diwanSessionId?: string;
+};
+
 type PairPromptEvent =
-  | { type: 'created'; draft: PairPromptDraft }
+  | { type: 'created'; draft: StoredPairPromptDraft }
   | {
       type: 'textUpdated';
       draftId: string;
@@ -102,7 +107,7 @@ export class PairPromptStore {
 
   listForSession(sessionId: string): PairPromptDraft[] {
     return [...this.drafts.values()]
-      .filter(draft => draft.diwanSessionId === sessionId)
+      .filter(draft => draft.sessionId === sessionId)
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
@@ -121,7 +126,7 @@ export class PairPromptStore {
     const draft: PairPromptDraft = {
       id: `pair-${nanoid(12)}`,
       channelId: input.channelId,
-      diwanSessionId: input.session.id,
+      sessionId: input.session.id,
       opencodeSessionId: input.session.openCodeSessionId,
       createdAt: now,
       createdByEmail: input.actor.email,
@@ -293,7 +298,8 @@ export class PairPromptStore {
 
   private apply(event: PairPromptEvent): void {
     if (event.type === 'created') {
-      this.drafts.set(event.draft.id, { ...event.draft });
+      const draft = normalizeStoredDraft(event.draft);
+      this.drafts.set(draft.id, draft);
       return;
     }
     const draft = this.requireDraft(event.draftId);
@@ -374,6 +380,15 @@ function normalizePromptText(text: string): string {
     throw new Error('Pair prompt exceeds 64 KiB');
   }
   return text;
+}
+
+function normalizeStoredDraft(draft: StoredPairPromptDraft): PairPromptDraft {
+  const sessionId = draft.sessionId ?? draft.diwanSessionId;
+  if (!sessionId) {
+    throw new Error('Pair prompt draft is missing sessionId');
+  }
+  const { diwanSessionId: _legacySessionId, ...normalized } = draft;
+  return { ...normalized, sessionId };
 }
 
 function hashPrompt(text: string): string {
