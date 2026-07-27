@@ -90,6 +90,7 @@ function projectionRowFromResult(result: MemoryIngestResult): Record<string, unk
     data: {
       logId: result.logId,
       chunkCount: result.chunkCount,
+      traceId: result.traceContext?.traceId,
       rebuiltFromTemporalVisibility: true,
     },
     completed_at: new Date().toISOString(),

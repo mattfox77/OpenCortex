@@ -1,5 +1,6 @@
 import { proxyActivities, workflowInfo } from '@temporalio/workflow';
 import type * as activities from '../activities';
+import type { TraceContext } from '../telemetry';
 
 const ingest = proxyActivities<typeof activities>({
   startToCloseTimeout: '2 minutes',
@@ -18,6 +19,7 @@ export interface MemoryIngestInput {
   toolName?: string;
   mimeType?: string;
   sourcePath?: string;
+  traceContext?: TraceContext;
 }
 
 export interface MemoryIngestResult {
@@ -31,6 +33,7 @@ export interface MemoryIngestResult {
   project?: string;
   sourceSystem: string;
   sourceSessionId?: string;
+  traceContext?: TraceContext;
 }
 
 export async function memoryIngestWorkflow(
@@ -44,15 +47,22 @@ export async function memoryIngestWorkflow(
     ...input,
     workflowId,
     runId,
+    traceContext: input.traceContext,
   });
   const extracted = await ingest.extractArtifactText({
     content: input.content,
     artifactId: artifact.artifactId,
     mimeType: artifact.mimeType,
+    workflowId,
+    runId,
+    traceContext: input.traceContext,
   });
   const chunks = await ingest.chunkArtifactText({
     text: extracted.text,
     artifactId: artifact.artifactId,
+    workflowId,
+    runId,
+    traceContext: input.traceContext,
   });
   const entries = await ingest.writeMemoryChunks({
     artifact,
@@ -66,6 +76,7 @@ export async function memoryIngestWorkflow(
     toolName: input.toolName,
     workflowId,
     runId,
+    traceContext: input.traceContext,
   });
   await ingest.linkArtifactEntries({
     artifactId: artifact.artifactId,
@@ -73,6 +84,7 @@ export async function memoryIngestWorkflow(
     ownerId: input.ownerId,
     workflowId,
     runId,
+    traceContext: input.traceContext,
   });
   const audit = await ingest.writeIngestAuditEvent({
     artifactId: artifact.artifactId,
@@ -83,6 +95,7 @@ export async function memoryIngestWorkflow(
     sourceSessionId: input.sourceSessionId,
     workflowId,
     runId,
+    traceContext: input.traceContext,
   });
   await ingest.upsertWorkflowProjection({
     workflowId,
@@ -100,7 +113,9 @@ export async function memoryIngestWorkflow(
       artifactName: input.artifactName,
       storageUri: artifact.storageUri,
       logId: audit.logId,
+      traceId: input.traceContext?.traceId,
     },
+    traceContext: input.traceContext,
   });
 
   return {
@@ -114,5 +129,6 @@ export async function memoryIngestWorkflow(
     project: input.project,
     sourceSystem: input.sourceSystem,
     sourceSessionId: input.sourceSessionId,
+    traceContext: input.traceContext,
   };
 }

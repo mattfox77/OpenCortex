@@ -4,6 +4,7 @@ import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { mkdirSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
+import { TraceContext, withTraceSpan } from '../telemetry';
 
 // --- Shared memory client ---
 let _supabase: SupabaseClient;
@@ -283,7 +284,14 @@ export async function storeOriginalArtifact(params: {
   toolName?: string;
   mimeType?: string;
   sourcePath?: string;
+  traceContext?: TraceContext;
 }): Promise<StoredArtifact> {
+  return withTraceSpan('opencortex.memory.store_original_artifact', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'memory.owner_id': params.ownerId,
+    'memory.source_system': params.sourceSystem,
+  }, async () => {
   const sourcePath = params.sourcePath ?? params.artifactName;
   const sha256 = sha256Hex(params.content);
   const existing = await findArtifact(params.sourceSystem, sourcePath, sha256);
@@ -344,6 +352,7 @@ export async function storeOriginalArtifact(params: {
   }
 
   return artifactRowToStored(insert.data);
+  });
 }
 
 // ================================================================
@@ -353,7 +362,15 @@ export async function extractArtifactText(params: {
   content: string;
   artifactId: string;
   mimeType?: string;
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
 }): Promise<{ artifactId: string; text: string }> {
+  return withTraceSpan('opencortex.memory.extract_artifact_text', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'memory.artifact_id': params.artifactId,
+  }, async () => {
   const normalized = params.content
     .replace(/\u0000/g, '')
     .replace(/\r\n/g, '\n')
@@ -362,6 +379,7 @@ export async function extractArtifactText(params: {
     artifactId: params.artifactId,
     text: normalized,
   };
+  });
 }
 
 // ================================================================
@@ -371,7 +389,15 @@ export async function chunkArtifactText(params: {
   text: string;
   artifactId: string;
   maxChars?: number;
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
 }): Promise<{ artifactId: string; chunks: TextChunk[] }> {
+  return withTraceSpan('opencortex.memory.chunk_artifact_text', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'memory.artifact_id': params.artifactId,
+  }, async () => {
   const maxChars = params.maxChars ?? 4000;
   const paragraphs = params.text.split(/\n{2,}/);
   const chunks: TextChunk[] = [];
@@ -412,6 +438,7 @@ export async function chunkArtifactText(params: {
   }
 
   return { artifactId: params.artifactId, chunks };
+  });
 }
 
 // ================================================================
@@ -429,7 +456,14 @@ export async function writeMemoryChunks(params: {
   scope?: 'personal' | 'team' | 'global';
   sourceSessionId?: string;
   toolName?: string;
+  traceContext?: TraceContext;
 }): Promise<{ entryIds: string[] }> {
+  return withTraceSpan('opencortex.memory.write_memory_chunks', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'memory.artifact_id': params.artifact.artifactId,
+    'memory.chunk_count': params.chunks.length,
+  }, async () => {
   const entryIds: string[] = [];
 
   for (const chunk of params.chunks) {
@@ -485,6 +519,7 @@ export async function writeMemoryChunks(params: {
   }
 
   return { entryIds };
+  });
 }
 
 // ================================================================
@@ -496,7 +531,14 @@ export async function linkArtifactEntries(params: {
   ownerId: string;
   workflowId: string;
   runId: string;
+  traceContext?: TraceContext;
 }): Promise<void> {
+  return withTraceSpan('opencortex.memory.link_artifact_entries', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'memory.artifact_id': params.artifactId,
+    'memory.entry_count': params.entryIds.length,
+  }, async () => {
   for (const entryId of params.entryIds) {
     const existing = await supabase()
       .from('artifact_links')
@@ -527,6 +569,7 @@ export async function linkArtifactEntries(params: {
       throw new Error(`Artifact link insert failed: ${inserted.error.message}`);
     }
   }
+  });
 }
 
 // ================================================================
@@ -541,7 +584,14 @@ export async function writeIngestAuditEvent(params: {
   runId: string;
   project?: string;
   sourceSessionId?: string;
+  traceContext?: TraceContext;
 }): Promise<{ logId: string }> {
+  return withTraceSpan('opencortex.memory.write_ingest_audit_event', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'memory.artifact_id': params.artifactId,
+    'memory.entry_count': params.entryIds.length,
+  }, async () => {
   const existing = await supabase()
     .from('log')
     .select('id')
@@ -582,6 +632,7 @@ export async function writeIngestAuditEvent(params: {
     throw new Error(`Ingest audit insert failed: ${inserted.error.message}`);
   }
   return { logId: inserted.data.id };
+  });
 }
 
 // ================================================================
@@ -600,7 +651,14 @@ export async function upsertWorkflowProjection(params: {
   artifactId?: string;
   entryIds?: string[];
   data?: Record<string, unknown>;
+  traceContext?: TraceContext;
 }): Promise<void> {
+  return withTraceSpan('opencortex.memory.upsert_workflow_projection', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'workflow.type': params.workflowType,
+    'workflow.status': params.status,
+  }, async () => {
   const upserted = await supabase()
     .from('workflow_projection')
     .upsert(
@@ -625,6 +683,7 @@ export async function upsertWorkflowProjection(params: {
   if (upserted.error) {
     throw new Error(`Workflow projection upsert failed: ${upserted.error.message}`);
   }
+  });
 }
 
 // ================================================================

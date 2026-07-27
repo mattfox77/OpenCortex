@@ -11,6 +11,7 @@ import {
 } from './workflows';
 import type { CortexTaskInput } from './workflows/cortex';
 import type { MemoryIngestInput } from './workflows/memoryIngest';
+import { newTraceContext } from './telemetry';
 import * as dotenv from 'dotenv';
 
 dotenv.config();
@@ -129,6 +130,7 @@ export async function startMemoryIngest(
   const workflowId =
     params.workflowId ??
     `memory-ingest-${params.sourceSystem}-${params.sourceSessionId ?? Date.now()}`;
+  const traceContext = params.traceContext ?? newTraceContext();
 
   const handle = await client.workflow.start(memoryIngestWorkflow, {
     taskQueue: params.queue || 'cortex-tasks',
@@ -145,9 +147,11 @@ export async function startMemoryIngest(
       toolName: params.toolName,
       mimeType: params.mimeType,
       sourcePath: params.sourcePath,
+      traceContext,
     }],
   });
 
   console.log(`✅ Started memory ingest workflow: ${workflowId}`);
+  console.log(`   Trace: ${traceContext.traceId}`);
   return handle;
 }
