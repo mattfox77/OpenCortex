@@ -1,7 +1,8 @@
 #!/usr/bin/env ts-node
 /**
- * Execute MemoryIngestWorkflow against mocked activities, then replay the
- * resulting Temporal history to catch workflow non-determinism in CI.
+ * Execute MemoryIngestWorkflow against mocked activities, verify a transient
+ * activity failure retries to completion, then replay the resulting Temporal
+ * histories to catch workflow non-determinism in CI.
  */
 import assert from 'assert';
 import { randomUUID } from 'crypto';
@@ -11,6 +12,8 @@ import { memoryIngestWorkflow, MemoryIngestResult } from '../src/workflows/memor
 import type * as activities from '../src/activities';
 
 const taskQueue = `memory-ingest-replay-${process.pid}`;
+const retryWorkflowMarker = '-retry-';
+const writeAttempts = new Map<string, number>();
 
 const mockActivities: Pick<
   typeof activities,
@@ -51,7 +54,12 @@ const mockActivities: Pick<
       ],
     };
   },
-  async writeMemoryChunks() {
+  async writeMemoryChunks(params) {
+    const attempt = (writeAttempts.get(params.workflowId) ?? 0) + 1;
+    writeAttempts.set(params.workflowId, attempt);
+    if (params.workflowId.includes(retryWorkflowMarker) && attempt === 1) {
+      throw new Error('transient replay fixture failure');
+    }
     return { entryIds: ['entry-replay-1'] };
   },
   async linkArtifactEntries() {
@@ -76,46 +84,67 @@ async function main(): Promise<void> {
     });
 
     const workflowId = `memory-ingest-replay-${randomUUID()}`;
-    let handle: ReturnType<typeof env.client.workflow.getHandle> | undefined;
-    const result = await worker.runUntil(async () => {
-      handle = await env.client.workflow.start(memoryIngestWorkflow, {
-        workflowId,
-        taskQueue,
-        args: [{
-          content: '# Replay fixture\n\nTemporal replay must stay deterministic.',
-          artifactName: 'replay.md',
-          ownerId: 'owner-replay',
-          sourceSystem: 'test',
-          sourceSessionId: 'session-replay',
-          project: 'opencortex',
-          traceContext: {
-            traceId: '1'.repeat(32),
-            parentSpanId: '2'.repeat(16),
-          },
-        }],
-      });
-      return handle.result() as Promise<MemoryIngestResult>;
+    const retryWorkflowId = `memory-ingest${retryWorkflowMarker}${randomUUID()}`;
+    const results = await worker.runUntil(async () => {
+      const handle = await startFixtureWorkflow(env, workflowId);
+      const retryHandle = await startFixtureWorkflow(env, retryWorkflowId);
+      const result = await handle.result() as MemoryIngestResult;
+      const retryResult = await retryHandle.result() as MemoryIngestResult;
+      return {
+        result,
+        retryResult,
+        history: await handle.fetchHistory(),
+        retryHistory: await retryHandle.fetchHistory(),
+      };
     });
 
+    const { result, retryResult, history, retryHistory } = results;
     assert.equal(result.artifactId, 'artifact-replay-1');
     assert.deepEqual(result.entryIds, ['entry-replay-1']);
     assert.equal(result.logId, 'log-replay-1');
     assert.equal(result.traceContext?.traceId, '1'.repeat(32));
+    assert.equal(retryResult.artifactId, 'artifact-replay-1');
+    assert.deepEqual(retryResult.entryIds, ['entry-replay-1']);
+    assert.equal(writeAttempts.get(retryWorkflowId), 2);
 
-    if (!handle) {
-      throw new Error('Workflow handle was not created');
-    }
-    const history = await handle.fetchHistory();
     await Worker.runReplayHistory(
       { workflowsPath: require.resolve('../src/workflows') },
       history,
       workflowId,
     );
+    await Worker.runReplayHistory(
+      { workflowsPath: require.resolve('../src/workflows') },
+      retryHistory,
+      retryWorkflowId,
+    );
 
     console.log(`Replay passed for ${workflowId}`);
+    console.log(`Retry and replay passed for ${retryWorkflowId}`);
   } finally {
     await env.teardown();
   }
+}
+
+async function startFixtureWorkflow(
+  env: TestWorkflowEnvironment,
+  workflowId: string,
+) {
+  return env.client.workflow.start(memoryIngestWorkflow, {
+    workflowId,
+    taskQueue,
+    args: [{
+      content: '# Replay fixture\n\nTemporal replay must stay deterministic.',
+      artifactName: 'replay.md',
+      ownerId: 'owner-replay',
+      sourceSystem: 'test',
+      sourceSessionId: 'session-replay',
+      project: 'opencortex',
+      traceContext: {
+        traceId: '1'.repeat(32),
+        parentSpanId: '2'.repeat(16),
+      },
+    }],
+  });
 }
 
 main().catch((err) => {
