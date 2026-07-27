@@ -8,6 +8,12 @@ const returnToKey = 'opencortex.returnTo';
 const legacyReturnToKey = 'diwan.returnTo';
 const authCookieName = 'opencortex.idToken';
 const legacyAuthCookieName = 'diwan.idToken';
+const teamChatCollapsedKey = 'opencortex.teamchatCollapsed';
+const legacyTeamChatCollapsedKey = 'diwan.teamchatCollapsed';
+const channelLastSeenKey = 'opencortex.channelLastSeen';
+const legacyChannelLastSeenKey = 'diwan.channelLastSeen';
+const teamChatWidthKey = 'opencortex.teamchatWidthPx';
+const legacyTeamChatWidthKey = 'diwan.teamchatWidthPx';
 
 function currentBasePath() {
   const base = document.querySelector('base')?.getAttribute('href') ?? '/';
@@ -21,6 +27,24 @@ function bindUiAction(selector, event, handler) {
     element.addEventListener(event, handler);
   }
   return element;
+}
+
+function localStorageValue(key, legacyKey) {
+  const value = localStorage.getItem(key);
+  if (value !== null) {
+    return value;
+  }
+  const legacyValue = localStorage.getItem(legacyKey);
+  if (legacyValue !== null) {
+    localStorage.setItem(key, legacyValue);
+    localStorage.removeItem(legacyKey);
+  }
+  return legacyValue;
+}
+
+function setLocalStorageValue(key, legacyKey, value) {
+  localStorage.setItem(key, value);
+  localStorage.removeItem(legacyKey);
 }
 
 function apiUrl(path) {
@@ -188,9 +212,9 @@ let chatEventReconnectTimer;
 let sessionNameRefreshTimer;
 let renderedCodeFrameKey;
 let teamChatCollapsed =
-  localStorage.getItem('diwan.teamchatCollapsed') === 'true';
+  localStorageValue(teamChatCollapsedKey, legacyTeamChatCollapsedKey) === 'true';
 const channelLastSeen = JSON.parse(
-  localStorage.getItem('diwan.channelLastSeen') ?? '{}',
+  localStorageValue(channelLastSeenKey, legacyChannelLastSeenKey) ?? '{}',
 );
 const jiraKeyPattern = /\b([A-Z][A-Z0-9]+-\d+)\b/gi;
 
@@ -411,8 +435,9 @@ function markSelectedChannelSeen() {
     return;
   }
   channelLastSeen[channel.id] = channel.lastMessageAt;
-  localStorage.setItem(
-    'diwan.channelLastSeen',
+  setLocalStorageValue(
+    channelLastSeenKey,
+    legacyChannelLastSeenKey,
     JSON.stringify(channelLastSeen),
   );
 }
@@ -439,7 +464,6 @@ function initPanelResizer() {
   const chatPanel = document.querySelector('#chat-panel');
   if (!grid || !resizer || !chatPanel) return;
 
-  const storageKey = 'diwan.teamchatWidthPx';
   const minWidth = 380;
   const maxWidth = 720;
   const clamp = value => Math.min(maxWidth, Math.max(minWidth, value));
@@ -450,7 +474,9 @@ function initPanelResizer() {
     resizer.setAttribute('aria-valuenow', String(Math.round(next)));
   };
 
-  const saved = Number(localStorage.getItem(storageKey));
+  const saved = Number(
+    localStorageValue(teamChatWidthKey, legacyTeamChatWidthKey),
+  );
   if (Number.isFinite(saved) && saved > 0) {
     applyWidth(saved);
   }
@@ -469,7 +495,13 @@ function initPanelResizer() {
     const current = grid.style
       .getPropertyValue('--teamchat-width')
       .replace('px', '');
-    if (current) localStorage.setItem(storageKey, current.trim());
+    if (current) {
+      setLocalStorageValue(
+        teamChatWidthKey,
+        legacyTeamChatWidthKey,
+        current.trim(),
+      );
+    }
   };
 
   const onPointerMove = event => {
@@ -549,7 +581,11 @@ function renderChannels() {
     selectedChannelId = select.value;
     if (teamChatCollapsed) {
       teamChatCollapsed = false;
-      localStorage.setItem('diwan.teamchatCollapsed', 'false');
+      setLocalStorageValue(
+        teamChatCollapsedKey,
+        legacyTeamChatCollapsedKey,
+        'false',
+      );
     }
     renderTeamChatShell();
     void renderSelectedChannel();
@@ -1432,7 +1468,11 @@ async function renderSelectedChannel() {
 
 bindUiAction('#toggle-chat', 'click', () => {
   teamChatCollapsed = !teamChatCollapsed;
-  localStorage.setItem('diwan.teamchatCollapsed', String(teamChatCollapsed));
+  setLocalStorageValue(
+    teamChatCollapsedKey,
+    legacyTeamChatCollapsedKey,
+    String(teamChatCollapsed),
+  );
   renderTeamChatShell();
 });
 
