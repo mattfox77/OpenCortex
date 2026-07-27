@@ -15,7 +15,7 @@ function addonConfig(root) {
     apiBaseUrl: root.dataset.apiBaseUrl,
     channelId: root.dataset.channelId,
     channelName: root.dataset.channelName || 'New session',
-    diwanUrl: root.dataset.diwanUrl,
+    workbenchUrl: root.dataset.workbenchUrl || root.dataset.diwanUrl,
     slackUrl: root.dataset.slackUrl,
   };
 }
@@ -110,11 +110,11 @@ function sessionIdFromUrl(value) {
 }
 
 function ensureWorkbenchSessionAgeStyles() {
-  if (document.querySelector('style[data-diwan-workbench-session-age]')) return
+  if (document.querySelector('style[data-opencortex-workbench-session-age]')) return
   const styles = createEl('style')
-  styles.dataset.diwanWorkbenchSessionAge = 'true'
+  styles.dataset.opencortexWorkbenchSessionAge = 'true'
   styles.textContent = `
-    .diwan-workbench-session-age {
+    .opencortex-workbench-session-age {
       color: rgb(113 113 122);
       flex: 0 0 auto;
       font-size: 0.875rem;
@@ -147,12 +147,12 @@ function annotateWorkbenchSessionRows(sessionTimes) {
     const id = sessionIdFromUrl(link.getAttribute('href') || '')
     const timestamp = id ? sessionTimes.get(id) : undefined
     const label = compactRelativeTime(timestamp)
-    const existing = link.querySelector(':scope > .diwan-workbench-session-age')
+    const existing = link.querySelector(':scope > .opencortex-workbench-session-age')
     if (!label) {
       existing?.remove()
       continue
     }
-    const age = existing || createEl('span', 'diwan-workbench-session-age')
+    const age = existing || createEl('span', 'opencortex-workbench-session-age')
     age.textContent = label
     age.title = new Date(timestamp).toLocaleString()
     if (!existing) link.append(age)
@@ -271,7 +271,7 @@ function initAddon(root) {
     gap: '8px',
   });
   for (const [label, href] of [
-    ['DIWAN', config.diwanUrl],
+    ['OpenCortex', config.workbenchUrl],
     ['Slack', config.slackUrl],
   ]) {
     if (!href) continue;
@@ -374,7 +374,7 @@ function initAddon(root) {
   shell.append(panel, toggle);
 }
 
-for (const root of document.querySelectorAll('[data-diwan-session-addon]')) {
+for (const root of document.querySelectorAll('[data-opencortex-session-addon], [data-diwan-session-addon]')) {
   initAddon(root);
 }
 

@@ -1298,13 +1298,13 @@ describe('http app', () => {
     expect(html.headers.get('etag')).toBeNull();
     const htmlBody = await html.text();
     expect(htmlBody).toContain('OpenCortex Workbench');
-    expect(htmlBody).toContain('data-diwan-session-addon');
+    expect(htmlBody).toContain('data-opencortex-session-addon');
     expect(htmlBody).toContain('data-channel-id="');
-    expect(htmlBody).toContain('data-diwan-url="/diwan/code/sessions/live"');
+    expect(htmlBody).toContain('data-workbench-url="/diwan/code/sessions/live"');
     expect(htmlBody).toContain(
       'data-slack-url="https://workspace.example.com/archives/CSESSION"',
     );
-    expect(htmlBody).toContain('/diwan/diwan-session-addon.js');
+    expect(htmlBody).toContain('/diwan/opencortex-session-addon.js');
 
     const js = await fetch(`${base}/diwan/code/session/live/assets/app.js`, {
       headers: cookie,

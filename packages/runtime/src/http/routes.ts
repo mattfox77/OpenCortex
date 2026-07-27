@@ -1323,8 +1323,8 @@ export function codeSessionProxy(
     proxyRes.on('data', (chunk: Buffer) => chunks.push(chunk));
     proxyRes.on('end', () => {
       const sessionBase =
-        (req as express.Request & { diwanSessionBase?: string })
-          .diwanSessionBase ?? '/';
+        (req as express.Request & { opencortexSessionBase?: string })
+          .opencortexSessionBase ?? '/';
       let body = Buffer.concat(chunks).toString('utf8');
       if (String(contentType).includes('text/html')) {
         // Inject a <base href> so the OpenCode SPA resolves its relative asset
@@ -1429,11 +1429,12 @@ export function codeSessionProxy(
       ? sessionWithSelectedThread(session, requestThread)
       : session;
     chat.ensureSessionChannel(requestSession, req.user);
-    (req as express.Request & { diwanSessionBase?: string }).diwanSessionBase =
-      requestSession.urlPath;
     (
-      req as express.Request & { diwanSessionAddon?: SessionAddon }
-    ).diwanSessionAddon = sessionAddon(requestSession, chat);
+      req as express.Request & { opencortexSessionBase?: string }
+    ).opencortexSessionBase = requestSession.urlPath;
+    (
+      req as express.Request & { opencortexSessionAddon?: SessionAddon }
+    ).opencortexSessionAddon = sessionAddon(requestSession, chat);
     return proxy.web(req, res, {
       target: `http://127.0.0.1:${requestSession.port}`,
       changeOrigin: false,
@@ -1529,7 +1530,7 @@ interface SessionAddon {
   apiBaseUrl: string;
   channelId?: string;
   channelName: string;
-  diwanUrl: string;
+  workbenchUrl: string;
   slackUrl?: string;
 }
 
@@ -1539,7 +1540,7 @@ function sessionAddon(session: CodeSession, chat: ChatStore): SessionAddon {
     apiBaseUrl: `${sessionBasePath(session)}/api`,
     channelId: channel?.id,
     channelName: channel?.name ?? session.name ?? 'New session',
-    diwanUrl: sessionShellUrl(session),
+    workbenchUrl: sessionShellUrl(session),
     ...(channel?.external?.slack?.url
       ? { slackUrl: channel.external.slack.url }
       : {}),
@@ -1557,9 +1558,14 @@ function sessionBasePath(session: CodeSession): string {
 }
 
 function injectSessionAddon(body: string, req: express.Request): string {
-  const addon = (req as express.Request & { diwanSessionAddon?: SessionAddon })
-    .diwanSessionAddon;
-  if (!addon || body.includes('data-diwan-session-addon')) {
+  const addon = (
+    req as express.Request & { opencortexSessionAddon?: SessionAddon }
+  ).opencortexSessionAddon;
+  if (
+    !addon ||
+    body.includes('data-opencortex-session-addon') ||
+    body.includes('data-diwan-session-addon')
+  ) {
     return body;
   }
   const html = sessionAddonHtml(addon);
@@ -1570,14 +1576,14 @@ function injectSessionAddon(body: string, req: express.Request): string {
 
 function sessionAddonHtml(addon: SessionAddon): string {
   return [
-    '<div data-diwan-session-addon',
+    '<div data-opencortex-session-addon',
     ` data-api-base-url="${escapeHtml(addon.apiBaseUrl)}"`,
     addon.channelId ? ` data-channel-id="${escapeHtml(addon.channelId)}"` : '',
     ` data-channel-name="${escapeHtml(addon.channelName)}"`,
-    ` data-diwan-url="${escapeHtml(addon.diwanUrl)}"`,
+    ` data-workbench-url="${escapeHtml(addon.workbenchUrl)}"`,
     addon.slackUrl ? ` data-slack-url="${escapeHtml(addon.slackUrl)}"` : '',
     '></div>',
-    `<script src="${escapeHtml(addon.apiBaseUrl.replace(/\/api$/, ''))}/diwan-session-addon.js" defer></script>`,
+    `<script src="${escapeHtml(addon.apiBaseUrl.replace(/\/api$/, ''))}/opencortex-session-addon.js" defer></script>`,
   ].join('');
 }
 
