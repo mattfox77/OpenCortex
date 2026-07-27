@@ -40,6 +40,10 @@ jobs:
       - name: Type check and config inventory
         run: npm run check
 
+      - name: Replay orchestrator workflows
+        run: npm run test:replay
+        working-directory: packages/orchestrator
+
       - name: Validate memory migrations on empty pgvector database
         run: npm --prefix packages/memory run check:empty-db
 
