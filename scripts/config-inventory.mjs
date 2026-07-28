@@ -11,6 +11,7 @@ const patterns = [
   { name: 'AWS SDK import', re: /from\s+['"]@aws-sdk\/|require\(['"]@aws-sdk\// },
   { name: 'AWS endpoint', re: /amazonaws\.com/i },
   { name: 'AWS credential env', re: /\bAWS_(?:ACCESS_KEY_ID|SECRET_ACCESS_KEY|SESSION_TOKEN|REGION)\b/ },
+  { name: 'Cognito auth path', re: /\b(?:COGNITO_|cognito:groups|amazoncognito\.com)\b/i },
   { name: 'hardcoded private key marker', re: /-----BEGIN (?:RSA |EC |OPENSSH |)PRIVATE KEY-----/ },
   { name: 'inline password assignment', re: /\bpassword\s*=\s*['"][^'"]+['"]/i },
 ];
@@ -62,11 +63,12 @@ for (const root of roots) {
 }
 
 if (findings.length === 0) {
-  console.log('Config inventory: no DSN/AWS/secret pattern findings.');
+  console.log('Config inventory: no DSN/AWS/Cognito/secret pattern findings.');
   process.exit(0);
 }
 
-console.warn('Config inventory warnings. These become hard failures after Phase 2 neutralization:');
+console.error('Config inventory failed:');
 for (const finding of findings) {
-  console.warn(`- ${finding.file}:${finding.line} ${finding.name}`);
+  console.error(`- ${finding.file}:${finding.line} ${finding.name}`);
 }
+process.exit(1);

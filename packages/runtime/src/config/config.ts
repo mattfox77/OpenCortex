@@ -34,12 +34,6 @@ const schema = z.object({
   OIDC_TOKEN_ENDPOINT: z.string().default(''),
   OIDC_JWKS_URI: z.string().default(''),
   OIDC_END_SESSION_ENDPOINT: z.string().default(''),
-  COGNITO_REGION: z.string().default('us-east-1'),
-  COGNITO_USER_POOL_ID: z.string().default(''),
-  COGNITO_APP_CLIENT_ID: z.string().default(''),
-  COGNITO_DOMAIN: z.string().default(''),
-  COGNITO_REDIRECT_PATH: z.string().default('/auth/callback'),
-  COGNITO_REQUIRED_GROUPS: csv(''),
   DIWAN_ALLOWED_EMAIL_DOMAIN: z.string().default(''),
   OPENCORTEX_ALLOWED_EMAIL_DOMAINS: csv(''),
   OPENCORTEX_SUPER_ADMIN_EMAILS: csv(''),
@@ -91,27 +85,6 @@ function normalizeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   applyInputAlias(normalized, 'OPENCORTEX_OIDC_JWKS_URI', 'OIDC_JWKS_URI');
   applyInputAlias(normalized, 'OPENCORTEX_OIDC_END_SESSION_ENDPOINT', 'OIDC_END_SESSION_ENDPOINT');
   applyInputAlias(normalized, 'OPENCORTEX_REQUIRED_GROUPS', 'OIDC_REQUIRED_GROUPS');
-  applyAlias(normalized, 'OIDC_CLIENT_ID', 'COGNITO_APP_CLIENT_ID');
-  applyAlias(normalized, 'OIDC_REDIRECT_PATH', 'COGNITO_REDIRECT_PATH');
-  applyAlias(normalized, 'OIDC_REQUIRED_GROUPS', 'COGNITO_REQUIRED_GROUPS');
-
-  if (!normalized.OIDC_ISSUER && normalized.COGNITO_USER_POOL_ID) {
-    throw new Error(
-      'COGNITO_USER_POOL_ID no longer derives OIDC_ISSUER; set OPENCORTEX_OIDC_ISSUER instead.',
-    );
-  }
-  if (normalized.COGNITO_DOMAIN) {
-    if (!normalized.OIDC_AUTHORIZATION_ENDPOINT) {
-      normalized.OIDC_AUTHORIZATION_ENDPOINT = `${normalized.COGNITO_DOMAIN}/oauth2/authorize`;
-    }
-    if (!normalized.OIDC_TOKEN_ENDPOINT) {
-      normalized.OIDC_TOKEN_ENDPOINT = `${normalized.COGNITO_DOMAIN}/oauth2/token`;
-    }
-    if (!normalized.OIDC_END_SESSION_ENDPOINT) {
-      normalized.OIDC_END_SESSION_ENDPOINT = `${normalized.COGNITO_DOMAIN}/logout`;
-    }
-    console.warn('COGNITO_DOMAIN is deprecated; use OIDC issuer metadata or OIDC_* endpoints instead.');
-  }
 
   if (!normalized.OPENCORTEX_ALLOWED_EMAIL_DOMAINS && normalized.DIWAN_ALLOWED_EMAIL_DOMAIN) {
     normalized.OPENCORTEX_ALLOWED_EMAIL_DOMAINS = normalized.DIWAN_ALLOWED_EMAIL_DOMAIN;

@@ -33,7 +33,7 @@ function tokenFromRequest(req: Parameters<RequestHandler>[0]): string | null {
 }
 
 function groupsFrom(payload: JWTPayload, groupsClaim: string): string[] {
-  const value = payload[groupsClaim] ?? payload['cognito:groups'];
+  const value = payload[groupsClaim];
   if (Array.isArray(value)) {
     return value.filter((item): item is string => typeof item === 'string');
   }
