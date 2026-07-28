@@ -8,6 +8,10 @@ import {
   assertAllowedEmailDomains,
   emailToLinuxUser,
 } from "../src/auth/linuxUser.js";
+import {
+  mintInternalToken,
+  verifyInternalToken,
+} from '../src/auth/internalToken.js';
 import { oidcAuth, requireUser } from '../src/auth/oidc.js';
 import type { AppConfig } from '../src/config/config.js';
 
@@ -180,6 +184,7 @@ function testConfig(
     DIWAN_ALLOWED_EMAIL_DOMAIN: '',
     OPENCORTEX_ALLOWED_EMAIL_DOMAINS: options.allowedDomains,
     OPENCORTEX_SUPER_ADMIN_EMAILS: [],
+    OPENCORTEX_INTERNAL_TOKEN_SECRET: 'test-internal-token-secret-32-bytes',
     OPENCORTEX_LINUX_USER_PREFIX: '',
     OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
     OPENCORTEX_EXEC_MODE: 'dry-run',
@@ -193,6 +198,35 @@ function testConfig(
     SLACK_SESSION_CHANNEL_PREFIX: 'opencortex',
   };
 }
+
+describe('internal scoped tokens', () => {
+  it('mints and verifies short-lived scoped tokens for an OIDC user', async () => {
+    const minted = await mintInternalToken({
+      user: {
+        sub: 'oidc:issuer:user-123',
+        email: 'operator@example.com',
+        groups: ['CortexUsers'],
+        linuxUser: 'operator',
+      },
+      scopes: ['memory:read', 'memory:write'],
+      secret: 'test-internal-token-secret-32-bytes',
+      ttlSeconds: 60,
+    });
+
+    const verified = await verifyInternalToken(
+      minted.token,
+      'test-internal-token-secret-32-bytes',
+      ['memory:write'],
+    );
+
+    expect(verified).toMatchObject({
+      subject: 'oidc:issuer:user-123',
+      ownerEmail: 'operator@example.com',
+      linuxUser: 'operator',
+      scopes: ['memory:read', 'memory:write'],
+    });
+  });
+});
 
 async function startJwksServer(): Promise<{
   server: Server;

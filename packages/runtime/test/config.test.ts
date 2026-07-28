@@ -86,5 +86,6 @@ function requiredAuthEnv(): NodeJS.ProcessEnv {
     OPENCORTEX_OIDC_AUTHORIZATION_ENDPOINT: 'https://dex.example.com/auth',
     OPENCORTEX_OIDC_TOKEN_ENDPOINT: 'https://dex.example.com/token',
     OPENCORTEX_OIDC_JWKS_URI: 'https://dex.example.com/keys',
+    OPENCORTEX_INTERNAL_TOKEN_SECRET: 'test-internal-token-secret-32-bytes',
   };
 }

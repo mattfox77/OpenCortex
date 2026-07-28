@@ -6,6 +6,7 @@ import net from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/http/app.js';
 import type { AppConfig } from '../src/config/config.js';
+import { verifyInternalToken } from '../src/auth/internalToken.js';
 import { SessionStore } from '../src/code/sessionStore.js';
 import { ChatStore } from '../src/chat/chatStore.js';
 import type { AuthenticatedUser } from '../src/auth/types.js';
@@ -35,6 +36,7 @@ function testConfig(): AppConfig {
     DIWAN_ALLOWED_EMAIL_DOMAIN: 'acme.test',
     OPENCORTEX_ALLOWED_EMAIL_DOMAINS: ['acme.test'],
     OPENCORTEX_SUPER_ADMIN_EMAILS: ['mfox@acme.test'],
+    OPENCORTEX_INTERNAL_TOKEN_SECRET: 'test-internal-token-secret-32-bytes',
     OPENCORTEX_LINUX_USER_PREFIX: '',
     OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
     OPENCORTEX_EXEC_MODE: 'dry-run',
@@ -269,6 +271,47 @@ describe('http app', () => {
     );
     expect(form.get('code')).toBe('auth-code');
     expect(form.get('code_verifier')).toBe('pkce-verifier');
+  });
+
+  it('mints scoped internal tokens for authenticated users', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+
+    const response = await fetch(`${base}/diwan/api/auth/internal-token`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Dev owner@acme.test',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        scopes: ['memory:read', 'memory:write'],
+        ttlSeconds: 60,
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    const payload = await response.json() as {
+      token: string;
+      tokenType: string;
+      scopes: string[];
+      expiresAt: string;
+    };
+    expect(payload.tokenType).toBe('Bearer');
+    expect(payload.scopes).toEqual(['memory:read', 'memory:write']);
+    expect(new Date(payload.expiresAt).getTime()).toBeGreaterThan(Date.now());
+    await expect(
+      verifyInternalToken(
+        payload.token,
+        config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+        ['memory:write'],
+      ),
+    ).resolves.toMatchObject({
+      subject: 'dev:owner@acme.test',
+      ownerEmail: 'owner@acme.test',
+      linuxUser: 'owner',
+      scopes: ['memory:read', 'memory:write'],
+    });
   });
 
   it('requires auth to list code sessions', async () => {

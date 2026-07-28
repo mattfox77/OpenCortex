@@ -21,6 +21,10 @@ import {
 } from '../code/openCodePromptClient.js';
 import { oidcProviderMetadata, requireUser } from '../auth/oidc.js';
 import type { AuthenticatedUser } from '../auth/types.js';
+import {
+  mintInternalToken,
+  parseInternalTokenScopes,
+} from '../auth/internalToken.js';
 import { provisioningCommands } from '../system/provisioning.js';
 import {
   PairPromptStore,
@@ -148,6 +152,32 @@ export function apiRouter(
 
   router.get('/me', requireUser, (req, res) => {
     res.json({ user: req.user });
+  });
+
+  router.post('/auth/internal-token', requireUser, async (req, res, next) => {
+    try {
+      const body = z
+        .object({
+          scopes: z.array(z.string()).min(1),
+          ttlSeconds: z.number().int().positive().max(3600).optional(),
+        })
+        .parse(req.body);
+      const scopes = parseInternalTokenScopes(body.scopes);
+      const minted = await mintInternalToken({
+        user: req.user!,
+        scopes,
+        secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+        ttlSeconds: body.ttlSeconds,
+      });
+      res.status(201).json({
+        token: minted.token,
+        tokenType: 'Bearer',
+        scopes,
+        expiresAt: minted.expiresAt.toISOString(),
+      });
+    } catch (error) {
+      next(error);
+    }
   });
 
   router.get('/chat/events', requireUser, (req, res) => {

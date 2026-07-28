@@ -37,6 +37,7 @@ const schema = z.object({
   DIWAN_ALLOWED_EMAIL_DOMAIN: z.string().default(''),
   OPENCORTEX_ALLOWED_EMAIL_DOMAINS: csv(''),
   OPENCORTEX_SUPER_ADMIN_EMAILS: csv(''),
+  OPENCORTEX_INTERNAL_TOKEN_SECRET: z.string().min(32),
   OPENCORTEX_LINUX_USER_PREFIX: z.string().default(''),
   OPENCORTEX_WORKSPACE_ROOT: z.string().default('/srv/opencortex/workspaces'),
   OPENCORTEX_EXEC_MODE: z.enum(['dry-run', 'sudo']).default('dry-run'),
@@ -68,6 +69,7 @@ function normalizeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   applyAlias(normalized, 'OPENCORTEX_WORKSPACE_ROOT', 'DIWAN_WORKSPACE_ROOT');
   applyAlias(normalized, 'OPENCORTEX_ALLOWED_EMAIL_DOMAINS', 'DIWAN_ALLOWED_EMAIL_DOMAINS');
   applyAlias(normalized, 'OPENCORTEX_SUPER_ADMIN_EMAILS', 'DIWAN_SUPER_ADMIN_EMAILS');
+  applyAlias(normalized, 'OPENCORTEX_INTERNAL_TOKEN_SECRET', 'DIWAN_INTERNAL_TOKEN_SECRET');
   applyAlias(normalized, 'OPENCORTEX_LINUX_USER_PREFIX', 'DIWAN_LINUX_USER_PREFIX');
   applyAlias(normalized, 'OPENCORTEX_EXEC_MODE', 'DIWAN_EXEC_MODE');
   applyAlias(normalized, 'OPENCORTEX_WORKBENCH_PORT_BASE', 'DIWAN_OPENCODE_PORT_BASE');
