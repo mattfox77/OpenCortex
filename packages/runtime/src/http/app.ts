@@ -8,6 +8,7 @@ import { oidcAuth } from '../auth/oidc.js';
 import {
   apiRouter,
   codeSessionProxy,
+  memoryRouter,
   publicRouter,
   rawOpenCodeSessionRedirect,
 } from './routes.js';
@@ -15,6 +16,7 @@ import { SessionStore } from '../code/sessionStore.js';
 import { ChatStore } from '../chat/chatStore.js';
 import { PairPromptStore } from '../pairPrompts/pairPromptStore.js';
 import { JiraTrackingStore } from '../jira/jiraTrackingStore.js';
+import { createMemoryStore, type MemoryStore } from '../memory/memoryStore.js';
 
 export function createApp(
   config: AppConfig,
@@ -24,6 +26,7 @@ export function createApp(
   jiraTracking: JiraTrackingStore = new JiraTrackingStore(
     config.OPENCORTEX_DATA_DIR,
   ),
+  memory: MemoryStore | undefined = createMemoryStore(config),
 ): express.Express {
   const app = express();
   const mountPath = config.OPENCORTEX_BASE_PATH || '/';
@@ -56,6 +59,7 @@ export function createApp(
     res.json({ ok: true, service: 'opencortex-runtime' }),
   );
   mounted.use('/api', publicRouter(config));
+  mounted.use('/api/memory', memoryRouter(config, memory));
   mounted.use(
     '/api',
     oidcAuth(config),

@@ -24,7 +24,16 @@ import type { AuthenticatedUser } from '../auth/types.js';
 import {
   mintInternalToken,
   parseInternalTokenScopes,
+  verifyInternalToken,
+  type InternalTokenScope,
+  type VerifiedInternalToken,
 } from '../auth/internalToken.js';
+import type {
+  MemoryEntryAuthor,
+  MemoryEntryKind,
+  MemoryEntryScope,
+  MemoryStore,
+} from '../memory/memoryStore.js';
 import { provisioningCommands } from '../system/provisioning.js';
 import {
   PairPromptStore,
@@ -874,8 +883,166 @@ export function apiRouter(
   return router;
 }
 
+export function memoryRouter(
+  config: AppConfig,
+  memory: MemoryStore | undefined,
+): express.Router {
+  const router = express.Router();
+
+  router.post(
+    '/entries',
+    requireInternalToken(config, ['memory:write']),
+    async (req, res, next) => {
+      try {
+        const store = requireMemoryStore(memory, res);
+        if (!store) {
+          return;
+        }
+        const body = z
+          .object({
+            content: z.string().min(1),
+            title: z.string().min(1).optional(),
+            kind: z
+              .enum(['thought', 'finding', 'decision', 'document', 'chunk'])
+              .default('thought'),
+            scope: z.enum(['personal', 'team', 'global']).default('team'),
+            project: z.string().min(1).optional(),
+            repo: z.string().min(1).optional(),
+            sourceSystem: z.string().min(1).optional(),
+            sourceSessionId: z.string().min(1).optional(),
+            toolName: z.string().min(1).optional(),
+            author: z.enum(['user', 'agent']).default('user'),
+            tags: z.array(z.string().min(1)).default([]),
+            meta: z.record(z.string(), z.unknown()).default({}),
+          })
+          .parse(req.body);
+        const token = res.locals.internalToken as VerifiedInternalToken;
+        const entry = await store.captureEntry({
+          ownerId: token.ownerEmail,
+          identitySubject: token.subject,
+          content: body.content,
+          title: body.title,
+          kind: body.kind as MemoryEntryKind,
+          scope: body.scope as MemoryEntryScope,
+          project: body.project,
+          repo: body.repo,
+          sourceSystem: body.sourceSystem,
+          sourceSessionId: body.sourceSessionId,
+          toolName: body.toolName,
+          author: body.author as MemoryEntryAuthor,
+          tags: body.tags,
+          meta: body.meta,
+        });
+        res.status(201).json({ entry });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  router.get(
+    '/entries',
+    requireInternalToken(config, ['memory:read']),
+    async (req, res, next) => {
+      try {
+        const store = requireMemoryStore(memory, res);
+        if (!store) {
+          return;
+        }
+        const query = z
+          .object({
+            q: z.string().min(1).optional(),
+            limit: z.coerce.number().int().positive().max(50).default(10),
+            project: z.string().min(1).optional(),
+            scope: z.enum(['personal', 'team', 'global']).optional(),
+            repo: z.string().min(1).optional(),
+            includePending: queryBoolean().default(false),
+          })
+          .parse(req.query);
+        const token = res.locals.internalToken as VerifiedInternalToken;
+        const entries = await store.searchEntries({
+          ownerId: token.ownerEmail,
+          query: query.q,
+          limit: query.limit,
+          project: query.project,
+          scope: query.scope as MemoryEntryScope | undefined,
+          repo: query.repo,
+          includePending: query.includePending,
+        });
+        res.json({ entries });
+      } catch (error) {
+        next(error);
+      }
+    },
+  );
+
+  return router;
+}
+
+function requireInternalToken(
+  config: AppConfig,
+  scopes: InternalTokenScope[],
+): express.RequestHandler {
+  return async (req, res, next) => {
+    try {
+      const token = bearerToken(req.header('authorization'));
+      if (!token) {
+        return res.status(401).json({ error: 'missing_bearer_token' });
+      }
+      res.locals.internalToken = await verifyInternalToken(
+        token,
+        config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+        scopes,
+      );
+      return next();
+    } catch (error) {
+      return res.status(403).json({
+        error: 'invalid_internal_token',
+        message: error instanceof Error ? error.message : 'Unknown auth error',
+      });
+    }
+  };
+}
+
+function bearerToken(header: string | undefined): string | null {
+  if (!header) {
+    return null;
+  }
+  const match = /^Bearer\s+(.+)$/i.exec(header);
+  return match?.[1] ?? null;
+}
+
+function requireMemoryStore(
+  memory: MemoryStore | undefined,
+  res: express.Response,
+): MemoryStore | undefined {
+  if (memory) {
+    return memory;
+  }
+  res.status(503).json({
+    error: 'memory_unavailable',
+    message: 'OPENCORTEX_MEMORY_DATABASE_URL is not configured.',
+  });
+  return undefined;
+}
+
 function optionalQuery(value: unknown): string | undefined {
   return typeof value === 'string' && value.trim() ? value.trim() : undefined;
+}
+
+function queryBoolean() {
+  return z.preprocess(value => {
+    if (value === undefined) {
+      return undefined;
+    }
+    if (value === 'true') {
+      return true;
+    }
+    if (value === 'false') {
+      return false;
+    }
+    return value;
+  }, z.boolean());
 }
 
 function messageLimit(value: unknown): number {

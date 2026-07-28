@@ -185,6 +185,7 @@ function testConfig(
     OPENCORTEX_ALLOWED_EMAIL_DOMAINS: options.allowedDomains,
     OPENCORTEX_SUPER_ADMIN_EMAILS: [],
     OPENCORTEX_INTERNAL_TOKEN_SECRET: 'test-internal-token-secret-32-bytes',
+    OPENCORTEX_MEMORY_DATABASE_URL: '',
     OPENCORTEX_LINUX_USER_PREFIX: '',
     OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
     OPENCORTEX_EXEC_MODE: 'dry-run',

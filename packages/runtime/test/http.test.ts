@@ -6,9 +6,18 @@ import net from 'node:net';
 import { afterEach, describe, expect, it } from 'vitest';
 import { createApp } from '../src/http/app.js';
 import type { AppConfig } from '../src/config/config.js';
-import { verifyInternalToken } from '../src/auth/internalToken.js';
+import {
+  mintInternalToken,
+  verifyInternalToken,
+} from '../src/auth/internalToken.js';
 import { SessionStore } from '../src/code/sessionStore.js';
 import { ChatStore } from '../src/chat/chatStore.js';
+import type {
+  CaptureMemoryEntryInput,
+  MemoryEntry,
+  MemoryStore,
+  SearchMemoryEntriesInput,
+} from '../src/memory/memoryStore.js';
 import type { AuthenticatedUser } from '../src/auth/types.js';
 import type { CodeSession } from '../src/code/sessionLauncher.js';
 
@@ -37,6 +46,7 @@ function testConfig(): AppConfig {
     OPENCORTEX_ALLOWED_EMAIL_DOMAINS: ['acme.test'],
     OPENCORTEX_SUPER_ADMIN_EMAILS: ['mfox@acme.test'],
     OPENCORTEX_INTERNAL_TOKEN_SECRET: 'test-internal-token-secret-32-bytes',
+    OPENCORTEX_MEMORY_DATABASE_URL: '',
     OPENCORTEX_LINUX_USER_PREFIX: '',
     OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
     OPENCORTEX_EXEC_MODE: 'dry-run',
@@ -62,6 +72,23 @@ async function request(path: string) {
 
 function startApp(config: AppConfig) {
   const app = createApp(config);
+  const listener = app.listen(0);
+  const address = listener.address();
+  if (!address || typeof address === 'string')
+    throw new Error('Expected TCP listener');
+  const base = `http://127.0.0.1:${address.port}`;
+  return { listener, base };
+}
+
+function startAppWithMemory(config: AppConfig, memory: MemoryStore) {
+  const app = createApp(
+    config,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    memory,
+  );
   const listener = app.listen(0);
   const address = listener.address();
   if (!address || typeof address === 'string')
@@ -156,6 +183,43 @@ function fakeOpenCode(
       resolve({ port: address.port, requests });
     });
   });
+}
+
+class FakeMemoryStore implements MemoryStore {
+  readonly captures: CaptureMemoryEntryInput[] = [];
+  readonly searches: SearchMemoryEntriesInput[] = [];
+  private readonly entries: MemoryEntry[] = [];
+
+  async captureEntry(input: CaptureMemoryEntryInput): Promise<MemoryEntry> {
+    this.captures.push(input);
+    const entry: MemoryEntry = {
+      id: `entry-${this.entries.length + 1}`,
+      createdAt: new Date().toISOString(),
+      title: input.title,
+      content: input.content,
+      kind: input.kind,
+      scope: input.scope,
+      project: input.project,
+      repo: input.repo,
+      sourceSystem: input.sourceSystem,
+      sourceSessionId: input.sourceSessionId,
+      toolName: input.toolName,
+      ownerId: input.ownerId,
+      author: input.author,
+      review: input.author === 'agent' ? 'pending' : 'approved',
+      tags: input.tags,
+      identitySubject: input.identitySubject,
+    };
+    this.entries.push(entry);
+    return entry;
+  }
+
+  async searchEntries(input: SearchMemoryEntriesInput): Promise<MemoryEntry[]> {
+    this.searches.push(input);
+    return this.entries.filter(entry =>
+      input.query ? entry.content.includes(input.query) : true,
+    );
+  }
 }
 
 afterEach(() => {
@@ -312,6 +376,90 @@ describe('http app', () => {
       linuxUser: 'owner',
       scopes: ['memory:read', 'memory:write'],
     });
+  });
+
+  it('captures and searches memory through scoped internal tokens', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const memory = new FakeMemoryStore();
+    const { listener, base } = startAppWithMemory(config, memory);
+    server = listener;
+    const minted = await mintInternalToken({
+      user: authUser('owner@acme.test'),
+      scopes: ['memory:read', 'memory:write'],
+      secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+    });
+
+    const capture = await fetch(`${base}/diwan/api/memory/entries`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${minted.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: 'Captured through the OpenCortex memory API',
+        title: 'Runtime memory capture',
+        scope: 'personal',
+        kind: 'finding',
+        project: 'runtime',
+        sourceSystem: 'opencortex-session',
+        sourceSessionId: 'session-1',
+        toolName: 'opencode',
+        tags: ['api'],
+      }),
+    });
+
+    expect(capture.status).toBe(201);
+    await expect(capture.json()).resolves.toMatchObject({
+      entry: {
+        title: 'Runtime memory capture',
+        ownerId: 'owner@acme.test',
+        identitySubject: 'dev:owner@acme.test',
+      },
+    });
+    expect(memory.captures[0]).toMatchObject({
+      ownerId: 'owner@acme.test',
+      identitySubject: 'dev:owner@acme.test',
+      scope: 'personal',
+    });
+
+    const search = await fetch(
+      `${base}/diwan/api/memory/entries?q=OpenCortex&limit=5`,
+      { headers: { Authorization: `Bearer ${minted.token}` } },
+    );
+
+    expect(search.status).toBe(200);
+    await expect(search.json()).resolves.toMatchObject({
+      entries: [{ title: 'Runtime memory capture' }],
+    });
+    expect(memory.searches[0]).toMatchObject({
+      ownerId: 'owner@acme.test',
+      query: 'OpenCortex',
+      limit: 5,
+    });
+  });
+
+  it('rejects memory writes without the memory write scope', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const memory = new FakeMemoryStore();
+    const { listener, base } = startAppWithMemory(config, memory);
+    server = listener;
+    const minted = await mintInternalToken({
+      user: authUser('owner@acme.test'),
+      scopes: ['memory:read'],
+      secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+    });
+
+    const response = await fetch(`${base}/diwan/api/memory/entries`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${minted.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ content: 'should not write' }),
+    });
+
+    expect(response.status).toBe(403);
+    expect(memory.captures).toHaveLength(0);
   });
 
   it('requires auth to list code sessions', async () => {
