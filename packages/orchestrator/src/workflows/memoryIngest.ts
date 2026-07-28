@@ -19,6 +19,7 @@ export interface MemoryIngestInput {
   toolName?: string;
   mimeType?: string;
   sourcePath?: string;
+  identitySubject?: string;
   traceContext?: TraceContext;
 }
 
@@ -33,6 +34,7 @@ export interface MemoryIngestResult {
   project?: string;
   sourceSystem: string;
   sourceSessionId?: string;
+  identitySubject?: string;
   traceContext?: TraceContext;
 }
 
@@ -74,6 +76,7 @@ export async function memoryIngestWorkflow(
     sourceSystem: input.sourceSystem,
     sourceSessionId: input.sourceSessionId,
     toolName: input.toolName,
+    identitySubject: input.identitySubject,
     workflowId,
     runId,
     traceContext: input.traceContext,
@@ -93,6 +96,7 @@ export async function memoryIngestWorkflow(
     project: input.project,
     sourceSystem: input.sourceSystem,
     sourceSessionId: input.sourceSessionId,
+    identitySubject: input.identitySubject,
     workflowId,
     runId,
     traceContext: input.traceContext,
@@ -129,6 +133,7 @@ export async function memoryIngestWorkflow(
     project: input.project,
     sourceSystem: input.sourceSystem,
     sourceSessionId: input.sourceSessionId,
+    identitySubject: input.identitySubject,
     traceContext: input.traceContext,
   };
 }

@@ -284,6 +284,7 @@ export async function storeOriginalArtifact(params: {
   toolName?: string;
   mimeType?: string;
   sourcePath?: string;
+  identitySubject?: string;
   traceContext?: TraceContext;
 }): Promise<StoredArtifact> {
   return withTraceSpan('opencortex.memory.store_original_artifact', params.traceContext, {
@@ -323,6 +324,7 @@ export async function storeOriginalArtifact(params: {
       session_group: params.sourceSessionId ?? null,
       scope: params.scope ?? 'personal',
       owner_id: params.ownerId,
+      identity_subject: params.identitySubject ?? null,
       sha256,
       size_bytes: Buffer.byteLength(params.content, 'utf8'),
       mime_type: mimeType,
@@ -456,6 +458,7 @@ export async function writeMemoryChunks(params: {
   scope?: 'personal' | 'team' | 'global';
   sourceSessionId?: string;
   toolName?: string;
+  identitySubject?: string;
   traceContext?: TraceContext;
 }): Promise<{ entryIds: string[] }> {
   return withTraceSpan('opencortex.memory.write_memory_chunks', params.traceContext, {
@@ -495,6 +498,7 @@ export async function writeMemoryChunks(params: {
         project: params.project ?? null,
         scope: params.scope ?? 'personal',
         owner_id: params.ownerId,
+        identity_subject: params.identitySubject ?? null,
         author: 'agent',
         content_hash: contentHash,
         source_system: params.sourceSystem,
@@ -584,6 +588,7 @@ export async function writeIngestAuditEvent(params: {
   runId: string;
   project?: string;
   sourceSessionId?: string;
+  identitySubject?: string;
   traceContext?: TraceContext;
 }): Promise<{ logId: string }> {
   return withTraceSpan('opencortex.memory.write_ingest_audit_event', params.traceContext, {
@@ -614,6 +619,7 @@ export async function writeIngestAuditEvent(params: {
       summary: `Ingested artifact ${params.artifactId} into ${params.entryIds.length} memory chunk(s)`,
       project: params.project ?? null,
       owner_id: params.ownerId,
+      identity_subject: params.identitySubject ?? null,
       worker: process.env.WORKER_NAME || 'opencortex-orchestrator',
       data: {
         artifactId: params.artifactId,

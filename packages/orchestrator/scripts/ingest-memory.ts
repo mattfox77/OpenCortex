@@ -16,6 +16,9 @@ async function main() {
   let ownerId = process.env.OPENCORTEX_OWNER_ID ?? process.env.OWNER_ID ?? '';
   let sourceSystem = 'opencortex-session';
   let sourceSessionId: string | undefined;
+  let identitySubject =
+    process.env.OPENCORTEX_IDENTITY_SUBJECT ??
+    process.env.IDENTITY_SUBJECT;
   let scope: 'personal' | 'team' | 'global' = 'personal';
   let toolName: string | undefined;
   let queue: string | undefined;
@@ -41,6 +44,9 @@ async function main() {
       case '--session-id':
         sourceSessionId = args[++i];
         break;
+      case '--identity-subject':
+        identitySubject = args[++i];
+        break;
       case '--scope':
         scope = parseScope(args[++i]);
         break;
@@ -65,6 +71,7 @@ async function main() {
   const traceContext = newTraceContext();
   const result = await withTraceSpan('opencortex.memory.ingest_request', traceContext, {
     'memory.owner_id': ownerId,
+    'identity.subject': identitySubject,
     'memory.source_system': sourceSystem,
     'memory.source_session_id': sourceSessionId,
     'memory.artifact_name': artifactName,
@@ -79,6 +86,7 @@ async function main() {
       repo,
       scope,
       toolName,
+      identitySubject,
       sourcePath: file || artifactName,
       queue,
       traceContext: requestTraceContext ?? traceContext,

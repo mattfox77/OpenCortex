@@ -150,11 +150,12 @@ export async function startMemoryIngest(
         repo: params.repo,
         scope: params.scope,
         toolName: params.toolName,
-        mimeType: params.mimeType,
-        sourcePath: params.sourcePath,
-        traceContext: workflowTraceContext ?? traceContext,
-      }],
-    }));
+      mimeType: params.mimeType,
+      sourcePath: params.sourcePath,
+      identitySubject: params.identitySubject,
+      traceContext: workflowTraceContext ?? traceContext,
+    }],
+  }));
 
   console.log(`✅ Started memory ingest workflow: ${workflowId}`);
   console.log(`   Trace: ${traceContext.traceId}`);

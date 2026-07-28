@@ -139,6 +139,7 @@ async function startFixtureWorkflow(
       sourceSystem: 'test',
       sourceSessionId: 'session-replay',
       project: 'opencortex',
+      identitySubject: 'oidc:test:user-123',
       traceContext: {
         traceId: '1'.repeat(32),
         parentSpanId: '2'.repeat(16),
