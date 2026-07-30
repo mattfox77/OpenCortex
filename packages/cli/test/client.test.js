@@ -180,6 +180,11 @@ test('calls runtime memory capture and search endpoints with internal tokens', a
     seen.push({ url, init });
     if (String(url).includes('/api/memory/entries?')) {
       assert.equal(init.headers.Authorization, 'Bearer read-token');
+      assert.match(String(url), /q=Result/);
+      assert.match(String(url), /project=runtime/);
+      assert.match(String(url), /scope=team/);
+      assert.match(String(url), /repo=opencortex/);
+      assert.match(String(url), /includePending=true/);
       return jsonResponse({ entries: [{ id: 'entry-1', title: 'Result' }] });
     }
     assert.equal(url, 'https://runtime.test/api/memory/entries');
@@ -197,6 +202,10 @@ test('calls runtime memory capture and search endpoints with internal tokens', a
     runtimeUrl: 'https://runtime.test',
     internalToken: 'read-token',
     query: 'Result',
+    project: 'runtime',
+    scope: 'team',
+    repo: 'opencortex',
+    includePending: true,
   }, fetchImpl);
 
   assert.equal(captured.entry.id, 'entry-1');
@@ -285,6 +294,78 @@ test('CLI memory capture reads stdin and sends source metadata', async () => {
         toolName: 'opencode',
       },
     }]);
+  } finally {
+    server.close();
+  }
+});
+
+test('CLI memory recall prints ranked content snippets', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
+  const credentialsPath = join(dir, 'tokens.json');
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({
+      method: req.method,
+      url: req.url,
+      authorization: req.headers.authorization,
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      entries: [{
+        id: 'entry-1',
+        title: 'Useful finding',
+        content: 'OpenCortex recall returns the actual content for context.',
+        scope: 'team',
+        project: 'runtime',
+        repo: 'opencortex',
+        score: 0.875,
+      }],
+    }));
+  });
+
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  await writeCredentials(credentialsPath, {
+    schemaVersion: 1,
+    runtimeUrl: `http://127.0.0.1:${port}`,
+    oidc: {
+      idToken: 'oidc-id-token',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    },
+    internalTokens: {
+      'memory:read': {
+        token: 'read-token',
+        scopes: ['memory:read'],
+        expiresAt: '2999-01-01T00:00:00.000Z',
+      },
+    },
+  });
+
+  try {
+    const result = await runCli([
+      'memory',
+      'recall',
+      'OpenCortex context',
+      '-n',
+      '3',
+      '-p',
+      'runtime',
+      '-s',
+      'team',
+    ], {
+      env: { OPENCORTEX_CREDENTIALS_DIR: dir },
+    });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /1\. Useful finding \[team\] score=0\.875/);
+    assert.match(result.stdout, /runtime \| opencortex/);
+    assert.match(result.stdout, /OpenCortex recall returns the actual content/);
+    assert.equal(seen[0].method, 'GET');
+    assert.equal(seen[0].authorization, 'Bearer read-token');
+    assert.match(seen[0].url, /q=OpenCortex\+context/);
+    assert.match(seen[0].url, /limit=3/);
+    assert.match(seen[0].url, /project=runtime/);
+    assert.match(seen[0].url, /scope=team/);
   } finally {
     server.close();
   }

@@ -194,6 +194,11 @@ export async function memorySearch(options, fetchImpl = fetch) {
     q: options.query,
     limit: String(options.limit ?? 10),
   });
+  for (const key of ['project', 'scope', 'repo', 'includePending']) {
+    if (options[key] !== undefined) {
+      params.set(key, String(options[key]));
+    }
+  }
   const response = await fetchImpl(
     `${options.runtimeUrl.replace(/\/$/, '')}/api/memory/entries?${params.toString()}`,
     { headers: { Authorization: `Bearer ${options.internalToken}` } },

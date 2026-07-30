@@ -69,8 +69,11 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     return;
   }
 
-  if (command === 'memory' && subcommand === 'search') {
-    const parsed = parseSearchArgs(rest);
+  if (command === 'memory' && (subcommand === 'search' || subcommand === 'recall')) {
+    const parsed = parseMemoryQueryArgs(rest, {
+      defaultLimit: subcommand === 'recall' ? 5 : 10,
+      commandName: `memory ${subcommand}`,
+    });
     const { credentials, token } = await ensureInternalToken({
       credentialsPath,
       scopes: ['memory:read'],
@@ -81,9 +84,17 @@ async function main(argv = process.argv.slice(2), env = process.env) {
       internalToken: token,
       query: parsed.query,
       limit: parsed.limit,
+      project: parsed.project,
+      scope: parsed.scope,
+      repo: parsed.repo,
+      includePending: parsed.includePending,
     });
-    for (const entry of payload.entries ?? []) {
-      console.log(`${entry.id}\t${entry.title ?? '(untitled)'}`);
+    if (subcommand === 'recall') {
+      printRecall(payload.entries ?? []);
+    } else {
+      for (const entry of payload.entries ?? []) {
+        console.log(`${entry.id}\t${entry.title ?? '(untitled)'}`);
+      }
     }
     return;
   }
@@ -154,12 +165,20 @@ function parseCaptureArgs(args) {
   return entry;
 }
 
-function parseSearchArgs(args) {
-  const parsed = { query: '', limit: 10 };
+function parseMemoryQueryArgs(args, options) {
+  const parsed = { query: '', limit: options.defaultLimit };
   for (let index = 0; index < args.length; index += 1) {
     const item = args[index];
     if (item === '--limit' || item === '-n') {
-      parsed.limit = Number(args[++index] ?? 10);
+      parsed.limit = Number(args[++index] ?? options.defaultLimit);
+    } else if (item === '--project' || item === '-p') {
+      parsed.project = args[++index];
+    } else if (item === '--scope' || item === '-s') {
+      parsed.scope = args[++index];
+    } else if (item === '--repo' || item === '-r') {
+      parsed.repo = args[++index];
+    } else if (item === '--include-pending') {
+      parsed.includePending = true;
     } else if (!parsed.query) {
       parsed.query = item;
     } else {
@@ -167,9 +186,27 @@ function parseSearchArgs(args) {
     }
   }
   if (!parsed.query) {
-    throw new Error('memory search requires a query');
+    throw new Error(`${options.commandName} requires a query`);
   }
   return parsed;
+}
+
+function printRecall(entries) {
+  for (const [index, entry] of entries.entries()) {
+    const title = entry.title ?? '(untitled)';
+    const scope = entry.scope ? ` [${entry.scope}]` : '';
+    const score = Number.isFinite(Number(entry.score))
+      ? ` score=${Number(entry.score).toFixed(3)}`
+      : '';
+    console.log(`${index + 1}. ${title}${scope}${score}`);
+    if (entry.project || entry.repo) {
+      console.log(`   ${[entry.project, entry.repo].filter(Boolean).join(' | ')}`);
+    }
+    const content = String(entry.content ?? '').replace(/\s+/g, ' ').trim();
+    if (content) {
+      console.log(`   ${content.slice(0, 320)}${content.length > 320 ? '...' : ''}`);
+    }
+  }
 }
 
 function usage() {
@@ -178,7 +215,8 @@ function usage() {
   cortex memory capture "text"|-
     [-t title] [-p project] [-r repo] [-s personal|team|global] [-k kind]
     [--source-system name] [--session-id id] [--tool name]
-  cortex memory search "query" [-n limit]`);
+  cortex memory search "query" [-n limit] [-p project] [-r repo] [-s scope] [--include-pending]
+  cortex memory recall "query" [-n limit] [-p project] [-r repo] [-s scope] [--include-pending]`);
 }
 
 function readStdin(stream = process.stdin) {
