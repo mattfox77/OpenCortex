@@ -33,6 +33,7 @@ Phase 0/1 guardrails are being established:
 - Node/npm boundary for the Temporal worker
 - warning-mode config inventory for DSN/AWS/secret patterns
 - single OIDC implementation, Dex bundled, tested against Google as a second compliant issuer
+- bundled Dex example with three local CortexUsers identities for Phase 4 multi-user checks
 - root scripts that run package checks from a clean checkout
 
 The target deployment profile is one self-hosted Linux host under Podman

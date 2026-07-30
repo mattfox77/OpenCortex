@@ -26,4 +26,34 @@ staticClients:
     name: OpenCortex CLI
     public: true
 
-enablePasswordDB: false
+enablePasswordDB: true
+
+# Local-only bootstrap identities for fresh installs and Phase 4 multi-user
+# tests. The bcrypt hash below is for the password "password"; replace these
+# entries or federate Dex to a real IdP before exposing a deployment.
+staticPasswords:
+  - email: ada@opencortex.local
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: ada
+    name: Ada Lovelace
+    emailVerified: true
+    groups:
+      - CortexUsers
+      - CortexAdmins
+    userID: "10000000-0000-4000-8000-000000000001"
+  - email: grace@opencortex.local
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: grace
+    name: Grace Hopper
+    emailVerified: true
+    groups:
+      - CortexUsers
+    userID: "10000000-0000-4000-8000-000000000002"
+  - email: linus@opencortex.local
+    hash: "$2a$10$2b2cU8CPhOTaGrs1HRQuAueS7JTT5ZHsHSzYiFPm1leZck7Mc8T4W"
+    username: linus
+    name: Linus Torvalds
+    emailVerified: true
+    groups:
+      - CortexUsers
+    userID: "10000000-0000-4000-8000-000000000003"

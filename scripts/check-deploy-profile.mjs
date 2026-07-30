@@ -58,6 +58,12 @@ const configChecks = {
     "urn:ietf:params:oauth:grant-type:device_code",
     "id: opencortex-cli",
     "public: true",
+    "enablePasswordDB: true",
+    "staticPasswords:",
+    "email: ada@opencortex.local",
+    "email: grace@opencortex.local",
+    "email: linus@opencortex.local",
+    "CortexUsers",
   ],
 };
 
