@@ -148,6 +148,15 @@ export async function ensureOidcToken(credentials, fetchImpl = fetch, now = Date
   };
 }
 
+export async function readFreshCredentials(path, fetchImpl = fetch, now = Date.now()) {
+  const credentials = await readCredentials(path);
+  const refreshed = await ensureOidcToken(credentials, fetchImpl, now);
+  if (refreshed !== credentials) {
+    await writeCredentials(path, refreshed);
+  }
+  return refreshed;
+}
+
 export async function mintInternalToken(options, fetchImpl = fetch) {
   const response = await fetchImpl(
     `${options.runtimeUrl.replace(/\/$/, '')}/api/auth/internal-token`,
@@ -210,13 +219,43 @@ export async function memorySearch(options, fetchImpl = fetch) {
   return payload;
 }
 
+export async function sessionList(options, fetchImpl = fetch) {
+  const response = await fetchImpl(
+    `${options.runtimeUrl.replace(/\/$/, '')}/api/code/sessions`,
+    { headers: { Authorization: `Bearer ${options.idToken}` } },
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.message ?? payload.error ?? 'session list failed');
+  }
+  return payload;
+}
+
+export async function sessionArchive(options, fetchImpl = fetch) {
+  const response = await fetchImpl(
+    `${options.runtimeUrl.replace(/\/$/, '')}/api/code/sessions/${encodeURIComponent(options.sessionId)}`,
+    {
+      method: 'DELETE',
+      headers: { Authorization: `Bearer ${options.idToken}` },
+    },
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.message ?? payload.error ?? 'session archive failed');
+  }
+  return payload;
+}
+
 export function isExpired(isoTimestamp, now = Date.now()) {
   return !isoTimestamp || new Date(isoTimestamp).getTime() <= now + 30_000;
 }
 
 export async function ensureInternalToken(options, fetchImpl = fetch) {
-  let credentials = await readCredentials(options.credentialsPath);
-  credentials = await ensureOidcToken(credentials, fetchImpl, options.now);
+  let credentials = await readFreshCredentials(
+    options.credentialsPath,
+    fetchImpl,
+    options.now,
+  );
   const cached = credentials.internalTokens?.[options.scopeKey];
   if (cached && !isExpired(cached.expiresAt, options.now)) {
     return { credentials, token: cached.token };

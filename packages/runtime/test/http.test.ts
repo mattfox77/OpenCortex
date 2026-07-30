@@ -679,6 +679,42 @@ describe('http app', () => {
     expect(body.sessions).toHaveLength(0);
   });
 
+  it('archives owned code sessions and hides them from later lists', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+    const ownerAuth = { Authorization: 'Dev owner@acme.test' };
+    const otherAuth = { Authorization: 'Dev other@acme.test' };
+
+    const created = await fetch(`${base}/diwan/api/code/sessions`, {
+      method: 'POST',
+      headers: ownerAuth,
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json();
+
+    const denied = await fetch(
+      `${base}/diwan/api/code/sessions/${createdBody.session.id}`,
+      { method: 'DELETE', headers: otherAuth },
+    );
+    expect(denied.status).toBe(404);
+
+    const archived = await fetch(
+      `${base}/diwan/api/code/sessions/${createdBody.session.id}`,
+      { method: 'DELETE', headers: ownerAuth },
+    );
+    expect(archived.status).toBe(200);
+    const archivedBody = await archived.json();
+    expect(archivedBody.session.id).toBe(createdBody.session.id);
+    expect(archivedBody.channel.archivedAt).toBeTruthy();
+
+    const listed = await fetch(`${base}/diwan/api/code/sessions`, {
+      headers: ownerAuth,
+    });
+    const listedBody = await listed.json();
+    expect(listedBody.sessions).toHaveLength(0);
+  });
+
   it("lets super admins see everyone else's sessions and untagged activity", async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const { listener, base } = startApp(config);

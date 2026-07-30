@@ -343,6 +343,24 @@ export function apiRouter(
     });
   });
 
+  router.delete('/code/sessions/:id', requireUser, (req, res) => {
+    const session = sessions.get(String(req.params.id));
+    if (
+      !session ||
+      (session.ownerEmail !== req.user!.email && !req.user!.isSuperAdmin)
+    ) {
+      return res.status(404).json({ error: 'code_session_not_found' });
+    }
+    const channel = chat.archiveSessionChannel(session);
+    sessions.delete(session.id);
+    events.publish({
+      type: 'session.archived',
+      channelId: channel?.id ?? `session-${session.id}`,
+      payload: { session, channel },
+    });
+    return res.json({ session, channel });
+  });
+
   router.get('/code/sessions/:id/channel', requireUser, (req, res) => {
     const session = sessions.get(String(req.params.id));
     if (!session || !chat.userCanAccessSession(session, req.user!)) {

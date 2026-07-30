@@ -5,6 +5,9 @@ import {
   memoryCapture,
   memorySearch,
   pollDeviceToken,
+  readFreshCredentials,
+  sessionArchive,
+  sessionList,
   startDeviceLogin,
   tokenExpiresAt,
   writeCredentials,
@@ -96,6 +99,39 @@ async function main(argv = process.argv.slice(2), env = process.env) {
         console.log(`${entry.id}\t${entry.title ?? '(untitled)'}`);
       }
     }
+    return;
+  }
+
+  if (command === 'session' && subcommand === 'list') {
+    const credentials = await readFreshCredentials(credentialsPath);
+    const payload = await sessionList({
+      runtimeUrl: credentials.runtimeUrl,
+      idToken: credentials.oidc.idToken,
+    });
+    for (const session of payload.sessions ?? []) {
+      console.log([
+        session.id,
+        session.role ?? 'unknown',
+        session.name ?? '(untitled)',
+        session.ownerEmail ?? '',
+        session.urlPath ?? '',
+      ].join('\t'));
+    }
+    return;
+  }
+
+  if (command === 'session' && subcommand === 'archive') {
+    const sessionId = rest[0] ?? '';
+    if (!sessionId) {
+      throw new Error('session archive requires a session id');
+    }
+    const credentials = await readFreshCredentials(credentialsPath);
+    const payload = await sessionArchive({
+      runtimeUrl: credentials.runtimeUrl,
+      idToken: credentials.oidc.idToken,
+      sessionId,
+    });
+    console.log(payload.session.id);
     return;
   }
 
@@ -216,7 +252,9 @@ function usage() {
     [-t title] [-p project] [-r repo] [-s personal|team|global] [-k kind]
     [--source-system name] [--session-id id] [--tool name]
   cortex memory search "query" [-n limit] [-p project] [-r repo] [-s scope] [--include-pending]
-  cortex memory recall "query" [-n limit] [-p project] [-r repo] [-s scope] [--include-pending]`);
+  cortex memory recall "query" [-n limit] [-p project] [-r repo] [-s scope] [--include-pending]
+  cortex session list
+  cortex session archive SESSION_ID`);
 }
 
 function readStdin(stream = process.stdin) {

@@ -9,7 +9,10 @@ import {
   ensureInternalToken,
   memoryCapture,
   memorySearch,
+  readFreshCredentials,
   refreshOidcToken,
+  sessionArchive,
+  sessionList,
   startDeviceLogin,
   tokenExpiresAt,
   writeCredentials,
@@ -141,6 +144,111 @@ test('refreshes expired OIDC tokens before minting internal tokens', async () =>
   assert.equal(calls.length, 3);
 });
 
+test('persists refreshed OIDC tokens even when internal tokens are cached', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
+  const credentialsPath = join(dir, 'tokens.json');
+  await writeCredentials(credentialsPath, {
+    schemaVersion: 1,
+    runtimeUrl: 'https://runtime.test/cortex',
+    issuer: 'https://issuer.test',
+    clientId: 'opencortex-cli',
+    oidc: {
+      idToken: 'expired-id-token',
+      refreshToken: 'refresh-token',
+      expiresAt: '2000-01-01T00:00:00.000Z',
+    },
+    internalTokens: {
+      'memory:read': {
+        token: 'cached-internal-token',
+        scopes: ['memory:read'],
+        expiresAt: '2999-01-01T00:00:00.000Z',
+      },
+    },
+  });
+
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({ url, init });
+    if (String(url).endsWith('/.well-known/openid-configuration')) {
+      return jsonResponse({
+        issuer: 'https://issuer.test',
+        token_endpoint: 'https://issuer.test/token',
+        device_authorization_endpoint: 'https://issuer.test/device',
+      });
+    }
+    if (url === 'https://issuer.test/token') {
+      return jsonResponse({
+        id_token: 'fresh-id-token',
+        refresh_token: 'fresh-refresh-token',
+        expires_in: 3600,
+      });
+    }
+    assert.equal(url, 'https://runtime.test/cortex/api/auth/internal-token');
+    assert.equal(init.headers.Authorization, 'Bearer fresh-id-token');
+    return jsonResponse({
+      token: 'fresh-internal-token',
+      scopes: ['memory:read'],
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    }, 201);
+  };
+
+  const result = await ensureInternalToken({
+    credentialsPath,
+    scopes: ['memory:read'],
+    scopeKey: 'memory:read',
+    now: Date.parse('2026-07-30T12:00:00.000Z'),
+  }, fetchImpl);
+
+  assert.equal(result.token, 'fresh-internal-token');
+  const saved = JSON.parse(await readFile(credentialsPath, 'utf8'));
+  assert.equal(saved.oidc.idToken, 'fresh-id-token');
+  assert.equal(saved.oidc.refreshToken, 'fresh-refresh-token');
+  assert.equal(saved.internalTokens['memory:read'].token, 'fresh-internal-token');
+  assert.equal(calls.length, 3);
+});
+
+test('persists refreshed OIDC tokens when reading fresh credentials', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
+  const credentialsPath = join(dir, 'tokens.json');
+  await writeCredentials(credentialsPath, {
+    schemaVersion: 1,
+    runtimeUrl: 'https://runtime.test/cortex',
+    issuer: 'https://issuer.test',
+    clientId: 'opencortex-cli',
+    oidc: {
+      idToken: 'expired-id-token',
+      refreshToken: 'refresh-token',
+      expiresAt: '2000-01-01T00:00:00.000Z',
+    },
+    internalTokens: {},
+  });
+
+  const fetchImpl = async (url) => {
+    if (String(url).endsWith('/.well-known/openid-configuration')) {
+      return jsonResponse({
+        issuer: 'https://issuer.test',
+        token_endpoint: 'https://issuer.test/token',
+        device_authorization_endpoint: 'https://issuer.test/device',
+      });
+    }
+    return jsonResponse({
+      id_token: 'fresh-id-token',
+      refresh_token: 'fresh-refresh-token',
+      expires_in: 3600,
+    });
+  };
+
+  await readFreshCredentials(
+    credentialsPath,
+    fetchImpl,
+    Date.parse('2026-07-30T12:00:00.000Z'),
+  );
+
+  const saved = JSON.parse(await readFile(credentialsPath, 'utf8'));
+  assert.equal(saved.oidc.idToken, 'fresh-id-token');
+  assert.equal(saved.oidc.refreshToken, 'fresh-refresh-token');
+});
+
 test('refreshes OIDC tokens with the cached refresh token', async () => {
   const calls = [];
   const fetchImpl = async (url, init = {}) => {
@@ -210,6 +318,36 @@ test('calls runtime memory capture and search endpoints with internal tokens', a
 
   assert.equal(captured.entry.id, 'entry-1');
   assert.equal(searched.entries[0].title, 'Result');
+  assert.equal(seen.length, 2);
+});
+
+test('lists and archives runtime sessions with OIDC credentials', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init = {}) => {
+    seen.push({ url, init });
+    assert.equal(init.headers.Authorization, 'Bearer oidc-id-token');
+    if (init.method === 'DELETE') {
+      assert.equal(url, 'https://runtime.test/api/code/sessions/session-1');
+      return jsonResponse({ session: { id: 'session-1' } });
+    }
+    assert.equal(url, 'https://runtime.test/api/code/sessions');
+    return jsonResponse({
+      sessions: [{ id: 'session-1', name: 'Runtime', role: 'owner' }],
+    });
+  };
+
+  const listed = await sessionList({
+    runtimeUrl: 'https://runtime.test',
+    idToken: 'oidc-id-token',
+  }, fetchImpl);
+  const archived = await sessionArchive({
+    runtimeUrl: 'https://runtime.test',
+    idToken: 'oidc-id-token',
+    sessionId: 'session-1',
+  }, fetchImpl);
+
+  assert.equal(listed.sessions[0].id, 'session-1');
+  assert.equal(archived.session.id, 'session-1');
   assert.equal(seen.length, 2);
 });
 
@@ -294,6 +432,65 @@ test('CLI memory capture reads stdin and sends source metadata', async () => {
         toolName: 'opencode',
       },
     }]);
+  } finally {
+    server.close();
+  }
+});
+
+test('CLI session list and archive use cached OIDC credentials', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
+  const credentialsPath = join(dir, 'tokens.json');
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({
+      method: req.method,
+      url: req.url,
+      authorization: req.headers.authorization,
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (req.method === 'DELETE') {
+      res.end(JSON.stringify({ session: { id: 'session-1' } }));
+      return;
+    }
+    res.end(JSON.stringify({
+      sessions: [{
+        id: 'session-1',
+        role: 'owner',
+        name: 'Runtime',
+        ownerEmail: 'owner@acme.test',
+        urlPath: '/code/session/session-1/',
+      }],
+    }));
+  });
+
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  await writeCredentials(credentialsPath, {
+    schemaVersion: 1,
+    runtimeUrl: `http://127.0.0.1:${port}`,
+    oidc: {
+      idToken: 'oidc-id-token',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    },
+    internalTokens: {},
+  });
+
+  try {
+    const listed = await runCli(['session', 'list'], {
+      env: { OPENCORTEX_CREDENTIALS_DIR: dir },
+    });
+    const archived = await runCli(['session', 'archive', 'session-1'], {
+      env: { OPENCORTEX_CREDENTIALS_DIR: dir },
+    });
+
+    assert.equal(listed.code, 0, listed.stderr);
+    assert.match(listed.stdout, /session-1\towner\tRuntime\towner@acme\.test/);
+    assert.equal(archived.code, 0, archived.stderr);
+    assert.equal(archived.stdout.trim(), 'session-1');
+    assert.deepEqual(seen.map(item => [item.method, item.url, item.authorization]), [
+      ['GET', '/api/code/sessions', 'Bearer oidc-id-token'],
+      ['DELETE', '/api/code/sessions/session-1', 'Bearer oidc-id-token'],
+    ]);
   } finally {
     server.close();
   }
