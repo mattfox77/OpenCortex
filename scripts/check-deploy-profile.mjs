@@ -53,6 +53,14 @@ const fileChecks = {
   ],
 };
 
+const configChecks = {
+  "config/dex.example.yaml": [
+    "urn:ietf:params:oauth:grant-type:device_code",
+    "id: opencortex-cli",
+    "public: true",
+  ],
+};
+
 const failures = [];
 
 for (const file of requiredFiles) {
@@ -65,6 +73,22 @@ for (const file of requiredFiles) {
   }
 
   for (const expected of fileChecks[file] ?? []) {
+    if (!text.includes(expected)) {
+      failures.push(`${file} missing: ${expected}`);
+    }
+  }
+}
+
+for (const [file, checks] of Object.entries(configChecks)) {
+  let text = "";
+  try {
+    text = await readFile(file, "utf8");
+  } catch {
+    failures.push(`missing ${file}`);
+    continue;
+  }
+
+  for (const expected of checks) {
     if (!text.includes(expected)) {
       failures.push(`${file} missing: ${expected}`);
     }
