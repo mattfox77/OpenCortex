@@ -7,7 +7,9 @@ import {
   ensureInternalToken,
   memoryCapture,
   memorySearch,
+  refreshOidcToken,
   startDeviceLogin,
+  tokenExpiresAt,
   writeCredentials,
 } from '../src/client.js';
 
@@ -49,7 +51,10 @@ test('refreshes and caches internal memory tokens', async () => {
   await writeCredentials(credentialsPath, {
     schemaVersion: 1,
     runtimeUrl: 'https://runtime.test/cortex',
-    oidc: { idToken: 'oidc-id-token' },
+    oidc: {
+      idToken: 'oidc-id-token',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    },
     internalTokens: {},
   });
 
@@ -73,6 +78,98 @@ test('refreshes and caches internal memory tokens', async () => {
   assert.equal(result.token, 'internal-token');
   const saved = JSON.parse(await readFile(credentialsPath, 'utf8'));
   assert.equal(saved.internalTokens['memory:read'].token, 'internal-token');
+});
+
+test('refreshes expired OIDC tokens before minting internal tokens', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
+  const credentialsPath = join(dir, 'tokens.json');
+  await writeCredentials(credentialsPath, {
+    schemaVersion: 1,
+    runtimeUrl: 'https://runtime.test/cortex',
+    issuer: 'https://issuer.test',
+    clientId: 'opencortex-cli',
+    oidc: {
+      idToken: 'expired-id-token',
+      refreshToken: 'refresh-token',
+      expiresAt: '2000-01-01T00:00:00.000Z',
+    },
+    internalTokens: {},
+  });
+
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({ url, init });
+    if (String(url).endsWith('/.well-known/openid-configuration')) {
+      return jsonResponse({
+        issuer: 'https://issuer.test',
+        token_endpoint: 'https://issuer.test/token',
+        device_authorization_endpoint: 'https://issuer.test/device',
+      });
+    }
+    if (url === 'https://issuer.test/token') {
+      assert.match(String(init.body), /grant_type=refresh_token/);
+      return jsonResponse({
+        id_token: 'fresh-id-token',
+        access_token: 'fresh-access-token',
+        refresh_token: 'fresh-refresh-token',
+        expires_in: 3600,
+        token_type: 'Bearer',
+      });
+    }
+    assert.equal(url, 'https://runtime.test/cortex/api/auth/internal-token');
+    assert.equal(init.headers.Authorization, 'Bearer fresh-id-token');
+    return jsonResponse({
+      token: 'internal-token',
+      scopes: ['memory:write'],
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    }, 201);
+  };
+
+  const result = await ensureInternalToken({
+    credentialsPath,
+    scopes: ['memory:write'],
+    scopeKey: 'memory:write',
+    now: Date.parse('2026-07-30T12:00:00.000Z'),
+  }, fetchImpl);
+
+  assert.equal(result.token, 'internal-token');
+  const saved = JSON.parse(await readFile(credentialsPath, 'utf8'));
+  assert.equal(saved.oidc.idToken, 'fresh-id-token');
+  assert.equal(saved.oidc.refreshToken, 'fresh-refresh-token');
+  assert.equal(calls.length, 3);
+});
+
+test('refreshes OIDC tokens with the cached refresh token', async () => {
+  const calls = [];
+  const fetchImpl = async (url, init = {}) => {
+    calls.push({ url, init });
+    if (String(url).endsWith('/.well-known/openid-configuration')) {
+      return jsonResponse({
+        issuer: 'https://issuer.test',
+        token_endpoint: 'https://issuer.test/token',
+        device_authorization_endpoint: 'https://issuer.test/device',
+      });
+    }
+    assert.equal(url, 'https://issuer.test/token');
+    assert.match(String(init.body), /refresh_token=refresh-token/);
+    return jsonResponse({ id_token: 'new-id-token', expires_in: 60 });
+  };
+
+  const result = await refreshOidcToken({
+    issuer: 'https://issuer.test',
+    clientId: 'opencortex-cli',
+    refreshToken: 'refresh-token',
+  }, fetchImpl);
+
+  assert.equal(result.id_token, 'new-id-token');
+  assert.equal(calls.length, 2);
+});
+
+test('computes token expiry timestamps', () => {
+  assert.equal(
+    tokenExpiresAt(60, Date.parse('2026-07-30T12:00:00.000Z')),
+    '2026-07-30T12:01:00.000Z',
+  );
 });
 
 test('calls runtime memory capture and search endpoints with internal tokens', async () => {

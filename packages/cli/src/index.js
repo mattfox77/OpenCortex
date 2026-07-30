@@ -6,6 +6,7 @@ import {
   memorySearch,
   pollDeviceToken,
   startDeviceLogin,
+  tokenExpiresAt,
   writeCredentials,
 } from './client.js';
 
@@ -36,6 +37,7 @@ async function main(argv = process.argv.slice(2), env = process.env) {
         accessToken: oidc.access_token,
         refreshToken: oidc.refresh_token,
         expiresIn: oidc.expires_in,
+        expiresAt: tokenExpiresAt(oidc.expires_in),
         tokenType: oidc.token_type,
       },
       internalTokens: {},

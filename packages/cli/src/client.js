@@ -92,6 +92,62 @@ export async function readCredentials(path) {
   return JSON.parse(await readFile(path, 'utf8'));
 }
 
+export function tokenExpiresAt(expiresIn, now = Date.now()) {
+  if (!Number.isFinite(Number(expiresIn))) {
+    return undefined;
+  }
+  return new Date(now + Number(expiresIn) * 1000).toISOString();
+}
+
+export async function refreshOidcToken(options, fetchImpl = fetch) {
+  const metadata = await discoverOidc(options.issuer, fetchImpl);
+  const body = new URLSearchParams({
+    grant_type: 'refresh_token',
+    client_id: options.clientId,
+    refresh_token: options.refreshToken,
+  });
+  const response = await fetchImpl(metadata.token_endpoint, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+    body,
+  });
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.error_description ?? payload.error ?? 'OIDC refresh failed');
+  }
+  return payload;
+}
+
+export async function ensureOidcToken(credentials, fetchImpl = fetch, now = Date.now()) {
+  if (!isExpired(credentials.oidc.expiresAt, now)) {
+    return credentials;
+  }
+  if (!credentials.oidc.refreshToken) {
+    throw new Error('OIDC token expired and no refresh token is cached; run cortex login');
+  }
+  const refreshed = await refreshOidcToken(
+    {
+      issuer: credentials.issuer,
+      clientId: credentials.clientId,
+      refreshToken: credentials.oidc.refreshToken,
+    },
+    fetchImpl,
+  );
+  return {
+    ...credentials,
+    updatedAt: new Date(now).toISOString(),
+    oidc: {
+      idToken: refreshed.id_token ?? credentials.oidc.idToken,
+      accessToken: refreshed.access_token ?? credentials.oidc.accessToken,
+      refreshToken: refreshed.refresh_token ?? credentials.oidc.refreshToken,
+      expiresIn: refreshed.expires_in,
+      expiresAt: tokenExpiresAt(refreshed.expires_in, now),
+      tokenType: refreshed.token_type ?? credentials.oidc.tokenType,
+    },
+    internalTokens: {},
+  };
+}
+
 export async function mintInternalToken(options, fetchImpl = fetch) {
   const response = await fetchImpl(
     `${options.runtimeUrl.replace(/\/$/, '')}/api/auth/internal-token`,
@@ -154,7 +210,8 @@ export function isExpired(isoTimestamp, now = Date.now()) {
 }
 
 export async function ensureInternalToken(options, fetchImpl = fetch) {
-  const credentials = await readCredentials(options.credentialsPath);
+  let credentials = await readCredentials(options.credentialsPath);
+  credentials = await ensureOidcToken(credentials, fetchImpl, options.now);
   const cached = credentials.internalTokens?.[options.scopeKey];
   if (cached && !isExpired(cached.expiresAt, options.now)) {
     return { credentials, token: cached.token };
