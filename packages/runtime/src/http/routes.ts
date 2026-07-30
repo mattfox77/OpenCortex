@@ -962,6 +962,7 @@ export function memoryRouter(
         const token = res.locals.internalToken as VerifiedInternalToken;
         const entries = await store.searchEntries({
           ownerId: token.ownerEmail,
+          identitySubject: token.subject,
           query: query.q,
           limit: query.limit,
           project: query.project,

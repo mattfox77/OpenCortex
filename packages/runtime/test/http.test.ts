@@ -217,7 +217,12 @@ class FakeMemoryStore implements MemoryStore {
   async searchEntries(input: SearchMemoryEntriesInput): Promise<MemoryEntry[]> {
     this.searches.push(input);
     return this.entries.filter(entry =>
-      input.query ? entry.content.includes(input.query) : true,
+      (entry.scope === 'global' ||
+        entry.scope === 'team' ||
+        (entry.scope === 'personal' &&
+          (entry.identitySubject === input.identitySubject ||
+            (!entry.identitySubject && entry.ownerId === input.ownerId)))) &&
+      (input.query ? entry.content.includes(input.query) : true),
     );
   }
 }
@@ -433,6 +438,7 @@ describe('http app', () => {
     });
     expect(memory.searches[0]).toMatchObject({
       ownerId: 'owner@acme.test',
+      identitySubject: 'dev:owner@acme.test',
       query: 'OpenCortex',
       limit: 5,
     });
@@ -460,6 +466,55 @@ describe('http app', () => {
 
     expect(response.status).toBe(403);
     expect(memory.captures).toHaveLength(0);
+  });
+
+  it('isolates personal memory by internal-token identity subject', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const memory = new FakeMemoryStore();
+    const { listener, base } = startAppWithMemory(config, memory);
+    server = listener;
+    const owner = await mintInternalToken({
+      user: authUser('owner@acme.test'),
+      scopes: ['memory:read', 'memory:write'],
+      secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+    });
+    const teammate = await mintInternalToken({
+      user: authUser('teammate@acme.test'),
+      scopes: ['memory:read', 'memory:write'],
+      secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+    });
+
+    for (const [token, content, scope] of [
+      [owner.token, 'OpenCortex owner personal note', 'personal'],
+      [teammate.token, 'OpenCortex teammate personal note', 'personal'],
+      [teammate.token, 'OpenCortex team note', 'team'],
+    ]) {
+      const response = await fetch(`${base}/diwan/api/memory/entries`, {
+        method: 'POST',
+        headers: {
+          Authorization: `Bearer ${token}`,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ content, scope }),
+      });
+      expect(response.status).toBe(201);
+    }
+
+    const response = await fetch(
+      `${base}/diwan/api/memory/entries?q=OpenCortex&limit=10`,
+      { headers: { Authorization: `Bearer ${owner.token}` } },
+    );
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { entries: MemoryEntry[] };
+    expect(payload.entries.map(entry => entry.content)).toEqual([
+      'OpenCortex owner personal note',
+      'OpenCortex team note',
+    ]);
+    expect(memory.searches.at(-1)).toMatchObject({
+      ownerId: 'owner@acme.test',
+      identitySubject: 'dev:owner@acme.test',
+    });
   });
 
   it('requires auth to list code sessions', async () => {

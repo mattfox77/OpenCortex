@@ -47,6 +47,7 @@ export interface CaptureMemoryEntryInput {
 
 export interface SearchMemoryEntriesInput {
   ownerId: string;
+  identitySubject: string;
   query?: string;
   limit: number;
   project?: string;
@@ -124,10 +125,16 @@ export class PgMemoryStore implements MemoryStore {
   }
 
   async searchEntries(input: SearchMemoryEntriesInput): Promise<MemoryEntry[]> {
-    const values: unknown[] = [input.ownerId, input.limit];
+    const values: unknown[] = [input.ownerId, input.identitySubject, input.limit];
     const predicates = [
       "e.review != 'archived'",
-      "(e.scope = 'global' OR e.scope = 'team' OR (e.scope = 'personal' AND e.owner_id = $1))",
+      [
+        "(e.scope = 'global'",
+        "OR e.scope = 'team'",
+        "OR (e.scope = 'personal'",
+        "AND (e.identity_subject = $2",
+        "OR (e.identity_subject IS NULL AND e.owner_id = $1))))",
+      ].join(' '),
     ];
     if (!input.includePending) {
       predicates.push("e.review = 'approved'");
@@ -161,7 +168,7 @@ export class PgMemoryStore implements MemoryStore {
         FROM entries e
         WHERE ${predicates.join(' AND ')}
         ORDER BY ${order}
-        LIMIT $2
+        LIMIT $3
       `,
       values,
     );
