@@ -1,4 +1,4 @@
-issuer: http://opencortex-dex:5556/dex
+issuer: http://localhost:5556/dex
 
 storage:
   type: sqlite3

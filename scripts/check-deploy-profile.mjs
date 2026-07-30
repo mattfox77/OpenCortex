@@ -59,6 +59,7 @@ const configChecks = {
     "OPENCORTEX_REQUIRED_GROUPS=CortexUsers",
   ],
   "config/dex.example.yaml": [
+    "issuer: http://localhost:5556/dex",
     "urn:ietf:params:oauth:grant-type:device_code",
     "id: opencortex-cli",
     "public: true",

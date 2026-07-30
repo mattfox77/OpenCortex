@@ -44,11 +44,13 @@ in `opencortex_temporal` and visibility data in
 `opencortex_memory`.
 
 `opencortex-dex` is the bundled OIDC issuer for local and staging profiles. The
-runtime uses the same OIDC implementation for Dex and external compliant issuers
-such as Google; configure `OPENCORTEX_OIDC_ISSUER` and client settings per
-profile. The bundled config includes a confidential `opencortex-runtime` web
-client and a public `opencortex-cli` client with the device-code grant enabled
-for CLI login. Dex publishes only `127.0.0.1:5556` by default.
+default issuer URL is `http://localhost:5556/dex`, matching the host-local
+runtime and CLI example configuration. The runtime uses the same OIDC
+implementation for Dex and external compliant issuers such as Google; configure
+`OPENCORTEX_OIDC_ISSUER` and client settings per profile. The bundled config
+includes a confidential `opencortex-runtime` web client and a public
+`opencortex-cli` client with the device-code grant enabled for CLI login. Dex
+publishes only `127.0.0.1:5556` by default.
 
 `opencortex-embeddings` runs Infinity's CPU image with
 `nomic-ai/nomic-embed-text-v1.5` and publishes only `127.0.0.1:7997` for local
