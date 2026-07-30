@@ -54,6 +54,10 @@ const fileChecks = {
 };
 
 const configChecks = {
+  "config/env.example": [
+    "OPENCORTEX_OIDC_SCOPES=openid,email,profile,groups",
+    "OPENCORTEX_REQUIRED_GROUPS=CortexUsers",
+  ],
   "config/dex.example.yaml": [
     "urn:ietf:params:oauth:grant-type:device_code",
     "id: opencortex-cli",

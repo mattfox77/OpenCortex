@@ -67,6 +67,16 @@ describe('runtime config compatibility', () => {
     expect(config.OPENCORTEX_ALLOWED_EMAIL_DOMAINS).toEqual([]);
   });
 
+  it('parses OpenCortex OIDC scopes for bundled Dex group claims', () => {
+    const config = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      OPENCORTEX_OIDC_SCOPES: 'openid,email,profile,groups',
+    });
+
+    expect(config.OIDC_SCOPES).toEqual(['openid', 'email', 'profile', 'groups']);
+  });
+
   it('does not bake tenant-specific Jira or Slack workspace defaults into config', () => {
     const config = loadConfig({
       ...requiredAuthEnv(),
