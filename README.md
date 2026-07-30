@@ -14,6 +14,7 @@ packages/
   workbench/        # OpenCode workbench provider integration
   orchestrator/     # Temporal workflows, activities, worker runtime
   activity-ledger/  # optional activity and attribution rollups
+  cli/              # cortex CLI login and memory commands
   skills/           # versioned skill bundle publishing/provisioning
   ui/               # web console
 deploy/             # podman Quadlet / systemd deployment profile
