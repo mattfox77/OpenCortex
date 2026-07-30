@@ -11,7 +11,9 @@
 # For OpenCode, register as a plugin that fires on session close.
 # ============================================================
 
-if [ -z "${OPENCORTEX_MEMORY_INGEST_CMD:-}" ] && ! command -v brain >/dev/null 2>&1; then
+if [ -z "${OPENCORTEX_MEMORY_INGEST_CMD:-}" ] \
+  && ! command -v cortex >/dev/null 2>&1 \
+  && ! command -v brain >/dev/null 2>&1; then
   exit 0
 fi
 
@@ -53,6 +55,16 @@ WORD_COUNT=$(wc -w < "$TRANSCRIPT")
 if [ -n "${OPENCORTEX_MEMORY_INGEST_CMD:-}" ]; then
   bash -lc "$OPENCORTEX_MEMORY_INGEST_CMD --file $(printf '%q' "$TRANSCRIPT") --project $(printf '%q' "$PROJECT") --session-id $(printf '%q' "session-${TIMESTAMP}") --source-system opencortex-session --scope personal --tool opencode" \
     > /dev/null 2>&1 &
+elif command -v cortex >/dev/null 2>&1; then
+  cat "$TRANSCRIPT" | cortex memory capture - \
+    -t "Session transcript: ${PROJECT}" \
+    -p "$PROJECT" \
+    -s personal \
+    -k document \
+    --source-system opencortex-session \
+    --session-id "session-${TIMESTAMP}" \
+    --tool opencode \
+    > /dev/null 2>&1 &
 else
   # Full transcript -> personal scope (background, don't block session close)
   cat "$TRANSCRIPT" | brain archive full \
@@ -73,12 +85,25 @@ fi
 if [ -n "$WORK_DIR" ]; then
   for f in "${WORK_DIR}"/*.md "${WORK_DIR}"/*.json; do
     [ -f "$f" ] || continue
-    brain capture "$(cat "$f")" \
-      -t "PAI $(basename "$f" | sed 's/\.[^.]*$//'): ${PROJECT}" \
-      -s personal \
-      -k finding \
-      -p "$PROJECT" \
-      2>/dev/null &
+    if command -v cortex >/dev/null 2>&1; then
+      cortex memory capture - \
+        -t "PAI $(basename "$f" | sed 's/\.[^.]*$//'): ${PROJECT}" \
+        -s personal \
+        -k finding \
+        -p "$PROJECT" \
+        --source-system opencortex-session \
+        --session-id "session-${TIMESTAMP}" \
+        --tool opencode \
+        < "$f" \
+        > /dev/null 2>&1 &
+    elif command -v brain >/dev/null 2>&1; then
+      brain capture "$(cat "$f")" \
+        -t "PAI $(basename "$f" | sed 's/\.[^.]*$//'): ${PROJECT}" \
+        -s personal \
+        -k finding \
+        -p "$PROJECT" \
+        2>/dev/null &
+    fi
   done
 fi
 

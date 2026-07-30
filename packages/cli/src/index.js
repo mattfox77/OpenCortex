@@ -48,6 +48,13 @@ async function main(argv = process.argv.slice(2), env = process.env) {
 
   if (command === 'memory' && subcommand === 'capture') {
     const parsed = parseCaptureArgs(rest);
+    if (parsed.readFromStdin) {
+      parsed.content = await readStdin();
+    }
+    if (!parsed.content.trim()) {
+      throw new Error('memory capture requires content');
+    }
+    delete parsed.readFromStdin;
     const { credentials, token } = await ensureInternalToken({
       credentialsPath,
       scopes: ['memory:write'],
@@ -124,18 +131,25 @@ function parseCaptureArgs(args) {
       entry.title = args[++index];
     } else if (item === '--project' || item === '-p') {
       entry.project = args[++index];
+    } else if (item === '--repo' || item === '-r') {
+      entry.repo = args[++index];
     } else if (item === '--scope' || item === '-s') {
       entry.scope = args[++index];
     } else if (item === '--kind' || item === '-k') {
       entry.kind = args[++index];
+    } else if (item === '--source-system') {
+      entry.sourceSystem = args[++index];
+    } else if (item === '--session-id') {
+      entry.sourceSessionId = args[++index];
+    } else if (item === '--tool') {
+      entry.toolName = args[++index];
+    } else if (item === '-') {
+      entry.readFromStdin = true;
     } else if (!entry.content) {
       entry.content = item;
     } else {
       entry.content = `${entry.content} ${item}`;
     }
-  }
-  if (!entry.content) {
-    throw new Error('memory capture requires content');
   }
   return entry;
 }
@@ -161,8 +175,22 @@ function parseSearchArgs(args) {
 function usage() {
   console.error(`Usage:
   cortex login --issuer URL --runtime-url URL [--client-id opencortex-cli]
-  cortex memory capture "text" [-t title] [-p project] [-s personal|team|global] [-k kind]
+  cortex memory capture "text"|-
+    [-t title] [-p project] [-r repo] [-s personal|team|global] [-k kind]
+    [--source-system name] [--session-id id] [--tool name]
   cortex memory search "query" [-n limit]`);
+}
+
+function readStdin(stream = process.stdin) {
+  return new Promise((resolve, reject) => {
+    let content = '';
+    stream.setEncoding('utf8');
+    stream.on('data', chunk => {
+      content += chunk;
+    });
+    stream.on('end', () => resolve(content));
+    stream.on('error', reject);
+  });
 }
 
 main().catch(error => {

@@ -1,6 +1,8 @@
 import { mkdtemp, readFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
+import { createServer } from 'node:http';
+import { spawn } from 'node:child_process';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
@@ -202,6 +204,92 @@ test('calls runtime memory capture and search endpoints with internal tokens', a
   assert.equal(seen.length, 2);
 });
 
+test('CLI memory capture reads stdin and sends source metadata', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
+  const credentialsPath = join(dir, 'tokens.json');
+  const seen = [];
+  const server = createServer((req, res) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      seen.push({
+        method: req.method,
+        url: req.url,
+        authorization: req.headers.authorization,
+        body: JSON.parse(body),
+      });
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ entry: { id: 'entry-stdin' } }));
+    });
+  });
+
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  await writeCredentials(credentialsPath, {
+    schemaVersion: 1,
+    runtimeUrl: `http://127.0.0.1:${port}`,
+    oidc: {
+      idToken: 'oidc-id-token',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    },
+    internalTokens: {
+      'memory:write': {
+        token: 'write-token',
+        scopes: ['memory:write'],
+        expiresAt: '2999-01-01T00:00:00.000Z',
+      },
+    },
+  });
+
+  try {
+    const result = await runCli([
+      'memory',
+      'capture',
+      '-',
+      '-t',
+      'Hook capture',
+      '-p',
+      'runtime',
+      '-s',
+      'personal',
+      '-k',
+      'document',
+      '--source-system',
+      'opencortex-session',
+      '--session-id',
+      'session-1',
+      '--tool',
+      'opencode',
+    ], {
+      env: { OPENCORTEX_CREDENTIALS_DIR: dir },
+      input: 'captured from stdin',
+    });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout.trim(), 'entry-stdin');
+    assert.deepEqual(seen, [{
+      method: 'POST',
+      url: '/api/memory/entries',
+      authorization: 'Bearer write-token',
+      body: {
+        content: 'captured from stdin',
+        scope: 'personal',
+        kind: 'document',
+        title: 'Hook capture',
+        project: 'runtime',
+        sourceSystem: 'opencortex-session',
+        sourceSessionId: 'session-1',
+        toolName: 'opencode',
+      },
+    }]);
+  } finally {
+    server.close();
+  }
+});
+
 function jsonResponse(payload, status = 200) {
   return {
     ok: status >= 200 && status < 300,
@@ -210,4 +298,32 @@ function jsonResponse(payload, status = 200) {
       return payload;
     },
   };
+}
+
+function runCli(args, options = {}) {
+  return new Promise((resolve, reject) => {
+    const child = spawn(process.execPath, ['src/index.js', ...args], {
+      cwd: join(import.meta.dirname, '..'),
+      env: {
+        ...process.env,
+        ...options.env,
+      },
+      stdio: ['pipe', 'pipe', 'pipe'],
+    });
+    let stdout = '';
+    let stderr = '';
+    child.stdout.setEncoding('utf8');
+    child.stderr.setEncoding('utf8');
+    child.stdout.on('data', chunk => {
+      stdout += chunk;
+    });
+    child.stderr.on('data', chunk => {
+      stderr += chunk;
+    });
+    child.on('error', reject);
+    child.on('close', code => {
+      resolve({ code, stdout, stderr });
+    });
+    child.stdin.end(options.input ?? '');
+  });
 }
