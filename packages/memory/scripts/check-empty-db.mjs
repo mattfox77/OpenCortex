@@ -51,6 +51,7 @@ try {
   ]);
   verifySearchPath();
   verifyServiceKeyProvision();
+  verifyLegacyHumanKeyWarnings();
 } finally {
   run(runtime, ["rm", "-f", container], { allowFailure: true });
 }
@@ -196,6 +197,50 @@ function verifyServiceKeyProvision() {
     throw new Error("service-account provision did not return a key");
   }
   console.log("fresh-install provision allows service-account keys only");
+}
+
+function verifyLegacyHumanKeyWarnings() {
+  const sql = `
+    BEGIN;
+    INSERT INTO keys (hash, owner_id, name, role)
+    VALUES
+      (encode(digest('fresh-member-key', 'sha256'), 'hex'), 'fresh-member', 'Fresh Member', 'member'),
+      (encode(digest('fresh-agent-key', 'sha256'), 'hex'), 'fresh-agent', 'Fresh Agent', 'agent');
+    SET LOCAL ROLE opencortex_memory_api;
+    SELECT set_config('request.headers', '{"apikey":"fresh-member-key"}', true);
+    SELECT request_owner_id();
+    SELECT set_config('request.headers', '{"apikey":"fresh-agent-key"}', true);
+    SELECT request_owner_id();
+    ROLLBACK;
+  `;
+  const result = spawnSync(runtime, [
+    "exec",
+    "-i",
+    container,
+    "psql",
+    "-U",
+    "opencortex",
+    "-d",
+    "opencortex",
+    "--tuples-only",
+    "--no-align",
+    "--set",
+    "ON_ERROR_STOP=1",
+  ], {
+    input: sql,
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "pipe"],
+  });
+  if (result.status !== 0) {
+    process.stderr.write(result.stderr);
+    process.exit(result.status ?? 1);
+  }
+  const warnings = result.stderr.match(/legacy human memory key role/g) ?? [];
+  if (warnings.length !== 1) {
+    process.stderr.write(result.stderr);
+    throw new Error(`expected one legacy human key warning, got ${warnings.length}`);
+  }
+  console.log("fresh-install legacy human key usage emits a deprecation warning");
 }
 
 function run(command, args, options = {}) {
