@@ -31,3 +31,8 @@ npm --prefix packages/memory run check:empty-db
 
 Skill bundle publishing remains in scope for `@opencortex/skills`. Importing or
 migrating existing BrainTrust/DSN skill bundles is deliberately deferred.
+
+Phase 4 demotes human Brain keys. Existing `keys` rows remain honored for the
+deprecation window, but new key issuance is service-account-only (`role=agent`).
+Human users authenticate through OpenCortex OIDC and receive scoped internal
+tokens for memory API access.

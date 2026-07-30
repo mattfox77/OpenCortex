@@ -50,6 +50,7 @@ try {
     ].join("\n"),
   ]);
   verifySearchPath();
+  verifyServiceKeyProvision();
 } finally {
   run(runtime, ["rm", "-f", container], { allowFailure: true });
 }
@@ -144,6 +145,57 @@ function verifySearchPath() {
     throw new Error("fresh-install hybrid search did not return the seeded 768-dim entry");
   }
   console.log("fresh-install hybrid search returned seeded 768-dim entry");
+}
+
+function verifyServiceKeyProvision() {
+  const sql = `
+    BEGIN;
+    INSERT INTO keys (hash, owner_id, name, role)
+    VALUES (encode(digest('fresh-admin-key', 'sha256'), 'hex'), 'fresh-admin', 'Fresh Admin', 'admin');
+    SET LOCAL ROLE opencortex_memory_api;
+    SELECT set_config('request.headers', '{"apikey":"fresh-admin-key"}', true);
+
+    DO $$
+    BEGIN
+      BEGIN
+        PERFORM provision('fresh-human', 'Fresh Human', 'member');
+        RAISE EXCEPTION 'human key provision unexpectedly succeeded';
+      EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE 'human key issuance is disabled%' THEN
+          RAISE;
+        END IF;
+      END;
+    END;
+    $$;
+
+    SELECT provision('fresh-agent', 'Fresh Agent', 'agent');
+    ROLLBACK;
+  `;
+  const result = spawnSync(runtime, [
+    "exec",
+    "-i",
+    container,
+    "psql",
+    "-U",
+    "opencortex",
+    "-d",
+    "opencortex",
+    "--tuples-only",
+    "--no-align",
+    "--set",
+    "ON_ERROR_STOP=1",
+  ], {
+    input: sql,
+    encoding: "utf8",
+    stdio: ["pipe", "pipe", "inherit"],
+  });
+  if (result.status !== 0) {
+    process.exit(result.status ?? 1);
+  }
+  if (!result.stdout.trim()) {
+    throw new Error("service-account provision did not return a key");
+  }
+  console.log("fresh-install provision allows service-account keys only");
 }
 
 function run(command, args, options = {}) {

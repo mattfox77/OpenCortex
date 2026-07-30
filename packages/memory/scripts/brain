@@ -1226,11 +1226,15 @@ RHELP
 # provision
 # ============================================================
 cmd_provision() {
-  local id="${1:-}" name="${2:-}" role="${3:-member}"
-  [ -z "$id" ] || [ -z "$name" ] && { echo "Usage: brain provision ID \"Name\" [admin|member|agent]" >&2; exit 1; }
+  local id="${1:-}" name="${2:-}" role="${3:-agent}"
+  [ -z "$id" ] || [ -z "$name" ] && { echo "Usage: brain provision SERVICE_ID \"Name\" [agent]" >&2; exit 1; }
+  [ "$role" != "agent" ] && {
+    echo "brain provision: human key issuance is disabled; use OpenCortex OIDC login for users. Only role=agent service-account keys can be issued." >&2
+    return 1
+  }
   local key; key=$(rpc provision "$(jq -n --arg i "$id" --arg n "$name" --arg r "$role" \
     '{p_id:$i,p_name:$n,p_role:$r}')" | jq -r '.' | tr -d '"')
-  echo "Provisioned: ${name} (${id}) as ${role}"
+  echo "Provisioned service account: ${name} (${id}) as ${role}"
   echo "Key: ${key}"
 }
 
@@ -3704,10 +3708,13 @@ brain — OpenCortex Memory compatibility CLI
   brain task add|list|streams|start|done|move|capture|link|entries|show|graduate ...   user to-do list
   echo "text" | brain learn "title" [project] [--explain]  LEARN: stdin → team (--explain wraps in teaching prose)
   brain review [list|show|approve|reject|approve-all|reject-all|noise] ...   manage pending queue
-  brain provision ID "Name" [admin|member|agent]
+  brain provision SERVICE_ID "Name" [agent]
   brain auth status [--json]|health [--json]|doctor [--json] [--check]|refresh-metadata [--json]|broker-status [--json]|repair
                                     inspect or repair managed Brain runtime credentials
   brain key rotate               rotate managed Brain runtime key via broker
+
+Human Brain key issuance is disabled. Use OpenCortex OIDC login for users;
+`brain provision` issues service-account keys only.
   brain stats
   brain version                  Print CLI version
   brain sync run [--source pai|cursor|all] [-p project] [-r repo] [--dry-run]

@@ -171,6 +171,20 @@ SELECT set_config('request.headers', '{\"apikey\":\"${MEMBER_KEY_A}\"}', true);
 SELECT provision('smoke-new-${RAND}', 'Smoke New', 'member');
 ROLLBACK;"
 
+check_failure "admin cannot provision human key" "
+BEGIN;
+SET LOCAL ROLE opencortex_memory_api;
+SELECT set_config('request.headers', '{\"apikey\":\"${ADMIN_KEY}\"}', true);
+SELECT provision('smoke-human-${RAND}', 'Smoke Human', 'member');
+ROLLBACK;"
+
+check_success "admin can provision service account key" "
+BEGIN;
+SET LOCAL ROLE opencortex_memory_api;
+SELECT set_config('request.headers', '{\"apikey\":\"${ADMIN_KEY}\"}', true);
+SELECT provision('smoke-agent-${RAND}', 'Smoke Agent', 'agent');
+ROLLBACK;"
+
 echo ""
 echo "Security smoke summary: ${PASS} passed, ${FAIL} failed"
 
