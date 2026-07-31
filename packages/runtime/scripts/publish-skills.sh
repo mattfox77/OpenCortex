@@ -16,6 +16,9 @@ set -euo pipefail
 # Env:
 #   OPENCORTEX_SKILLS_SOURCE      (required) dir with skill packs
 #   OPENCORTEX_SKILLS_BUNDLE_PATH (default: ./opencortex-skills.tar.gz)
+#   OPENCORTEX_SKILLS_BUNDLE_VERSION version recorded in the bundle manifest
+#   OPENCORTEX_SKILLS_PRIVATE_KEY_FILE optional Ed25519 PEM key used to sign
+#   OPENCORTEX_SKILLS_PRIVATE_KEY_PEM  optional Ed25519 PEM key used to sign
 
 skills_src="${OPENCORTEX_SKILLS_SOURCE:-${DIWAN_SKILLS_SOURCE:-}}"
 bundle_path="${OPENCORTEX_SKILLS_BUNDLE_PATH:-${DIWAN_SKILLS_BUNDLE_PATH:-./opencortex-skills.tar.gz}}"
@@ -41,8 +44,15 @@ else
   find "$tmp/bundle/skills" -name '._*' -delete
 fi
 
+metadata_script="$(dirname "$0")/../../skills/scripts/bundle-metadata.mjs"
+node "$metadata_script" create "$tmp/bundle"
+
 mkdir -p "$(dirname "$bundle_path")"
-tar -czf "$bundle_path" -C "$tmp/bundle" skills
+tar -czf "$bundle_path" -C "$tmp/bundle" \
+  skills \
+  opencortex-skills-manifest.json \
+  opencortex-skills-integrity.json \
+  $(if [ -f "$tmp/bundle/opencortex-skills-signature.json" ]; then printf '%s\n' opencortex-skills-signature.json; fi)
 
 packs="$(ls "$tmp/bundle/skills" | wc -l | tr -d ' ')"
 echo "wrote ${packs} skill packs to ${bundle_path}"

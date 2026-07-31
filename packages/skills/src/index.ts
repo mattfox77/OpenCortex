@@ -1,7 +1,13 @@
-import { createHash } from "node:crypto";
+import {
+  createHash,
+  type KeyLike,
+  sign as signBytes,
+  verify as verifyBytes,
+} from "node:crypto";
 
 export const SKILL_BUNDLE_MANIFEST_VERSION = 1 as const;
 export const SKILL_BUNDLE_INTEGRITY_ALGORITHM = "sha256" as const;
+export const SKILL_BUNDLE_SIGNATURE_ALGORITHM = "ed25519" as const;
 
 export interface SkillBundleManifest {
   manifestVersion: typeof SKILL_BUNDLE_MANIFEST_VERSION;
@@ -32,6 +38,17 @@ export interface DeferredSkillImport {
 export interface SkillBundleIntegrity {
   algorithm: typeof SKILL_BUNDLE_INTEGRITY_ALGORITHM;
   digest: string;
+}
+
+export interface SkillBundleSignature {
+  algorithm: typeof SKILL_BUNDLE_SIGNATURE_ALGORITHM;
+  keyId: string;
+  signature: string;
+}
+
+export interface SignSkillBundleManifestOptions {
+  keyId: string;
+  privateKey: KeyLike;
 }
 
 export function validateSkillBundleManifest(input: unknown): SkillBundleManifest {
@@ -67,6 +84,22 @@ export function validateSkillBundleManifest(input: unknown): SkillBundleManifest
   };
 }
 
+export function validateSkillBundleSignature(input: unknown): SkillBundleSignature {
+  if (!isRecord(input)) {
+    throw new TypeError("Skill bundle signature must be an object");
+  }
+  assertEqual(input.algorithm, SKILL_BUNDLE_SIGNATURE_ALGORITHM, "signature.algorithm");
+  const keyId = requiredString(input.keyId, "signature.keyId");
+  if (!/^[a-zA-Z0-9_.:@/-]{1,128}$/.test(keyId)) {
+    throw new TypeError("signature.keyId contains unsupported characters");
+  }
+  const signature = requiredString(input.signature, "signature.signature");
+  if (!/^[A-Za-z0-9+/]+={0,2}$/.test(signature)) {
+    throw new TypeError("signature.signature must be base64");
+  }
+  return { algorithm: SKILL_BUNDLE_SIGNATURE_ALGORITHM, keyId, signature };
+}
+
 export function calculateSkillBundleIntegrity(manifest: SkillBundleManifest): SkillBundleIntegrity {
   return {
     algorithm: SKILL_BUNDLE_INTEGRITY_ALGORITHM,
@@ -76,8 +109,38 @@ export function calculateSkillBundleIntegrity(manifest: SkillBundleManifest): Sk
   };
 }
 
+export function signSkillBundleManifest(
+  manifest: SkillBundleManifest,
+  options: SignSkillBundleManifestOptions,
+): SkillBundleSignature {
+  const keyId = requiredString(options.keyId, "keyId");
+  return validateSkillBundleSignature({
+    algorithm: SKILL_BUNDLE_SIGNATURE_ALGORITHM,
+    keyId,
+    signature: signBytes(null, manifestPayload(manifest), options.privateKey).toString("base64"),
+  });
+}
+
+export function verifySkillBundleManifestSignature(
+  manifest: SkillBundleManifest,
+  signature: SkillBundleSignature,
+  publicKey: KeyLike,
+): boolean {
+  const validated = validateSkillBundleSignature(signature);
+  return verifyBytes(
+    null,
+    manifestPayload(manifest),
+    publicKey,
+    Buffer.from(validated.signature, "base64"),
+  );
+}
+
 export function canonicalJson(value: unknown): string {
   return JSON.stringify(sortJsonValue(value));
+}
+
+function manifestPayload(manifest: SkillBundleManifest): Buffer {
+  return Buffer.from(canonicalJson(validateSkillBundleManifest(manifest)), "utf8");
 }
 
 function validateSkillBundleFile(input: unknown): SkillBundleFile {

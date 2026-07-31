@@ -335,14 +335,19 @@ ensure_skills() {
   fi
 
   if [ "$fetched" -eq 1 ]; then
+    local metadata_verifier="./packages/skills/scripts/bundle-metadata.mjs"
     if tar -xzf "${tmp}/skills.tar.gz" -C "${tmp}" 2>/dev/null \
-       && [ -d "${tmp}/skills" ]; then
+       && [ -d "${tmp}/skills" ] \
+       && [ -f "${tmp}/opencortex-skills-manifest.json" ] \
+       && [ -f "${tmp}/opencortex-skills-integrity.json" ] \
+       && [ -f "$metadata_verifier" ] \
+       && node "$metadata_verifier" verify "$tmp"; then
       mkdir -p "$dest"
       rm -rf "${dest}/skills"
       mv "${tmp}/skills" "${dest}/skills"
       echo "ensure_skills: staged skills to ${dest} ($(ls "${dest}/skills" | wc -l) packs)"
     else
-      echo "ensure_skills: bundle malformed; leaving existing ${dest}/skills in place." >&2
+      echo "ensure_skills: bundle malformed or failed verification; leaving existing ${dest}/skills in place." >&2
     fi
   else
     echo "ensure_skills: leaving existing ${dest}/skills in place." >&2
