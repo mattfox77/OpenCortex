@@ -6,6 +6,7 @@ import { spawn } from 'node:child_process';
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import {
+  activityReport,
   ensureInternalToken,
   memoryCapture,
   memorySearch,
@@ -351,6 +352,34 @@ test('lists and archives runtime sessions with OIDC credentials', async () => {
   assert.equal(seen.length, 2);
 });
 
+test('fetches activity reports from work tracking endpoint', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init = {}) => {
+    seen.push({ url, init });
+    assert.equal(init.headers.Authorization, 'Bearer oidc-id-token');
+    assert.match(String(url), /^https:\/\/runtime\.test\/api\/work-tracking\/sessions\?/);
+    assert.match(String(url), /createdAfter=2026-07-24T00%3A00%3A00.000Z/);
+    assert.match(String(url), /createdBefore=2026-07-31T00%3A00%3A00.000Z/);
+    assert.match(String(url), /teamName=Platform\+Team/);
+    assert.match(String(url), /includeUntagged=true/);
+    return jsonResponse({
+      sessions: [{ id: 'session-1', ownerEmail: 'owner@acme.test' }],
+    });
+  };
+
+  const reported = await activityReport({
+    runtimeUrl: 'https://runtime.test',
+    idToken: 'oidc-id-token',
+    createdAfter: '2026-07-24T00:00:00.000Z',
+    createdBefore: '2026-07-31T00:00:00.000Z',
+    teamName: 'Platform Team',
+    includeUntagged: true,
+  }, fetchImpl);
+
+  assert.equal(reported.sessions[0].id, 'session-1');
+  assert.equal(seen.length, 1);
+});
+
 test('CLI memory capture reads stdin and sends source metadata', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
   const credentialsPath = join(dir, 'tokens.json');
@@ -491,6 +520,74 @@ test('CLI session list and archive use cached OIDC credentials', async () => {
       ['GET', '/api/code/sessions', 'Bearer oidc-id-token'],
       ['DELETE', '/api/code/sessions/session-1', 'Bearer oidc-id-token'],
     ]);
+  } finally {
+    server.close();
+  }
+});
+
+test('CLI activity report uses cached OIDC credentials and prints rollups', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
+  const credentialsPath = join(dir, 'tokens.json');
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({
+      method: req.method,
+      url: req.url,
+      authorization: req.headers.authorization,
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    res.end(JSON.stringify({
+      sessions: [{
+        id: 'session-1',
+        name: 'Runtime',
+        ownerEmail: 'owner@acme.test',
+        jiraItems: [{ key: 'OC-123' }],
+        teams: [{ id: 'team-1', name: 'Platform Team' }],
+      }],
+    }));
+  });
+
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  await writeCredentials(credentialsPath, {
+    schemaVersion: 1,
+    runtimeUrl: `http://127.0.0.1:${port}`,
+    oidc: {
+      idToken: 'oidc-id-token',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    },
+    internalTokens: {},
+  });
+
+  try {
+    const result = await runCli([
+      'activity',
+      'report',
+      '--created-after',
+      '2026-07-24T00:00:00.000Z',
+      '--created-before',
+      '2026-07-31T00:00:00.000Z',
+      '--team-name',
+      'Platform Team',
+      '--include-untagged',
+      '--exclude-archived',
+    ], {
+      env: { OPENCORTEX_CREDENTIALS_DIR: dir },
+    });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.match(result.stdout, /Activity report \(2026-07-24T00:00:00.000Z..2026-07-31T00:00:00.000Z\)/);
+    assert.match(result.stdout, /Sessions: 1/);
+    assert.match(result.stdout, /Linked sessions: 1/);
+    assert.match(result.stdout, /Jira items: 1/);
+    assert.match(result.stdout, /owner@acme\.test\t1/);
+    assert.match(result.stdout, /Platform Team\t1/);
+    assert.match(result.stdout, /session-1\towner@acme\.test\tRuntime\tOC-123\tPlatform Team/);
+    assert.deepEqual(seen, [{
+      method: 'GET',
+      url: '/api/work-tracking/sessions?createdAfter=2026-07-24T00%3A00%3A00.000Z&createdBefore=2026-07-31T00%3A00%3A00.000Z&teamName=Platform+Team&includeArchived=false&includeUntagged=true',
+      authorization: 'Bearer oidc-id-token',
+    }]);
   } finally {
     server.close();
   }

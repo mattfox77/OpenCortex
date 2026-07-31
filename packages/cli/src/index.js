@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 import {
+  activityReport,
   defaultCredentialsPath,
   ensureInternalToken,
   memoryCapture,
@@ -135,6 +136,18 @@ async function main(argv = process.argv.slice(2), env = process.env) {
     return;
   }
 
+  if (command === 'activity' && subcommand === 'report') {
+    const parsed = parseActivityReportArgs(rest);
+    const credentials = await readFreshCredentials(credentialsPath);
+    const payload = await activityReport({
+      runtimeUrl: credentials.runtimeUrl,
+      idToken: credentials.oidc.idToken,
+      ...parsed,
+    });
+    printActivityReport(payload.sessions ?? [], parsed);
+    return;
+  }
+
   usage();
   process.exitCode = 1;
 }
@@ -227,6 +240,82 @@ function parseMemoryQueryArgs(args, options) {
   return parsed;
 }
 
+function parseActivityReportArgs(args, now = new Date()) {
+  const parsed = {
+    includeArchived: true,
+  };
+  for (let index = 0; index < args.length; index += 1) {
+    const item = args[index];
+    if (item === '--range') {
+      Object.assign(parsed, activityRange(args[++index] ?? '', now));
+    } else if (item === '--created-after') {
+      parsed.createdAfter = args[++index];
+    } else if (item === '--created-before') {
+      parsed.createdBefore = args[++index];
+    } else if (item === '--jira-key') {
+      parsed.jiraKey = args[++index];
+    } else if (item === '--team-id') {
+      parsed.teamId = args[++index];
+    } else if (item === '--team-name') {
+      parsed.teamName = args[++index];
+    } else if (item === '--project-key') {
+      parsed.projectKey = args[++index];
+    } else if (item === '--owner') {
+      parsed.ownerEmail = args[++index];
+    } else if (item === '--member') {
+      parsed.memberEmail = args[++index];
+    } else if (item === '--workspace-dir') {
+      parsed.workspaceDir = args[++index];
+    } else if (item === '--source') {
+      parsed.source = args[++index];
+    } else if (item === '--confidence') {
+      parsed.confidence = args[++index];
+    } else if (item === '--include-archived') {
+      parsed.includeArchived = true;
+    } else if (item === '--exclude-archived') {
+      parsed.includeArchived = false;
+    } else if (item === '--include-untagged') {
+      parsed.includeUntagged = true;
+    } else if (item === '--exclude-untagged') {
+      parsed.includeUntagged = false;
+    } else {
+      throw new Error(`unknown activity report option: ${item}`);
+    }
+  }
+  return parsed;
+}
+
+function activityRange(range, now) {
+  const end = new Date(now);
+  if (range === 'today') {
+    const start = startOfUtcDay(end);
+    return { createdAfter: start.toISOString(), createdBefore: end.toISOString() };
+  }
+  if (range === 'yesterday') {
+    const before = startOfUtcDay(end);
+    const after = addUtcDays(before, -1);
+    return { createdAfter: after.toISOString(), createdBefore: before.toISOString() };
+  }
+  if (range === 'last-week') {
+    const after = new Date(end.getTime() - 7 * 24 * 60 * 60 * 1000);
+    return { createdAfter: after.toISOString(), createdBefore: end.toISOString() };
+  }
+  if (range === 'last-month') {
+    const after = new Date(end);
+    after.setUTCMonth(after.getUTCMonth() - 1);
+    return { createdAfter: after.toISOString(), createdBefore: end.toISOString() };
+  }
+  throw new Error('activity report --range must be today, yesterday, last-week, or last-month');
+}
+
+function startOfUtcDay(value) {
+  return new Date(Date.UTC(value.getUTCFullYear(), value.getUTCMonth(), value.getUTCDate()));
+}
+
+function addUtcDays(value, days) {
+  return new Date(value.getTime() + days * 24 * 60 * 60 * 1000);
+}
+
 function printRecall(entries) {
   for (const [index, entry] of entries.entries()) {
     const title = entry.title ?? '(untitled)';
@@ -245,6 +334,70 @@ function printRecall(entries) {
   }
 }
 
+function printActivityReport(sessions, filters) {
+  const jiraKeys = new Set();
+  const owners = new Map();
+  const teams = new Map();
+  let linkedSessions = 0;
+  for (const session of sessions) {
+    if ((session.jiraItems ?? []).length > 0 || (session.jiraLinks ?? []).length > 0) {
+      linkedSessions += 1;
+    }
+    increment(owners, session.ownerEmail ?? 'unknown');
+    for (const item of session.jiraItems ?? []) {
+      if (item.key) {
+        jiraKeys.add(item.key);
+      }
+    }
+    for (const team of session.teams ?? []) {
+      increment(teams, team.name ?? team.id ?? 'unknown');
+    }
+  }
+
+  const range = [filters.createdAfter, filters.createdBefore].filter(Boolean).join('..') || 'all';
+  console.log(`Activity report (${range})`);
+  console.log(`Sessions: ${sessions.length}`);
+  console.log(`Linked sessions: ${linkedSessions}`);
+  console.log(`Jira items: ${jiraKeys.size}`);
+  printCountGroup('Owners', owners);
+  printCountGroup('Teams', teams);
+  if (sessions.length > 0) {
+    console.log('Sessions:');
+    for (const session of sessions) {
+      const jira = (session.jiraItems ?? []).map(item => item.key).filter(Boolean).join(',');
+      const teamsText = (session.teams ?? [])
+        .map(team => team.name ?? team.id)
+        .filter(Boolean)
+        .join(',');
+      console.log([
+        session.id,
+        session.ownerEmail ?? '',
+        session.name ?? '(untitled)',
+        jira || '-',
+        teamsText || '-',
+      ].join('\t'));
+    }
+  }
+}
+
+function printCountGroup(label, counts) {
+  if (counts.size === 0) {
+    return;
+  }
+  console.log(`${label}:`);
+  for (const [name, count] of [...counts.entries()].sort(countSort)) {
+    console.log(`  ${name}\t${count}`);
+  }
+}
+
+function increment(counts, key) {
+  counts.set(key, (counts.get(key) ?? 0) + 1);
+}
+
+function countSort(left, right) {
+  return right[1] - left[1] || left[0].localeCompare(right[0]);
+}
+
 function usage() {
   console.error(`Usage:
   cortex login --issuer URL --runtime-url URL [--client-id opencortex-cli]
@@ -254,7 +407,11 @@ function usage() {
   cortex memory search "query" [-n limit] [-p project] [-r repo] [-s scope] [--include-pending]
   cortex memory recall "query" [-n limit] [-p project] [-r repo] [-s scope] [--include-pending]
   cortex session list
-  cortex session archive SESSION_ID`);
+  cortex session archive SESSION_ID
+  cortex activity report [--range today|yesterday|last-week|last-month]
+    [--created-after ISO] [--created-before ISO] [--jira-key KEY]
+    [--team-name NAME] [--project-key KEY] [--owner EMAIL] [--member EMAIL]
+    [--include-untagged] [--exclude-archived]`);
 }
 
 function readStdin(stream = process.stdin) {

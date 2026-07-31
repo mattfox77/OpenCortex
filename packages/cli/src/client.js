@@ -246,6 +246,39 @@ export async function sessionArchive(options, fetchImpl = fetch) {
   return payload;
 }
 
+export async function activityReport(options, fetchImpl = fetch) {
+  const params = new URLSearchParams();
+  for (const key of [
+    'createdAfter',
+    'createdBefore',
+    'jiraKey',
+    'teamId',
+    'teamName',
+    'projectKey',
+    'ownerEmail',
+    'memberEmail',
+    'workspaceDir',
+    'source',
+    'confidence',
+    'includeArchived',
+    'includeUntagged',
+  ]) {
+    if (options[key] !== undefined) {
+      params.set(key, String(options[key]));
+    }
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  const response = await fetchImpl(
+    `${options.runtimeUrl.replace(/\/$/, '')}/api/work-tracking/sessions${suffix}`,
+    { headers: { Authorization: `Bearer ${options.idToken}` } },
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.message ?? payload.error ?? 'activity report failed');
+  }
+  return payload;
+}
+
 export function isExpired(isoTimestamp, now = Date.now()) {
   return !isoTimestamp || new Date(isoTimestamp).getTime() <= now + 30_000;
 }
