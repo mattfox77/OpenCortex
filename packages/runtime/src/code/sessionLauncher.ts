@@ -9,6 +9,7 @@ import { execFile, spawn, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import net from 'node:net';
 import { join } from 'node:path';
+import { Client, Connection } from '@temporalio/client';
 import { nanoid } from 'nanoid';
 import {
   OpenCodeWorkbenchProvider,
@@ -218,10 +219,27 @@ export function opencodeRuntimeEnvironment(
   return Object.entries(workbenchOpencodeRuntimeEnvironment(homeDir));
 }
 
+type ProvisioningConfig = Pick<
+  AppConfig,
+  | 'OPENCORTEX_PROVISION_USER_MODE'
+  | 'OPENCORTEX_PROVISION_USER_SCRIPT'
+  | 'OPENCORTEX_PROVISIONING_REQUIRED_TOOLS'
+  | 'OPENCORTEX_PROVISIONING_TASK_QUEUE'
+  | 'OPENCORTEX_WORKSPACE_ROOT'
+  | 'OIDC_REQUIRED_GROUPS'
+  | 'TEMPORAL_ADDRESS'
+  | 'TEMPORAL_NAMESPACE'
+>;
+
 export async function provisionLocalUser(
-  config: Pick<AppConfig, 'OPENCORTEX_PROVISION_USER_SCRIPT'>,
-  user: Pick<AuthenticatedUser, 'linuxUser'>,
+  config: ProvisioningConfig,
+  user: Pick<AuthenticatedUser, 'email' | 'groups' | 'linuxUser'>,
 ): Promise<void> {
+  if (config.OPENCORTEX_PROVISION_USER_MODE === 'workflow') {
+    await provisionUserViaWorkflow(config, user);
+    return;
+  }
+
   try {
     const command = localProvisionCommand(config, user);
     await execFileAsync(command[0], command.slice(1), { timeout: 30000 });
@@ -243,6 +261,44 @@ export function localProvisionCommand(
     config.OPENCORTEX_PROVISION_USER_SCRIPT,
     user.linuxUser,
   ];
+}
+
+export function userProvisioningWorkflowInput(
+  config: ProvisioningConfig,
+  user: Pick<AuthenticatedUser, 'email' | 'groups' | 'linuxUser'>,
+): Record<string, unknown> {
+  return {
+    email: user.email,
+    linuxUser: user.linuxUser,
+    groups: user.groups,
+    requiredGroups: config.OIDC_REQUIRED_GROUPS,
+    workspaceRoot: config.OPENCORTEX_WORKSPACE_ROOT,
+    provisionScript: config.OPENCORTEX_PROVISION_USER_SCRIPT,
+    requiredTools: config.OPENCORTEX_PROVISIONING_REQUIRED_TOOLS,
+  };
+}
+
+async function provisionUserViaWorkflow(
+  config: ProvisioningConfig,
+  user: Pick<AuthenticatedUser, 'email' | 'groups' | 'linuxUser'>,
+): Promise<void> {
+  const connection = await Connection.connect({
+    address: config.TEMPORAL_ADDRESS,
+  });
+  try {
+    const client = new Client({
+      connection,
+      namespace: config.TEMPORAL_NAMESPACE,
+    });
+    const handle = await client.workflow.start('userProvisioningWorkflow', {
+      taskQueue: config.OPENCORTEX_PROVISIONING_TASK_QUEUE,
+      workflowId: `user-provisioning-${user.linuxUser}-${Date.now()}`,
+      args: [userProvisioningWorkflowInput(config, user)],
+    });
+    await handle.result();
+  } finally {
+    await connection.close();
+  }
 }
 
 function prepareWorkbenchRuntime(launchPlan: WorkbenchLaunchPlan): string {

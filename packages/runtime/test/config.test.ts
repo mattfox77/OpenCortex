@@ -102,6 +102,41 @@ describe('runtime config compatibility', () => {
     expect(disabled.OPENCORTEX_ACTIVITY_LEDGER_ENABLED).toBe(false);
     expect(enabled.OPENCORTEX_ACTIVITY_LEDGER_ENABLED).toBe(true);
   });
+
+  it('keeps provisioning workflow integration opt-in', () => {
+    const local = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+    });
+    const workflow = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      OPENCORTEX_PROVISION_USER_MODE: 'workflow',
+      OPENCORTEX_PROVISIONING_TASK_QUEUE: 'user-provisioning',
+      OPENCORTEX_PROVISIONING_REQUIRED_TOOLS: 'node,git,cortex',
+      TEMPORAL_ADDRESS: 'temporal.example.com:7233',
+      TEMPORAL_NAMESPACE: 'opencortex',
+    });
+
+    expect(local.OPENCORTEX_PROVISION_USER_MODE).toBe('local');
+    expect(local.OPENCORTEX_PROVISIONING_TASK_QUEUE).toBe('cortex-tasks');
+    expect(local.OPENCORTEX_PROVISIONING_REQUIRED_TOOLS).toEqual([
+      'node',
+      'npm',
+      'git',
+      'opencode',
+      'cortex',
+    ]);
+    expect(workflow.OPENCORTEX_PROVISION_USER_MODE).toBe('workflow');
+    expect(workflow.OPENCORTEX_PROVISIONING_TASK_QUEUE).toBe('user-provisioning');
+    expect(workflow.OPENCORTEX_PROVISIONING_REQUIRED_TOOLS).toEqual([
+      'node',
+      'git',
+      'cortex',
+    ]);
+    expect(workflow.TEMPORAL_ADDRESS).toBe('temporal.example.com:7233');
+    expect(workflow.TEMPORAL_NAMESPACE).toBe('opencortex');
+  });
 });
 
 function requiredAuthEnv(): NodeJS.ProcessEnv {

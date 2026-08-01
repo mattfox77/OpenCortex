@@ -20,6 +20,7 @@
   },
   "dependencies": {
     "@opencortex/workbench": "file:../workbench",
+    "@temporalio/client": "^1.21.1",
     "@types/express": "^5.0.3",
     "cookie-parser": "^1.4.7",
     "express": "^5.1.0",

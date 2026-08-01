@@ -49,9 +49,14 @@ const schema = z.object({
   OPENCORTEX_EXEC_MODE: z.enum(['dry-run', 'sudo']).default('dry-run'),
   OPENCORTEX_WORKBENCH_PORT_BASE: z.coerce.number().int().positive().default(4100),
   OPENCORTEX_WORKBENCH_BIN: z.string().default('/usr/local/bin/opencode'),
+  OPENCORTEX_PROVISION_USER_MODE: z.enum(['local', 'workflow']).default('local'),
   OPENCORTEX_PROVISION_USER_SCRIPT: z
     .string()
     .default('/opt/opencortex/scripts/provision-opencortex-user.sh'),
+  OPENCORTEX_PROVISIONING_TASK_QUEUE: z.string().default('cortex-tasks'),
+  OPENCORTEX_PROVISIONING_REQUIRED_TOOLS: csv('node,npm,git,opencode,cortex'),
+  TEMPORAL_ADDRESS: z.string().default('localhost:7233'),
+  TEMPORAL_NAMESPACE: z.string().default('default'),
   OPENCORTEX_JIRA_BASE_URL: optionalUrl.default(''),
   SLACK_BOT_TOKEN: z.string().default(''),
   SLACK_API_BASE_URL: z.string().url().default('https://slack.com/api'),
@@ -82,7 +87,10 @@ function normalizeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   applyAlias(normalized, 'OPENCORTEX_EXEC_MODE', 'DIWAN_EXEC_MODE');
   applyAlias(normalized, 'OPENCORTEX_WORKBENCH_PORT_BASE', 'DIWAN_OPENCODE_PORT_BASE');
   applyAlias(normalized, 'OPENCORTEX_WORKBENCH_BIN', 'DIWAN_OPENCODE_BIN');
+  applyAlias(normalized, 'OPENCORTEX_PROVISION_USER_MODE', 'DIWAN_PROVISION_USER_MODE');
   applyAlias(normalized, 'OPENCORTEX_PROVISION_USER_SCRIPT', 'DIWAN_PROVISION_USER_SCRIPT');
+  applyAlias(normalized, 'OPENCORTEX_PROVISIONING_TASK_QUEUE', 'DIWAN_PROVISIONING_TASK_QUEUE');
+  applyAlias(normalized, 'OPENCORTEX_PROVISIONING_REQUIRED_TOOLS', 'DIWAN_PROVISIONING_REQUIRED_TOOLS');
   applyAlias(normalized, 'OPENCORTEX_JIRA_BASE_URL', 'DIWAN_JIRA_BASE_URL');
   applyInputAlias(normalized, 'OPENCORTEX_OIDC_ISSUER', 'OIDC_ISSUER');
   applyInputAlias(normalized, 'OPENCORTEX_OIDC_CLIENT_ID', 'OIDC_CLIENT_ID');

@@ -4,6 +4,10 @@ import { provisioningCommands } from '../src/system/provisioning.js';
 import type { AppConfig } from '../src/config/config.js';
 
 const config = {
+  OIDC_REQUIRED_GROUPS: ['OpenCodeUsers'],
+  OPENCORTEX_PROVISION_USER_MODE: 'local',
+  OPENCORTEX_PROVISIONING_REQUIRED_TOOLS: ['node', 'npm', 'git', 'opencode', 'cortex'],
+  OPENCORTEX_PROVISIONING_TASK_QUEUE: 'cortex-tasks',
   OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
   OPENCORTEX_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
 } as AppConfig;
@@ -37,6 +41,31 @@ describe('provisioning', () => {
     );
     expect(commands.join('\n')).not.toContain('/home/mfox-dev/.claude/skills');
     expect(commands.join('\n')).not.toContain('/home/mfox/.aws');
+  });
+
+  it('points operators at UserProvisioningWorkflow when workflow mode is enabled', () => {
+    const commands = provisioningCommands(
+      {
+        sub: 'sub',
+        email: 'mfox@acme.test',
+        groups: ['OpenCodeUsers', 'Admins'],
+        linuxUser: 'mfox',
+      },
+      {
+        ...config,
+        OPENCORTEX_PROVISION_USER_MODE: 'workflow',
+        OPENCORTEX_PROVISIONING_TASK_QUEUE: 'user-provisioning',
+      },
+    );
+
+    expect(commands).toHaveLength(1);
+    expect(commands[0]).toContain('npm --prefix packages/orchestrator run provision-user');
+    expect(commands[0]).toContain('--email \'mfox@acme.test\'');
+    expect(commands[0]).toContain('--user \'mfox\'');
+    expect(commands[0]).toContain('--queue \'user-provisioning\'');
+    expect(commands[0]).toContain('--groups \'OpenCodeUsers,Admins\'');
+    expect(commands[0]).toContain('--required-groups \'OpenCodeUsers\'');
+    expect(commands[0]).toContain('--required-tools \'node,npm,git,opencode,cortex\'');
   });
 });
 

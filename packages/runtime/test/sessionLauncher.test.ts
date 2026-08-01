@@ -8,12 +8,20 @@ import {
   codeWorkspaceId,
   localProvisionCommand,
   opencodeRuntimeEnvironment,
+  userProvisioningWorkflowInput,
   waitForPort,
 } from '../src/code/sessionLauncher.js';
 import type { AppConfig } from '../src/config/config.js';
 
 const config = {
+  OPENCORTEX_PROVISION_USER_MODE: 'local',
   OPENCORTEX_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
+  OPENCORTEX_PROVISIONING_REQUIRED_TOOLS: ['node', 'npm', 'git', 'opencode', 'cortex'],
+  OPENCORTEX_PROVISIONING_TASK_QUEUE: 'cortex-tasks',
+  OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
+  OIDC_REQUIRED_GROUPS: ['engineers'],
+  TEMPORAL_ADDRESS: 'localhost:7233',
+  TEMPORAL_NAMESPACE: 'default',
 } as AppConfig;
 
 describe('SessionLauncher', () => {
@@ -40,6 +48,24 @@ describe('SessionLauncher', () => {
       ['XDG_CACHE_HOME', '/home/mfox/.cache'],
       ['OPENCODE_CONFIG', '/home/mfox/.config/opencode/opencode.json'],
     ]);
+  });
+
+  it('maps authenticated users to the provisioning workflow input', () => {
+    expect(
+      userProvisioningWorkflowInput(config, {
+        email: 'mfox@example.com',
+        groups: ['engineers', 'admins'],
+        linuxUser: 'mfox',
+      }),
+    ).toEqual({
+      email: 'mfox@example.com',
+      linuxUser: 'mfox',
+      groups: ['engineers', 'admins'],
+      requiredGroups: ['engineers'],
+      workspaceRoot: '/srv/opencortex/workspaces',
+      provisionScript: '/opt/opencortex/scripts/provision-opencortex-user.sh',
+      requiredTools: ['node', 'npm', 'git', 'opencode', 'cortex'],
+    });
   });
 
   it('accepts readiness after a wrapper process exits but the server keeps listening', async () => {
