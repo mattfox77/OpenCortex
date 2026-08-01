@@ -95,6 +95,27 @@ export interface UserProvisioningVerificationResult {
   tools: Record<string, boolean>;
 }
 
+export interface RuntimeWorkbenchSession {
+  id: string;
+  ownerEmail?: string;
+  linuxUser?: string;
+  workspaceDir?: string;
+  port?: number;
+  urlPath?: string;
+  openCodeSessionId?: string;
+}
+
+export interface RuntimeWorkbenchSessionResult {
+  session: RuntimeWorkbenchSession;
+  channel?: Record<string, unknown>;
+}
+
+export interface RuntimeWorkbenchProbeResult {
+  sessionId: string;
+  running: boolean;
+  session?: RuntimeWorkbenchSession;
+}
+
 // ================================================================
 // ACTIVITY: Execute a CLI command via OpenCode
 // ================================================================
@@ -453,6 +474,84 @@ export async function verifyProvisionedUser(params: {
       requiredPaths,
       skillTargets,
       tools,
+    };
+  });
+}
+
+// ================================================================
+// ACTIVITY: Start/probe/archive a runtime-backed Workbench session
+// ================================================================
+export async function startRuntimeWorkbenchSession(params: {
+  runtimeBaseUrl?: string;
+  authorizationHeader?: string;
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
+}): Promise<RuntimeWorkbenchSessionResult> {
+  return withTraceSpan('opencortex.workbench.start_session', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+  }, async () => {
+    const payload = await runtimeJson(params, '/code/sessions', {
+      method: 'POST',
+    }) as { session?: RuntimeWorkbenchSession; channel?: Record<string, unknown> };
+    if (!payload.session?.id) {
+      throw new Error('Runtime session start did not return a session id');
+    }
+    return {
+      session: payload.session,
+      ...(payload.channel ? { channel: payload.channel } : {}),
+    };
+  });
+}
+
+export async function probeRuntimeWorkbenchSession(params: {
+  sessionId: string;
+  runtimeBaseUrl?: string;
+  authorizationHeader?: string;
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
+}): Promise<RuntimeWorkbenchProbeResult> {
+  return withTraceSpan('opencortex.workbench.probe_session', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'workbench.session_id': params.sessionId,
+  }, async () => {
+    const payload = await runtimeJson(params, '/code/sessions', {
+      method: 'GET',
+    }) as { sessions?: RuntimeWorkbenchSession[] };
+    const session = (payload.sessions ?? []).find(item => item.id === params.sessionId);
+    return {
+      sessionId: params.sessionId,
+      running: Boolean(session),
+      ...(session ? { session } : {}),
+    };
+  });
+}
+
+export async function archiveRuntimeWorkbenchSession(params: {
+  sessionId: string;
+  runtimeBaseUrl?: string;
+  authorizationHeader?: string;
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
+}): Promise<RuntimeWorkbenchSessionResult> {
+  return withTraceSpan('opencortex.workbench.archive_session', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'workbench.session_id': params.sessionId,
+  }, async () => {
+    const payload = await runtimeJson(
+      params,
+      `/code/sessions/${encodeURIComponent(params.sessionId)}`,
+      { method: 'DELETE' },
+      [404],
+    ) as { session?: RuntimeWorkbenchSession; channel?: Record<string, unknown> };
+    return {
+      session: payload.session ?? { id: params.sessionId },
+      ...(payload.channel ? { channel: payload.channel } : {}),
     };
   });
 }
@@ -1036,6 +1135,48 @@ function commandExists(command: string): boolean {
   } catch {
     return false;
   }
+}
+
+async function runtimeJson(
+  params: { runtimeBaseUrl?: string; authorizationHeader?: string },
+  path: string,
+  init: RequestInit,
+  okStatuses: number[] = [],
+): Promise<unknown> {
+  const configuredBaseUrl = (
+    params.runtimeBaseUrl ??
+    process.env.OPENCORTEX_RUNTIME_API_BASE_URL ??
+    process.env.OPENCORTEX_RUNTIME_BASE_URL ??
+    'http://127.0.0.1:8080/api'
+  ).replace(/\/$/, '');
+  const baseUrl = configuredBaseUrl.endsWith('/api')
+    ? configuredBaseUrl
+    : `${configuredBaseUrl}/api`;
+  const authorization =
+    params.authorizationHeader ??
+    process.env.OPENCORTEX_RUNTIME_AUTH_HEADER ??
+    '';
+  if (!authorization) {
+    throw new Error('Set OPENCORTEX_RUNTIME_AUTH_HEADER or pass authorizationHeader');
+  }
+  const response = await fetch(`${baseUrl}${path}`, {
+    ...init,
+    headers: {
+      Accept: 'application/json',
+      Authorization: authorization,
+      ...(init.headers ?? {}),
+    },
+  });
+  const text = await response.text();
+  const payload = text ? JSON.parse(text) as unknown : {};
+  if (!response.ok && !okStatuses.includes(response.status)) {
+    const message =
+      payload && typeof payload === 'object' && 'message' in payload
+        ? String((payload as { message?: unknown }).message)
+        : text;
+    throw new Error(`Runtime API ${init.method ?? 'GET'} ${path} failed: ${response.status} ${message}`);
+  }
+  return payload;
 }
 
 async function findArtifact(

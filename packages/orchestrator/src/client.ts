@@ -6,6 +6,7 @@ import {
   memoryIngestWorkflow,
   userProvisioningWorkflow,
   activityRollupWorkflow,
+  workbenchSessionWorkflow,
   approveSignal,
   feedbackSignal,
   cancelSignal,
@@ -15,6 +16,7 @@ import type { CortexTaskInput } from './workflows/cortex';
 import type { MemoryIngestInput } from './workflows/memoryIngest';
 import type { UserProvisioningInput } from './workflows/userProvisioning';
 import type { ActivityRollupInput } from './workflows/activityRollup';
+import type { WorkbenchSessionInput } from './workflows/workbenchSession';
 import { newTraceContext, withTraceSpan } from './telemetry';
 import * as dotenv from 'dotenv';
 
@@ -232,5 +234,41 @@ export async function startActivityRollup(
   });
 
   console.log(`✅ Started activity rollup workflow: ${workflowId}`);
+  return handle;
+}
+
+// --- Start a workbench session workflow ---
+export async function startWorkbenchSession(
+  params: WorkbenchSessionInput & {
+    queue?: string;
+    workflowId?: string;
+  },
+) {
+  const client = await getClient();
+  const workflowId =
+    params.workflowId ??
+    `workbench-session-${Date.now()}`;
+  const traceContext = params.traceContext ?? newTraceContext();
+
+  const handle = await withTraceSpan('opencortex.workbench.start_session_workflow', traceContext, {
+    'workflow.id': workflowId,
+    'workflow.type': 'WorkbenchSessionWorkflow',
+    'workbench.owner_id': params.ownerId,
+  }, async (workflowTraceContext) => client.workflow.start(workbenchSessionWorkflow, {
+    taskQueue: params.queue || 'cortex-tasks',
+    workflowId,
+    args: [{
+      ownerId: params.ownerId,
+      project: params.project,
+      runtimeBaseUrl: params.runtimeBaseUrl,
+      authorizationHeader: params.authorizationHeader,
+      monitorInterval: params.monitorInterval,
+      maxProbeIterations: params.maxProbeIterations,
+      traceContext: workflowTraceContext ?? traceContext,
+    }],
+  }));
+
+  console.log(`✅ Started workbench session workflow: ${workflowId}`);
+  console.log(`   Trace: ${traceContext.traceId}`);
   return handle;
 }
