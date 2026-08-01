@@ -2,7 +2,7 @@ import { Context } from '@temporalio/activity';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
-import { mkdirSync, writeFileSync } from 'fs';
+import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'fs';
 import { dirname, join } from 'path';
 import { TraceContext, withTraceSpan } from '../telemetry';
 
@@ -65,6 +65,34 @@ export interface TextChunk {
   index: number;
   content: string;
   heading?: string;
+}
+
+export interface ProvisioningIdentityResult {
+  email: string;
+  linuxUser: string;
+  requiredGroups: string[];
+  groups: string[];
+}
+
+export interface UserProvisioningRunResult {
+  linuxUser: string;
+  script: string;
+  output: string;
+}
+
+export interface ProvisionedSkillTarget {
+  path: string;
+  exists: boolean;
+  installedPackCount: number;
+}
+
+export interface UserProvisioningVerificationResult {
+  linuxUser: string;
+  homeDir: string;
+  workspaceDir: string;
+  requiredPaths: string[];
+  skillTargets: ProvisionedSkillTarget[];
+  tools: Record<string, boolean>;
 }
 
 // ================================================================
@@ -265,6 +293,168 @@ export async function notifyHuman(params: {
       console.error('Slack notification failed:', err);
     }
   }
+}
+
+// ================================================================
+// ACTIVITY: Validate identity and authorization for provisioning
+// ================================================================
+export async function validateProvisioningIdentity(params: {
+  email: string;
+  linuxUser: string;
+  groups?: string[];
+  requiredGroups?: string[];
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
+}): Promise<ProvisioningIdentityResult> {
+  return withTraceSpan('opencortex.provisioning.validate_identity', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'identity.email': params.email,
+    'identity.linux_user': params.linuxUser,
+  }, async () => {
+    if (!/^[^@\s]+@[^@\s]+\.[^@\s]+$/.test(params.email)) {
+      throw new Error(`Invalid provisioning email: ${params.email}`);
+    }
+    if (!isSafeLinuxUser(params.linuxUser)) {
+      throw new Error(`Invalid Linux user for provisioning: ${params.linuxUser}`);
+    }
+
+    const groups = uniqueMatches(params.groups ?? []).sort();
+    const requiredGroups = uniqueMatches(params.requiredGroups ?? []).sort();
+    const missingGroups = requiredGroups.filter(group => !groups.includes(group));
+    if (missingGroups.length > 0) {
+      throw new Error(
+        `Provisioning identity ${params.email} is missing required group(s): ${missingGroups.join(', ')}`,
+      );
+    }
+
+    return {
+      email: params.email,
+      linuxUser: params.linuxUser,
+      groups,
+      requiredGroups,
+    };
+  });
+}
+
+// ================================================================
+// ACTIVITY: Run the idempotent OpenCortex user provisioner
+// ================================================================
+export async function runUserProvisioningScript(params: {
+  linuxUser: string;
+  provisionScript?: string;
+  workspaceRoot?: string;
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
+}): Promise<UserProvisioningRunResult> {
+  return withTraceSpan('opencortex.provisioning.run_script', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'identity.linux_user': params.linuxUser,
+  }, async () => {
+    if (!isSafeLinuxUser(params.linuxUser)) {
+      throw new Error(`Invalid Linux user for provisioning: ${params.linuxUser}`);
+    }
+    const script =
+      params.provisionScript ??
+      process.env.OPENCORTEX_PROVISION_USER_SCRIPT ??
+      '/opt/opencortex/scripts/provision-opencortex-user.sh';
+    const output = execFileSync('sudo', ['-n', '/usr/bin/bash', script, params.linuxUser], {
+      encoding: 'utf8',
+      timeout: 120_000,
+      maxBuffer: 1024 * 1024,
+      env: {
+        ...process.env,
+        ...(params.workspaceRoot ? { OPENCORTEX_WORKSPACE_ROOT: params.workspaceRoot } : {}),
+      },
+    });
+
+    return {
+      linuxUser: params.linuxUser,
+      script,
+      output: output.trim(),
+    };
+  });
+}
+
+// ================================================================
+// ACTIVITY: Verify user runtime, memory, and skill directories
+// ================================================================
+export async function verifyProvisionedUser(params: {
+  linuxUser: string;
+  workspaceRoot?: string;
+  homeDir?: string;
+  requiredTools?: string[];
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
+}): Promise<UserProvisioningVerificationResult> {
+  return withTraceSpan('opencortex.provisioning.verify_user', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'identity.linux_user': params.linuxUser,
+  }, async () => {
+    if (!isSafeLinuxUser(params.linuxUser)) {
+      throw new Error(`Invalid Linux user for provisioning: ${params.linuxUser}`);
+    }
+
+    const homeDir = params.homeDir ?? `/home/${params.linuxUser}`;
+    const workspaceRoot =
+      params.workspaceRoot ??
+      process.env.OPENCORTEX_WORKSPACE_ROOT ??
+      '/srv/opencortex/workspaces';
+    const workspaceDir = join(workspaceRoot, params.linuxUser);
+    const skillTargetPaths = [
+      join(homeDir, '.opencode', 'skills'),
+      join(homeDir, '.codex', 'skills'),
+    ];
+    const requiredPaths = [
+      homeDir,
+      join(homeDir, 'repos'),
+      join(workspaceDir, 'repos'),
+      join(homeDir, '.config', 'opencode'),
+      join(homeDir, '.config', 'gh'),
+      join(homeDir, '.config', 'acli'),
+      join(homeDir, '.opencortex', 'memory'),
+      join(homeDir, '.opencortex', 'credentials'),
+      ...skillTargetPaths,
+    ];
+    const missingPaths = requiredPaths.filter(path => !isDirectory(path));
+    if (missingPaths.length > 0) {
+      throw new Error(
+        `Provisioned user ${params.linuxUser} is missing required path(s): ${missingPaths.join(', ')}`,
+      );
+    }
+
+    const skillTargets = skillTargetPaths.map(path => ({
+      path,
+      exists: true,
+      installedPackCount: countSkillPacks(path),
+    }));
+    const requiredTools = params.requiredTools ?? ['node', 'npm', 'git', 'opencode', 'cortex'];
+    const tools = Object.fromEntries(
+      requiredTools.map(tool => [tool, commandExists(tool)]),
+    );
+    const missingTools = Object.entries(tools)
+      .filter(([, exists]) => !exists)
+      .map(([tool]) => tool);
+    if (missingTools.length > 0) {
+      throw new Error(
+        `Provisioned user ${params.linuxUser} is missing required tool(s): ${missingTools.join(', ')}`,
+      );
+    }
+
+    return {
+      linuxUser: params.linuxUser,
+      homeDir,
+      workspaceDir,
+      requiredPaths,
+      skillTargets,
+      tools,
+    };
+  });
 }
 
 // ================================================================
@@ -789,6 +979,63 @@ function inferMemoryType(text: string): string {
 
 function uniqueMatches(values: string[]): string[] {
   return [...new Set(values)];
+}
+
+function isSafeLinuxUser(value: string): boolean {
+  if (!/^[a-z][a-z0-9-]{0,31}$/.test(value)) {
+    return false;
+  }
+  return ![
+    'root',
+    'admin',
+    'administrator',
+    'daemon',
+    'bin',
+    'sys',
+    'sync',
+    'diwan',
+    'opencortex',
+    'ssm-user',
+    'ubuntu',
+    'ec2-user',
+    'nobody',
+    'sshd',
+    'www-data',
+  ].includes(value);
+}
+
+function isDirectory(path: string): boolean {
+  try {
+    return existsSync(path) && statSync(path).isDirectory();
+  } catch {
+    return false;
+  }
+}
+
+function countSkillPacks(path: string): number {
+  try {
+    return readdirSync(path, { withFileTypes: true })
+      .filter(entry => entry.isDirectory())
+      .length;
+  } catch {
+    return 0;
+  }
+}
+
+function commandExists(command: string): boolean {
+  if (!/^[A-Za-z0-9_.@+-]+$/.test(command)) {
+    return false;
+  }
+  try {
+    execFileSync('/usr/bin/env', ['which', command], {
+      encoding: 'utf8',
+      timeout: 5_000,
+      stdio: 'ignore',
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 async function findArtifact(

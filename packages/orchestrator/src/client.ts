@@ -4,6 +4,7 @@ import {
   cortexTask,
   cortexMonitor,
   memoryIngestWorkflow,
+  userProvisioningWorkflow,
   approveSignal,
   feedbackSignal,
   cancelSignal,
@@ -11,6 +12,7 @@ import {
 } from './workflows';
 import type { CortexTaskInput } from './workflows/cortex';
 import type { MemoryIngestInput } from './workflows/memoryIngest';
+import type { UserProvisioningInput } from './workflows/userProvisioning';
 import { newTraceContext, withTraceSpan } from './telemetry';
 import * as dotenv from 'dotenv';
 
@@ -158,6 +160,45 @@ export async function startMemoryIngest(
   }));
 
   console.log(`✅ Started memory ingest workflow: ${workflowId}`);
+  console.log(`   Trace: ${traceContext.traceId}`);
+  return handle;
+}
+
+// --- Start a user provisioning workflow ---
+export async function startUserProvisioning(
+  params: UserProvisioningInput & {
+    queue?: string;
+    workflowId?: string;
+  },
+) {
+  const client = await getClient();
+  const workflowId =
+    params.workflowId ??
+    `user-provisioning-${params.linuxUser}-${Date.now()}`;
+  const traceContext = params.traceContext ?? newTraceContext();
+
+  const handle = await withTraceSpan('opencortex.provisioning.start_workflow', traceContext, {
+    'workflow.id': workflowId,
+    'workflow.type': 'UserProvisioningWorkflow',
+    'identity.email': params.email,
+    'identity.linux_user': params.linuxUser,
+  }, async (workflowTraceContext) => client.workflow.start(userProvisioningWorkflow, {
+    taskQueue: params.queue || 'cortex-tasks',
+    workflowId,
+    args: [{
+      email: params.email,
+      linuxUser: params.linuxUser,
+      groups: params.groups,
+      requiredGroups: params.requiredGroups,
+      workspaceRoot: params.workspaceRoot,
+      homeDir: params.homeDir,
+      provisionScript: params.provisionScript,
+      requiredTools: params.requiredTools,
+      traceContext: workflowTraceContext ?? traceContext,
+    }],
+  }));
+
+  console.log(`✅ Started user provisioning workflow: ${workflowId}`);
   console.log(`   Trace: ${traceContext.traceId}`);
   return handle;
 }
