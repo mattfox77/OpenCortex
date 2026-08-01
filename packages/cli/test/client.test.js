@@ -1,4 +1,4 @@
-import { mkdtemp, readFile } from 'node:fs/promises';
+import { mkdtemp, readFile, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
 import { createServer } from 'node:http';
@@ -17,6 +17,8 @@ import {
   startDeviceLogin,
   tokenExpiresAt,
   writeCredentials,
+  workflowList,
+  workflowShow,
 } from '../src/client.js';
 
 test('starts device login from OIDC discovery metadata', async () => {
@@ -380,6 +382,49 @@ test('fetches activity reports from work tracking endpoint', async () => {
   assert.equal(seen.length, 1);
 });
 
+test('lists and shows workflow projections with OIDC credentials', async () => {
+  const seen = [];
+  const fetchImpl = async (url, init = {}) => {
+    seen.push({ url, init });
+    assert.equal(init.headers.Authorization, 'Bearer oidc-id-token');
+    if (String(url).includes('/api/workflows/workflow-1')) {
+      return jsonResponse({
+        workflow: { workflowId: 'workflow-1', status: 'completed' },
+      });
+    }
+    assert.match(String(url), /^https:\/\/runtime\.test\/api\/workflows\?/);
+    assert.match(String(url), /workflowType=MemoryIngestWorkflow/);
+    assert.match(String(url), /status=completed/);
+    assert.match(String(url), /project=runtime/);
+    assert.match(String(url), /sourceSystem=opencode/);
+    assert.match(String(url), /sourceSessionId=session-1/);
+    assert.match(String(url), /limit=5/);
+    return jsonResponse({
+      workflows: [{ workflowId: 'workflow-1', status: 'completed' }],
+    });
+  };
+
+  const listed = await workflowList({
+    runtimeUrl: 'https://runtime.test',
+    idToken: 'oidc-id-token',
+    workflowType: 'MemoryIngestWorkflow',
+    status: 'completed',
+    project: 'runtime',
+    sourceSystem: 'opencode',
+    sourceSessionId: 'session-1',
+    limit: 5,
+  }, fetchImpl);
+  const shown = await workflowShow({
+    runtimeUrl: 'https://runtime.test',
+    idToken: 'oidc-id-token',
+    workflowId: 'workflow-1',
+  }, fetchImpl);
+
+  assert.equal(listed.workflows[0].workflowId, 'workflow-1');
+  assert.equal(shown.workflow.status, 'completed');
+  assert.equal(seen.length, 2);
+});
+
 test('CLI memory capture reads stdin and sends source metadata', async () => {
   const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
   const credentialsPath = join(dir, 'tokens.json');
@@ -457,6 +502,87 @@ test('CLI memory capture reads stdin and sends source metadata', async () => {
         title: 'Hook capture',
         project: 'runtime',
         sourceSystem: 'opencortex-session',
+        sourceSessionId: 'session-1',
+        toolName: 'opencode',
+      },
+    }]);
+  } finally {
+    server.close();
+  }
+});
+
+test('CLI memory sync run captures file content with source metadata', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
+  const credentialsPath = join(dir, 'tokens.json');
+  const transcriptPath = join(dir, 'transcript.md');
+  await writeFile(transcriptPath, '# Session\n\nSynced transcript content.\n');
+  const seen = [];
+  const server = createServer((req, res) => {
+    let body = '';
+    req.setEncoding('utf8');
+    req.on('data', chunk => {
+      body += chunk;
+    });
+    req.on('end', () => {
+      seen.push({
+        method: req.method,
+        url: req.url,
+        authorization: req.headers.authorization,
+        body: JSON.parse(body),
+      });
+      res.writeHead(201, { 'Content-Type': 'application/json' });
+      res.end(JSON.stringify({ entry: { id: 'entry-sync' } }));
+    });
+  });
+
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  await writeCredentials(credentialsPath, {
+    schemaVersion: 1,
+    runtimeUrl: `http://127.0.0.1:${port}`,
+    oidc: {
+      idToken: 'oidc-id-token',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    },
+    internalTokens: {
+      'memory:write': {
+        token: 'write-token',
+        scopes: ['memory:write'],
+        expiresAt: '2999-01-01T00:00:00.000Z',
+      },
+    },
+  });
+
+  try {
+    const result = await runCli([
+      'memory',
+      'sync',
+      'run',
+      '--source',
+      'opencode',
+      '--file',
+      transcriptPath,
+      '-p',
+      'runtime',
+      '--session-id',
+      'session-1',
+    ], {
+      env: { OPENCORTEX_CREDENTIALS_DIR: dir },
+    });
+
+    assert.equal(result.code, 0, result.stderr);
+    assert.equal(result.stdout.trim(), 'entry-sync');
+    assert.deepEqual(seen, [{
+      method: 'POST',
+      url: '/api/memory/entries',
+      authorization: 'Bearer write-token',
+      body: {
+        content: '# Session\n\nSynced transcript content.\n',
+        scope: 'personal',
+        kind: 'document',
+        sourceSystem: 'opencode',
+        title: 'opencode sync',
+        project: 'runtime',
         sourceSessionId: 'session-1',
         toolName: 'opencode',
       },
@@ -588,6 +714,111 @@ test('CLI activity report uses cached OIDC credentials and prints rollups', asyn
       url: '/api/work-tracking/sessions?createdAfter=2026-07-24T00%3A00%3A00.000Z&createdBefore=2026-07-31T00%3A00%3A00.000Z&teamName=Platform+Team&includeArchived=false&includeUntagged=true',
       authorization: 'Bearer oidc-id-token',
     }]);
+  } finally {
+    server.close();
+  }
+});
+
+test('CLI workflow list and show use cached OIDC credentials', async () => {
+  const dir = await mkdtemp(join(tmpdir(), 'opencortex-cli-'));
+  const credentialsPath = join(dir, 'tokens.json');
+  const seen = [];
+  const server = createServer((req, res) => {
+    seen.push({
+      method: req.method,
+      url: req.url,
+      authorization: req.headers.authorization,
+    });
+    res.writeHead(200, { 'Content-Type': 'application/json' });
+    if (req.url === '/api/workflows/workflow-1') {
+      res.end(JSON.stringify({
+        workflow: {
+          workflowId: 'workflow-1',
+          runId: 'run-1',
+          workflowType: 'MemoryIngestWorkflow',
+          status: 'completed',
+          ownerId: 'owner@acme.test',
+          project: 'runtime',
+          sourceSystem: 'opencode',
+          sourceSessionId: 'session-1',
+          artifactId: 'artifact-1',
+          entryIds: ['entry-1'],
+          completedAt: '2026-08-01T00:00:00.000Z',
+          updatedAt: '2026-08-01T00:00:00.000Z',
+          summary: 'Ingested memory',
+          data: { chunkCount: 1 },
+        },
+      }));
+      return;
+    }
+    res.end(JSON.stringify({
+      workflows: [{
+        workflowId: 'workflow-1',
+        runId: 'run-1',
+        workflowType: 'MemoryIngestWorkflow',
+        status: 'completed',
+        ownerId: 'owner@acme.test',
+        project: 'runtime',
+        completedAt: '2026-08-01T00:00:00.000Z',
+        summary: 'Ingested memory',
+      }],
+    }));
+  });
+
+  await new Promise(resolve => server.listen(0, '127.0.0.1', resolve));
+  const { port } = server.address();
+  await writeCredentials(credentialsPath, {
+    schemaVersion: 1,
+    runtimeUrl: `http://127.0.0.1:${port}`,
+    oidc: {
+      idToken: 'oidc-id-token',
+      expiresAt: '2999-01-01T00:00:00.000Z',
+    },
+    internalTokens: {},
+  });
+
+  try {
+    const listed = await runCli([
+      'workflow',
+      'list',
+      '--type',
+      'MemoryIngestWorkflow',
+      '--status',
+      'completed',
+      '-p',
+      'runtime',
+      '--source-system',
+      'opencode',
+      '--session-id',
+      'session-1',
+      '-n',
+      '5',
+    ], {
+      env: { OPENCORTEX_CREDENTIALS_DIR: dir },
+    });
+    const shown = await runCli(['workflow', 'show', 'workflow-1'], {
+      env: { OPENCORTEX_CREDENTIALS_DIR: dir },
+    });
+
+    assert.equal(listed.code, 0, listed.stderr);
+    assert.match(listed.stdout, /workflow-1\tcompleted\tMemoryIngestWorkflow\towner@acme\.test\truntime/);
+    assert.equal(shown.code, 0, shown.stderr);
+    assert.match(shown.stdout, /Workflow: workflow-1/);
+    assert.match(shown.stdout, /Run: run-1/);
+    assert.match(shown.stdout, /Summary: Ingested memory/);
+    assert.match(shown.stdout, /"chunkCount": 1/);
+    assert.deepEqual(seen, [
+      {
+        method: 'GET',
+        url: '/api/workflows?workflowType=MemoryIngestWorkflow&status=completed&project=runtime&sourceSystem=opencode&sourceSessionId=session-1&limit=5',
+        authorization: 'Bearer oidc-id-token',
+      },
+      {
+        method: 'GET',
+        url: '/api/workflows/workflow-1',
+        authorization: 'Bearer oidc-id-token',
+      },
+    ]);
   } finally {
     server.close();
   }

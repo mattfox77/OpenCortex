@@ -17,6 +17,10 @@ import { ChatStore } from '../chat/chatStore.js';
 import { PairPromptStore } from '../pairPrompts/pairPromptStore.js';
 import { JiraTrackingStore } from '../jira/jiraTrackingStore.js';
 import { createMemoryStore, type MemoryStore } from '../memory/memoryStore.js';
+import {
+  createWorkflowProjectionStore,
+  type WorkflowProjectionStore,
+} from '../workflows/workflowProjectionStore.js';
 
 export function createApp(
   config: AppConfig,
@@ -27,6 +31,8 @@ export function createApp(
     config.OPENCORTEX_DATA_DIR,
   ),
   memory: MemoryStore | undefined = createMemoryStore(config),
+  workflowProjections: WorkflowProjectionStore | undefined =
+    createWorkflowProjectionStore(config),
 ): express.Express {
   const app = express();
   const mountPath = config.OPENCORTEX_BASE_PATH || '/';
@@ -63,7 +69,15 @@ export function createApp(
   mounted.use(
     '/api',
     oidcAuth(config),
-    apiRouter(config, codeSessions, chat, pairPrompts, jiraTracking),
+    apiRouter(
+      config,
+      codeSessions,
+      chat,
+      pairPrompts,
+      jiraTracking,
+      undefined,
+      workflowProjections,
+    ),
   );
   mounted.use(
     '/code/session',

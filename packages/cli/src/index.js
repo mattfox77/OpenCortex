@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { readFile } from 'node:fs/promises';
 import {
   activityReport,
   defaultCredentialsPath,
@@ -12,6 +13,8 @@ import {
   startDeviceLogin,
   tokenExpiresAt,
   writeCredentials,
+  workflowList,
+  workflowShow,
 } from './client.js';
 
 async function main(argv = process.argv.slice(2), env = process.env) {
@@ -59,6 +62,26 @@ async function main(argv = process.argv.slice(2), env = process.env) {
       throw new Error('memory capture requires content');
     }
     delete parsed.readFromStdin;
+    const { credentials, token } = await ensureInternalToken({
+      credentialsPath,
+      scopes: ['memory:write'],
+      scopeKey: 'memory:write',
+    });
+    const payload = await memoryCapture({
+      runtimeUrl: credentials.runtimeUrl,
+      internalToken: token,
+      entry: parsed,
+    });
+    console.log(payload.entry.id);
+    return;
+  }
+
+  if (command === 'memory' && subcommand === 'sync') {
+    const action = rest.shift();
+    if (action !== 'run') {
+      throw new Error('memory sync requires run');
+    }
+    const parsed = await parseMemorySyncRunArgs(rest);
     const { credentials, token } = await ensureInternalToken({
       credentialsPath,
       scopes: ['memory:write'],
@@ -145,6 +168,33 @@ async function main(argv = process.argv.slice(2), env = process.env) {
       ...parsed,
     });
     printActivityReport(payload.sessions ?? [], parsed);
+    return;
+  }
+
+  if (command === 'workflow' && subcommand === 'list') {
+    const parsed = parseWorkflowListArgs(rest);
+    const credentials = await readFreshCredentials(credentialsPath);
+    const payload = await workflowList({
+      runtimeUrl: credentials.runtimeUrl,
+      idToken: credentials.oidc.idToken,
+      ...parsed,
+    });
+    printWorkflowList(payload.workflows ?? []);
+    return;
+  }
+
+  if (command === 'workflow' && subcommand === 'show') {
+    const workflowId = rest[0] ?? '';
+    if (!workflowId) {
+      throw new Error('workflow show requires a workflow id');
+    }
+    const credentials = await readFreshCredentials(credentialsPath);
+    const payload = await workflowShow({
+      runtimeUrl: credentials.runtimeUrl,
+      idToken: credentials.oidc.idToken,
+      workflowId,
+    });
+    printWorkflowDetail(payload.workflow);
     return;
   }
 
@@ -240,6 +290,63 @@ function parseMemoryQueryArgs(args, options) {
   return parsed;
 }
 
+async function parseMemorySyncRunArgs(args) {
+  const parsed = {
+    content: '',
+    scope: 'personal',
+    kind: 'document',
+    sourceSystem: '',
+  };
+  let file = '';
+  let readFromStdin = false;
+  for (let index = 0; index < args.length; index += 1) {
+    const item = args[index];
+    if (item === '--source') {
+      parsed.sourceSystem = args[++index] ?? '';
+    } else if (item === '--file' || item === '-f') {
+      file = args[++index] ?? '';
+    } else if (item === '-') {
+      readFromStdin = true;
+    } else if (item === '--title' || item === '-t') {
+      parsed.title = args[++index];
+    } else if (item === '--project' || item === '-p') {
+      parsed.project = args[++index];
+    } else if (item === '--repo' || item === '-r') {
+      parsed.repo = args[++index];
+    } else if (item === '--scope' || item === '-s') {
+      parsed.scope = args[++index];
+    } else if (item === '--kind' || item === '-k') {
+      parsed.kind = args[++index];
+    } else if (item === '--session-id') {
+      parsed.sourceSessionId = args[++index];
+    } else if (item === '--tool') {
+      parsed.toolName = args[++index];
+    } else {
+      throw new Error(`unknown memory sync run option: ${item}`);
+    }
+  }
+  if (!parsed.sourceSystem) {
+    throw new Error('memory sync run requires --source');
+  }
+  if (file) {
+    parsed.content = await readFile(file, 'utf8');
+  } else if (readFromStdin) {
+    parsed.content = await readStdin();
+  } else {
+    throw new Error('memory sync run requires --file PATH or - for stdin');
+  }
+  if (!parsed.title) {
+    parsed.title = `${parsed.sourceSystem} sync`;
+  }
+  if (!parsed.toolName) {
+    parsed.toolName = parsed.sourceSystem;
+  }
+  if (!parsed.content.trim()) {
+    throw new Error('memory sync run found no content');
+  }
+  return parsed;
+}
+
 function parseActivityReportArgs(args, now = new Date()) {
   const parsed = {
     includeArchived: true,
@@ -280,6 +387,29 @@ function parseActivityReportArgs(args, now = new Date()) {
       parsed.includeUntagged = false;
     } else {
       throw new Error(`unknown activity report option: ${item}`);
+    }
+  }
+  return parsed;
+}
+
+function parseWorkflowListArgs(args) {
+  const parsed = { limit: 50 };
+  for (let index = 0; index < args.length; index += 1) {
+    const item = args[index];
+    if (item === '--type') {
+      parsed.workflowType = args[++index];
+    } else if (item === '--status') {
+      parsed.status = args[++index];
+    } else if (item === '--project' || item === '-p') {
+      parsed.project = args[++index];
+    } else if (item === '--source-system') {
+      parsed.sourceSystem = args[++index];
+    } else if (item === '--session-id') {
+      parsed.sourceSessionId = args[++index];
+    } else if (item === '--limit' || item === '-n') {
+      parsed.limit = Number(args[++index] ?? parsed.limit);
+    } else {
+      throw new Error(`unknown workflow list option: ${item}`);
     }
   }
   return parsed;
@@ -380,6 +510,45 @@ function printActivityReport(sessions, filters) {
   }
 }
 
+function printWorkflowList(workflows) {
+  for (const workflow of workflows) {
+    console.log([
+      workflow.workflowId,
+      workflow.status ?? '',
+      workflow.workflowType ?? '',
+      workflow.ownerId ?? '',
+      workflow.project ?? '',
+      workflow.completedAt ?? workflow.updatedAt ?? '',
+      workflow.summary ?? '',
+    ].join('\t'));
+  }
+}
+
+function printWorkflowDetail(workflow) {
+  if (!workflow) {
+    return;
+  }
+  console.log(`Workflow: ${workflow.workflowId}`);
+  console.log(`Run: ${workflow.runId ?? ''}`);
+  console.log(`Type: ${workflow.workflowType ?? ''}`);
+  console.log(`Status: ${workflow.status ?? ''}`);
+  console.log(`Owner: ${workflow.ownerId ?? ''}`);
+  if (workflow.project) console.log(`Project: ${workflow.project}`);
+  if (workflow.sourceSystem) console.log(`Source: ${workflow.sourceSystem}`);
+  if (workflow.sourceSessionId) console.log(`Session: ${workflow.sourceSessionId}`);
+  if (workflow.artifactId) console.log(`Artifact: ${workflow.artifactId}`);
+  if ((workflow.entryIds ?? []).length > 0) {
+    console.log(`Entries: ${workflow.entryIds.join(',')}`);
+  }
+  if (workflow.completedAt) console.log(`Completed: ${workflow.completedAt}`);
+  if (workflow.updatedAt) console.log(`Updated: ${workflow.updatedAt}`);
+  console.log(`Summary: ${workflow.summary ?? ''}`);
+  if (workflow.data && Object.keys(workflow.data).length > 0) {
+    console.log('Data:');
+    console.log(JSON.stringify(workflow.data, null, 2));
+  }
+}
+
 function printCountGroup(label, counts) {
   if (counts.size === 0) {
     return;
@@ -406,8 +575,14 @@ function usage() {
     [--source-system name] [--session-id id] [--tool name]
   cortex memory search "query" [-n limit] [-p project] [-r repo] [-s scope] [--include-pending]
   cortex memory recall "query" [-n limit] [-p project] [-r repo] [-s scope] [--include-pending]
+  cortex memory sync run --source opencode (--file PATH|-)
+    [-t title] [-p project] [-r repo] [-s personal|team|global] [-k kind]
+    [--session-id id] [--tool name]
   cortex session list
   cortex session archive SESSION_ID
+  cortex workflow list [--type TYPE] [--status running|completed|failed|cancelled]
+    [-p project] [--source-system name] [--session-id id] [-n limit]
+  cortex workflow show WORKFLOW_ID
   cortex activity report [--range today|yesterday|last-week|last-month]
     [--created-after ISO] [--created-before ISO] [--jira-key KEY]
     [--team-name NAME] [--project-key KEY] [--owner EMAIL] [--member EMAIL]

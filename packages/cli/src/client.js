@@ -279,6 +279,44 @@ export async function activityReport(options, fetchImpl = fetch) {
   return payload;
 }
 
+export async function workflowList(options, fetchImpl = fetch) {
+  const params = new URLSearchParams();
+  for (const key of [
+    'workflowType',
+    'status',
+    'project',
+    'sourceSystem',
+    'sourceSessionId',
+    'limit',
+  ]) {
+    if (options[key] !== undefined) {
+      params.set(key, String(options[key]));
+    }
+  }
+  const suffix = params.size > 0 ? `?${params.toString()}` : '';
+  const response = await fetchImpl(
+    `${options.runtimeUrl.replace(/\/$/, '')}/api/workflows${suffix}`,
+    { headers: { Authorization: `Bearer ${options.idToken}` } },
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.message ?? payload.error ?? 'workflow list failed');
+  }
+  return payload;
+}
+
+export async function workflowShow(options, fetchImpl = fetch) {
+  const response = await fetchImpl(
+    `${options.runtimeUrl.replace(/\/$/, '')}/api/workflows/${encodeURIComponent(options.workflowId)}`,
+    { headers: { Authorization: `Bearer ${options.idToken}` } },
+  );
+  const payload = await response.json();
+  if (!response.ok) {
+    throw new Error(payload.message ?? payload.error ?? 'workflow show failed');
+  }
+  return payload;
+}
+
 export function isExpired(isoTimestamp, now = Date.now()) {
   return !isoTimestamp || new Date(isoTimestamp).getTime() <= now + 30_000;
 }

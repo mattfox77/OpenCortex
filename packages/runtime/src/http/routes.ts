@@ -44,6 +44,10 @@ import {
   type JiraSessionLinkConfidence,
   type JiraSessionLinkSource,
 } from '../jira/jiraTrackingStore.js';
+import {
+  type WorkflowProjectionStatus,
+  type WorkflowProjectionStore,
+} from '../workflows/workflowProjectionStore.js';
 
 const tokenExchangeResponseSchema = z.object({
   id_token: z.string().optional(),
@@ -52,6 +56,22 @@ const tokenExchangeResponseSchema = z.object({
   token_type: z.string().optional(),
   error: z.string().optional(),
   error_description: z.string().optional(),
+});
+
+const workflowStatusSchema = z.enum([
+  'running',
+  'completed',
+  'failed',
+  'cancelled',
+]) satisfies z.ZodType<WorkflowProjectionStatus>;
+
+const workflowListQuerySchema = z.object({
+  workflowType: z.string().min(1).optional(),
+  status: workflowStatusSchema.optional(),
+  project: z.string().min(1).optional(),
+  sourceSystem: z.string().min(1).optional(),
+  sourceSessionId: z.string().min(1).optional(),
+  limit: z.coerce.number().int().positive().max(200).optional(),
 });
 
 export function publicRouter(config: AppConfig): express.Router {
@@ -149,6 +169,7 @@ export function apiRouter(
   pairPrompts: PairPromptStore,
   jiraTracking: JiraTrackingStore,
   openCodePromptClient: OpenCodePromptClient = new HttpOpenCodePromptClient(),
+  workflowProjections?: WorkflowProjectionStore,
 ): express.Router {
   const router = express.Router();
   const launcher = new SessionLauncher(config);
@@ -371,6 +392,48 @@ export function apiRouter(
       return res.status(404).json({ error: 'session_channel_not_found' });
     }
     return res.json({ channel });
+  });
+
+  router.get('/workflows', requireUser, async (req, res, next) => {
+    try {
+      const store = requireWorkflowProjectionStore(workflowProjections, res);
+      if (!store) {
+        return;
+      }
+      const query = workflowListQuerySchema.parse(req.query);
+      const workflows = await store.list({
+        ownerId: req.user!.email,
+        isSuperAdmin: Boolean(req.user!.isSuperAdmin),
+        limit: query.limit ?? 50,
+        workflowType: query.workflowType,
+        status: query.status,
+        project: query.project,
+        sourceSystem: query.sourceSystem,
+        sourceSessionId: query.sourceSessionId,
+      });
+      return res.json({ workflows });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/workflows/:id', requireUser, async (req, res, next) => {
+    try {
+      const store = requireWorkflowProjectionStore(workflowProjections, res);
+      if (!store) {
+        return;
+      }
+      const workflow = await store.get(String(req.params.id), {
+        ownerId: req.user!.email,
+        isSuperAdmin: Boolean(req.user!.isSuperAdmin),
+      });
+      if (!workflow) {
+        return res.status(404).json({ error: 'workflow_not_found' });
+      }
+      return res.json({ workflow });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   router.get('/code/sessions/:id/pair-prompts', requireUser, (req, res) => {
@@ -1040,6 +1103,20 @@ function requireMemoryStore(
   }
   res.status(503).json({
     error: 'memory_unavailable',
+    message: 'OPENCORTEX_MEMORY_DATABASE_URL is not configured.',
+  });
+  return undefined;
+}
+
+function requireWorkflowProjectionStore(
+  workflowProjections: WorkflowProjectionStore | undefined,
+  res: express.Response,
+): WorkflowProjectionStore | undefined {
+  if (workflowProjections) {
+    return workflowProjections;
+  }
+  res.status(503).json({
+    error: 'workflow_projection_unavailable',
     message: 'OPENCORTEX_MEMORY_DATABASE_URL is not configured.',
   });
   return undefined;

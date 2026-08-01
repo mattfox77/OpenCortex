@@ -18,6 +18,11 @@ import type {
   MemoryStore,
   SearchMemoryEntriesInput,
 } from '../src/memory/memoryStore.js';
+import type {
+  ListWorkflowProjectionsInput,
+  WorkflowProjection,
+  WorkflowProjectionStore,
+} from '../src/workflows/workflowProjectionStore.js';
 import type { AuthenticatedUser } from '../src/auth/types.js';
 import type { CodeSession } from '../src/code/sessionLauncher.js';
 
@@ -97,6 +102,27 @@ function startAppWithMemory(config: AppConfig, memory: MemoryStore) {
   return { listener, base };
 }
 
+function startAppWithWorkflowProjections(
+  config: AppConfig,
+  workflowProjections: WorkflowProjectionStore,
+) {
+  const app = createApp(
+    config,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    workflowProjections,
+  );
+  const listener = app.listen(0);
+  const address = listener.address();
+  if (!address || typeof address === 'string')
+    throw new Error('Expected TCP listener');
+  const base = `http://127.0.0.1:${address.port}`;
+  return { listener, base };
+}
+
 function listenOnEphemeralPort(): Promise<number> {
   return new Promise((resolve, reject) => {
     const srv = net.createServer();
@@ -152,6 +178,28 @@ function codeSession(overrides: Partial<CodeSession>): CodeSession {
     urlPath: '/diwan/code/session/live/',
     command: ['opencode', 'web'],
     mode: 'sudo',
+    ...overrides,
+  };
+}
+
+function workflowProjection(
+  overrides: Partial<WorkflowProjection>,
+): WorkflowProjection {
+  return {
+    workflowId: 'workflow-1',
+    runId: 'run-1',
+    workflowType: 'MemoryIngestWorkflow',
+    status: 'completed',
+    ownerId: 'owner@acme.test',
+    project: 'runtime',
+    sourceSystem: 'opencode',
+    sourceSessionId: 'session-1',
+    artifactId: '00000000-0000-0000-0000-000000000001',
+    entryIds: ['00000000-0000-0000-0000-000000000002'],
+    summary: 'Ingested memory',
+    data: {},
+    completedAt: '2026-08-01T00:00:00.000Z',
+    updatedAt: '2026-08-01T00:00:00.000Z',
     ...overrides,
   };
 }
@@ -223,6 +271,34 @@ class FakeMemoryStore implements MemoryStore {
           (entry.identitySubject === input.identitySubject ||
             (!entry.identitySubject && entry.ownerId === input.ownerId)))) &&
       (input.query ? entry.content.includes(input.query) : true),
+    );
+  }
+}
+
+class FakeWorkflowProjectionStore implements WorkflowProjectionStore {
+  readonly lists: ListWorkflowProjectionsInput[] = [];
+
+  constructor(private readonly workflows: WorkflowProjection[]) {}
+
+  async list(input: ListWorkflowProjectionsInput): Promise<WorkflowProjection[]> {
+    this.lists.push(input);
+    return this.workflows.filter(workflow =>
+      (input.isSuperAdmin || workflow.ownerId === input.ownerId) &&
+      (!input.workflowType || workflow.workflowType === input.workflowType) &&
+      (!input.status || workflow.status === input.status) &&
+      (!input.project || workflow.project === input.project) &&
+      (!input.sourceSystem || workflow.sourceSystem === input.sourceSystem) &&
+      (!input.sourceSessionId || workflow.sourceSessionId === input.sourceSessionId),
+    ).slice(0, input.limit);
+  }
+
+  async get(
+    workflowId: string,
+    input: { ownerId: string; isSuperAdmin: boolean },
+  ): Promise<WorkflowProjection | undefined> {
+    return this.workflows.find(workflow =>
+      workflow.workflowId === workflowId &&
+      (input.isSuperAdmin || workflow.ownerId === input.ownerId),
     );
   }
 }
@@ -515,6 +591,75 @@ describe('http app', () => {
       ownerId: 'owner@acme.test',
       identitySubject: 'dev:owner@acme.test',
     });
+  });
+
+  it('lists workflow projections through authenticated runtime API', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const workflowStore = new FakeWorkflowProjectionStore([
+      workflowProjection({
+        workflowId: 'workflow-1',
+        ownerId: 'owner@acme.test',
+        project: 'runtime',
+      }),
+      workflowProjection({
+        workflowId: 'workflow-2',
+        ownerId: 'other@acme.test',
+        project: 'runtime',
+      }),
+    ]);
+    const { listener, base } = startAppWithWorkflowProjections(config, workflowStore);
+    server = listener;
+
+    const response = await fetch(
+      `${base}/diwan/api/workflows?workflowType=MemoryIngestWorkflow&status=completed&project=runtime&limit=5`,
+      { headers: { Authorization: 'Dev owner@acme.test' } },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.workflows).toMatchObject([
+      {
+        workflowId: 'workflow-1',
+        ownerId: 'owner@acme.test',
+        workflowType: 'MemoryIngestWorkflow',
+        status: 'completed',
+      },
+    ]);
+    expect(workflowStore.lists[0]).toMatchObject({
+      ownerId: 'owner@acme.test',
+      isSuperAdmin: false,
+      workflowType: 'MemoryIngestWorkflow',
+      status: 'completed',
+      project: 'runtime',
+      limit: 5,
+    });
+  });
+
+  it('shows owned workflow projections and hides other users projections', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const workflowStore = new FakeWorkflowProjectionStore([
+      workflowProjection({
+        workflowId: 'workflow-1',
+        ownerId: 'owner@acme.test',
+      }),
+    ]);
+    const { listener, base } = startAppWithWorkflowProjections(config, workflowStore);
+    server = listener;
+
+    const visible = await fetch(`${base}/diwan/api/workflows/workflow-1`, {
+      headers: { Authorization: 'Dev owner@acme.test' },
+    });
+    const hidden = await fetch(`${base}/diwan/api/workflows/workflow-1`, {
+      headers: { Authorization: 'Dev other@acme.test' },
+    });
+
+    expect(visible.status).toBe(200);
+    const visibleBody = await visible.json();
+    expect(visibleBody.workflow).toMatchObject({
+      workflowId: 'workflow-1',
+      ownerId: 'owner@acme.test',
+    });
+    expect(hidden.status).toBe(404);
   });
 
   it('requires auth to list code sessions', async () => {
