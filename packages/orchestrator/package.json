@@ -9,6 +9,7 @@
     "task": "ts-node scripts/start-task.ts",
     "monitor": "ts-node scripts/start-task.ts --monitor",
     "workbench-session": "ts-node scripts/start-workbench-session.ts",
+    "workbench-session:signal": "ts-node scripts/signal-workbench-session.ts",
     "ingest": "ts-node scripts/ingest-memory.ts",
     "provision-user": "ts-node scripts/provision-user.ts",
     "activity-rollup": "ts-node scripts/activity-rollup.ts",

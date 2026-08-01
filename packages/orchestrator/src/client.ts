@@ -10,6 +10,10 @@ import {
   approveSignal,
   feedbackSignal,
   cancelSignal,
+  stopSessionSignal,
+  archiveSessionSignal,
+  attachIssueSignal,
+  sendPairPromptSignal,
   statusQuery,
 } from './workflows';
 import type { CortexTaskInput } from './workflows/cortex';
@@ -271,4 +275,38 @@ export async function startWorkbenchSession(
   console.log(`✅ Started workbench session workflow: ${workflowId}`);
   console.log(`   Trace: ${traceContext.traceId}`);
   return handle;
+}
+
+export async function stopWorkbenchSession(workflowId: string, reason?: string) {
+  const client = await getClient();
+  const handle = client.workflow.getHandle(workflowId);
+  await handle.signal(stopSessionSignal, { reason });
+  console.log(`🛑 Stop signal sent to workbench session workflow: ${workflowId}`);
+}
+
+export async function archiveWorkbenchSession(workflowId: string, reason?: string) {
+  const client = await getClient();
+  const handle = client.workflow.getHandle(workflowId);
+  await handle.signal(archiveSessionSignal, { reason });
+  console.log(`🗄️ Archive signal sent to workbench session workflow: ${workflowId}`);
+}
+
+export async function attachWorkbenchIssue(
+  workflowId: string,
+  params: { issueKey: string; url?: string },
+) {
+  const client = await getClient();
+  const handle = client.workflow.getHandle(workflowId);
+  await handle.signal(attachIssueSignal, params);
+  console.log(`🔗 Issue signal sent to workbench session workflow: ${workflowId}`);
+}
+
+export async function sendWorkbenchPairPrompt(
+  workflowId: string,
+  params: { prompt: string; threadId?: string },
+) {
+  const client = await getClient();
+  const handle = client.workflow.getHandle(workflowId);
+  await handle.signal(sendPairPromptSignal, params);
+  console.log(`💬 Pair prompt signal sent to workbench session workflow: ${workflowId}`);
 }
