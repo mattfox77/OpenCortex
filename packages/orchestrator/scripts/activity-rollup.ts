@@ -6,6 +6,7 @@
 import { readFileSync } from 'fs';
 import { startActivityRollup } from '../src/client';
 import type { ActivityRollupEvent } from '../src/workflows/activityRollup';
+import { newTraceContext, withTraceSpan } from '../src/telemetry';
 
 async function main() {
   const args = process.argv.slice(2);
@@ -13,6 +14,8 @@ async function main() {
   let rangeStart = '';
   let rangeEnd = '';
   let enabled = process.env.OPENCORTEX_ACTIVITY_LEDGER_ENABLED === 'true';
+  let ownerId = process.env.OPENCORTEX_OWNER_ID ?? process.env.OWNER_ID ?? 'system';
+  let project: string | undefined;
   let queue: string | undefined;
   let workflowId: string | undefined;
 
@@ -32,6 +35,13 @@ async function main() {
         break;
       case '--disabled':
         enabled = false;
+        break;
+      case '--owner':
+      case '--owner-id':
+        ownerId = args[++i] ?? ownerId;
+        break;
+      case '--project':
+        project = args[++i];
         break;
       case '--queue':
         queue = args[++i];
@@ -58,6 +68,8 @@ Options:
   --range-end <iso>        Exclusive range end
   --enabled                Run rollup even when OPENCORTEX_ACTIVITY_LEDGER_ENABLED is not true
   --disabled               Start workflow with policy.enabled=false
+  --owner <id>             Owner for workflow projection (default: OPENCORTEX_OWNER_ID or system)
+  --project <name>         Optional project for workflow projection
   --queue <queue>          Temporal task queue (default: cortex-tasks)
   --workflow-id <id>       Deterministic workflow id for idempotent starts
 `);
@@ -66,15 +78,25 @@ Options:
 
   const payload = file ? readFileSync(file, 'utf8') : readFileSync(0, 'utf8');
   const events = parseEvents(payload);
-  const handle = await startActivityRollup({
-    policy: { enabled },
-    rangeStart,
-    rangeEnd,
-    events,
-    queue,
-    workflowId,
+  const traceContext = newTraceContext();
+  const result = await withTraceSpan('opencortex.activity.rollup_request', traceContext, {
+    'workflow.type': 'ActivityRollupWorkflow',
+    'activity.owner_id': ownerId,
+    'activity.project': project,
+  }, async (requestTraceContext) => {
+    const handle = await startActivityRollup({
+      policy: { enabled },
+      rangeStart,
+      rangeEnd,
+      events,
+      ownerId,
+      project,
+      queue,
+      workflowId,
+      traceContext: requestTraceContext ?? traceContext,
+    });
+    return handle.result();
   });
-  const result = await handle.result();
   console.log(JSON.stringify(result, null, 2));
 }
 

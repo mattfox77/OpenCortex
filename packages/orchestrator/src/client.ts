@@ -225,6 +225,9 @@ export async function startActivityRollup(
       rangeStart: params.rangeStart,
       rangeEnd: params.rangeEnd,
       events: params.events,
+      ownerId: params.ownerId,
+      project: params.project,
+      traceContext: params.traceContext,
     }],
   });
 
