@@ -56,6 +56,10 @@ export async function activityRollupWorkflow(
 
   const rangeStart = Date.parse(input.rangeStart);
   const rangeEnd = Date.parse(input.rangeEnd);
+  if (!Number.isFinite(rangeStart) || !Number.isFinite(rangeEnd) || rangeEnd < rangeStart) {
+    throw new TypeError('Activity rollup range must be valid and ordered');
+  }
+
   const buckets = new Map<string, ActivityRollupBucket>();
   for (const event of input.events) {
     const startedAt = Date.parse(event.startedAt);

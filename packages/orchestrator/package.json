@@ -10,6 +10,7 @@
     "monitor": "ts-node scripts/start-task.ts --monitor",
     "ingest": "ts-node scripts/ingest-memory.ts",
     "provision-user": "ts-node scripts/provision-user.ts",
+    "activity-rollup": "ts-node scripts/activity-rollup.ts",
     "rebuild-projection": "ts-node scripts/rebuild-projection.ts",
     "test:replay": "ts-node scripts/replay-memory-ingest.ts",
     "build": "tsc -p tsconfig.json",

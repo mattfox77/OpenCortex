@@ -5,6 +5,7 @@ import {
   cortexMonitor,
   memoryIngestWorkflow,
   userProvisioningWorkflow,
+  activityRollupWorkflow,
   approveSignal,
   feedbackSignal,
   cancelSignal,
@@ -13,6 +14,7 @@ import {
 import type { CortexTaskInput } from './workflows/cortex';
 import type { MemoryIngestInput } from './workflows/memoryIngest';
 import type { UserProvisioningInput } from './workflows/userProvisioning';
+import type { ActivityRollupInput } from './workflows/activityRollup';
 import { newTraceContext, withTraceSpan } from './telemetry';
 import * as dotenv from 'dotenv';
 
@@ -200,5 +202,32 @@ export async function startUserProvisioning(
 
   console.log(`✅ Started user provisioning workflow: ${workflowId}`);
   console.log(`   Trace: ${traceContext.traceId}`);
+  return handle;
+}
+
+// --- Start an activity rollup workflow ---
+export async function startActivityRollup(
+  params: ActivityRollupInput & {
+    queue?: string;
+    workflowId?: string;
+  },
+) {
+  const client = await getClient();
+  const workflowId =
+    params.workflowId ??
+    `activity-rollup-${params.rangeStart.slice(0, 10)}-${Date.now()}`;
+
+  const handle = await client.workflow.start(activityRollupWorkflow, {
+    taskQueue: params.queue || 'cortex-tasks',
+    workflowId,
+    args: [{
+      policy: params.policy,
+      rangeStart: params.rangeStart,
+      rangeEnd: params.rangeEnd,
+      events: params.events,
+    }],
+  });
+
+  console.log(`✅ Started activity rollup workflow: ${workflowId}`);
   return handle;
 }

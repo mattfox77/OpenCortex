@@ -84,3 +84,16 @@ test("rolls up enabled activity by actor project and kind", () => {
     },
   ]);
 });
+
+test("rejects invalid enabled rollup ranges", () => {
+  assert.throws(
+    () =>
+      rollupActivity({
+        policy: { enabled: true },
+        rangeStart: "2026-08-02T00:00:00.000Z",
+        rangeEnd: "2026-08-01T00:00:00.000Z",
+        events: [],
+      }),
+    /valid and ordered/,
+  );
+});
