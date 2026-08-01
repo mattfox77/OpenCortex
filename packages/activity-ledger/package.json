@@ -2,5 +2,25 @@
   "name": "@opencortex/activity-ledger",
   "version": "0.1.0",
   "private": true,
-  "description": "Optional activity, attribution, and billing rollups for OpenCortex"
+  "description": "Optional activity, attribution, and billing rollups for OpenCortex",
+  "type": "module",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.js"
+    }
+  },
+  "scripts": {
+    "build": "tsc -p tsconfig.json",
+    "check": "npm run build && npm test",
+    "test": "node --test test/*.test.mjs",
+    "prepare": "npm run build"
+  },
+  "engines": {
+    "node": ">=22"
+  },
+  "devDependencies": {
+    "@types/node": "^24.10.1",
+    "typescript": "^5.9.3"
+  }
 }

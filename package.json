@@ -14,8 +14,8 @@
     "packages/ui"
   ],
   "scripts": {
-    "build": "npm --prefix packages/orchestrator run build && npm --prefix packages/workbench run build && npm --prefix packages/skills run build && npm --prefix packages/cli run build && npm --prefix packages/runtime run build",
-    "check": "npm --prefix packages/orchestrator run check && npm --prefix packages/workbench run check && npm --prefix packages/skills run check && npm --prefix packages/cli run check && npm --prefix packages/runtime run check && npm --prefix packages/memory run check && node scripts/config-inventory.mjs && node scripts/check-deploy-profile.mjs && npm run audit",
+    "build": "npm --prefix packages/orchestrator run build && npm --prefix packages/workbench run build && npm --prefix packages/skills run build && npm --prefix packages/activity-ledger run build && npm --prefix packages/cli run build && npm --prefix packages/runtime run build",
+    "check": "npm --prefix packages/orchestrator run check && npm --prefix packages/workbench run check && npm --prefix packages/skills run check && npm --prefix packages/activity-ledger run check && npm --prefix packages/cli run check && npm --prefix packages/runtime run check && npm --prefix packages/memory run check && node scripts/config-inventory.mjs && node scripts/check-deploy-profile.mjs && npm run audit",
     "audit": "npm --prefix packages/runtime audit",
     "memory:check": "npm --prefix packages/memory run check",
     "memory:migrate": "npm --prefix packages/memory run migrate",
@@ -23,6 +23,7 @@
     "runtime:check": "npm --prefix packages/runtime run check",
     "runtime:test": "npm --prefix packages/runtime test",
     "skills:check": "npm --prefix packages/skills run check",
+    "activity-ledger:check": "npm --prefix packages/activity-ledger run check",
     "workbench:check": "npm --prefix packages/workbench run check",
     "config:inventory": "node scripts/config-inventory.mjs",
     "deploy:check": "node scripts/check-deploy-profile.mjs",

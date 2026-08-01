@@ -87,6 +87,21 @@ describe('runtime config compatibility', () => {
     expect(config.SLACK_WORKSPACE_URL).toBe('');
     expect(config.SLACK_SESSION_CHANNEL_PREFIX).toBe('opencortex');
   });
+
+  it('keeps activity ledger opt-in and default off', () => {
+    const disabled = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+    });
+    const enabled = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      OPENCORTEX_ACTIVITY_LEDGER_ENABLED: 'true',
+    });
+
+    expect(disabled.OPENCORTEX_ACTIVITY_LEDGER_ENABLED).toBe(false);
+    expect(enabled.OPENCORTEX_ACTIVITY_LEDGER_ENABLED).toBe(true);
+  });
 });
 
 function requiredAuthEnv(): NodeJS.ProcessEnv {
