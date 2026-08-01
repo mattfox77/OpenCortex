@@ -29,7 +29,10 @@
     "deploy:check": "node scripts/check-deploy-profile.mjs",
     "orchestrator:worker": "npm --prefix packages/orchestrator run worker",
     "orchestrator:task": "npm --prefix packages/orchestrator run task",
-    "orchestrator:monitor": "npm --prefix packages/orchestrator run monitor"
+    "orchestrator:monitor": "npm --prefix packages/orchestrator run monitor",
+    "orchestrator:ingest": "npm --prefix packages/orchestrator run ingest",
+    "orchestrator:provision-user": "npm --prefix packages/orchestrator run provision-user",
+    "orchestrator:activity-rollup": "npm --prefix packages/orchestrator run activity-rollup"
   },
   "keywords": [
     "opencortex",
