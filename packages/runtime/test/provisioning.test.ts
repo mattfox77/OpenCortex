@@ -14,6 +14,8 @@ const config = {
   OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL: 'http://127.0.0.1:8080/api',
   OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL: '30 seconds',
   OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES: 0,
+  OPENCORTEX_REVIEW_MODE: 'local',
+  OPENCORTEX_REVIEW_TASK_QUEUE: 'cortex-tasks',
   OPENCORTEX_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
 } as AppConfig;
 

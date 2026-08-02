@@ -9,12 +9,15 @@ import {
   activeCodeThread,
   archiveWorkbenchSessionWorkflow,
   attachWorkbenchIssueWorkflow,
+  reviewMemoryEntryWorkflow,
   SessionLauncher,
   sendWorkbenchPairPromptWorkflow,
   sessionWithActiveThread,
   startWorkbenchSessionWorkflow,
   type CodeSession,
   type CodeThread,
+  type ReviewWorkflowDecision,
+  type ReviewWorkflowStart,
   type WorkbenchSessionWorkflowSignal,
   type WorkbenchSessionWorkflowStart,
 } from '../code/sessionLauncher.js';
@@ -113,6 +116,18 @@ export type WorkbenchSessionWorkflowPairPromptSender = (
   workflowId: string,
   params: { prompt: string; threadId?: string },
 ) => Promise<WorkbenchSessionWorkflowSignal>;
+
+export type ReviewWorkflowStarter = (
+  config: AppConfig,
+  params: {
+    entryId: string;
+    ownerId: string;
+    review: ReviewWorkflowDecision;
+    reviewerEmail: string;
+    notes?: string;
+    project?: string;
+  },
+) => Promise<ReviewWorkflowStart>;
 
 export function publicRouter(config: AppConfig): express.Router {
   const router = express.Router();
@@ -1141,6 +1156,7 @@ export function runtimeWorkbenchRouter(
 export function memoryRouter(
   config: AppConfig,
   memory: MemoryStore | undefined,
+  reviewWorkflowStarter: ReviewWorkflowStarter = reviewMemoryEntryWorkflow,
 ): express.Router {
   const router = express.Router();
 
@@ -1237,10 +1253,6 @@ export function memoryRouter(
     requireInternalToken(config, ['memory:write']),
     async (req, res, next) => {
       try {
-        const store = requireMemoryStore(memory, res);
-        if (!store) {
-          return;
-        }
         const body = z
           .object({
             review: memoryReviewSchema,
@@ -1249,6 +1261,28 @@ export function memoryRouter(
           .parse(req.body);
         const params = z.object({ id: z.string().min(1) }).parse(req.params);
         const token = res.locals.internalToken as VerifiedInternalToken;
+        if (config.OPENCORTEX_REVIEW_MODE === 'workflow') {
+          const review = reviewWorkflowDecision(body.review);
+          if (!review) {
+            return res.status(400).json({
+              error: 'unsupported_review_workflow_transition',
+              message:
+                'Review workflow mode supports approved, rejected, noise, and changes_requested.',
+            });
+          }
+          const workflow = await reviewWorkflowStarter(config, {
+            entryId: params.id,
+            ownerId: token.ownerEmail,
+            review,
+            reviewerEmail: token.ownerEmail,
+            notes: body.notes,
+          });
+          return res.status(202).json({ workflow });
+        }
+        const store = requireMemoryStore(memory, res);
+        if (!store) {
+          return;
+        }
         const entry = await store.reviewEntry({
           entryId: params.id,
           ownerId: token.ownerEmail,
@@ -1268,6 +1302,21 @@ export function memoryRouter(
   );
 
   return router;
+}
+
+function reviewWorkflowDecision(
+  review: MemoryEntryReview,
+): ReviewWorkflowDecision | undefined {
+  switch (review) {
+    case 'approved':
+    case 'rejected':
+    case 'noise':
+    case 'changes_requested':
+      return review;
+    case 'pending':
+    case 'archived':
+      return undefined;
+  }
 }
 
 function requireInternalToken(

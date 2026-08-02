@@ -54,6 +54,8 @@ const schema = z.object({
   OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL: z.string().default('http://127.0.0.1:8080/api'),
   OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL: z.string().default('30 seconds'),
   OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES: z.coerce.number().int().min(0).default(0),
+  OPENCORTEX_REVIEW_MODE: z.enum(['local', 'workflow']).default('local'),
+  OPENCORTEX_REVIEW_TASK_QUEUE: z.string().default('cortex-tasks'),
   OPENCORTEX_PROVISION_USER_MODE: z.enum(['local', 'workflow']).default('local'),
   OPENCORTEX_PROVISION_USER_SCRIPT: z
     .string()
@@ -109,6 +111,8 @@ function normalizeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
     'OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES',
     'DIWAN_WORKBENCH_SESSION_MAX_PROBES',
   );
+  applyAlias(normalized, 'OPENCORTEX_REVIEW_MODE', 'DIWAN_REVIEW_MODE');
+  applyAlias(normalized, 'OPENCORTEX_REVIEW_TASK_QUEUE', 'DIWAN_REVIEW_TASK_QUEUE');
   applyAlias(normalized, 'OPENCORTEX_PROVISION_USER_MODE', 'DIWAN_PROVISION_USER_MODE');
   applyAlias(normalized, 'OPENCORTEX_PROVISION_USER_SCRIPT', 'DIWAN_PROVISION_USER_SCRIPT');
   applyAlias(normalized, 'OPENCORTEX_PROVISIONING_TASK_QUEUE', 'DIWAN_PROVISIONING_TASK_QUEUE');

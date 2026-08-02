@@ -242,6 +242,13 @@ type WorkbenchSessionWorkflowConfig = Pick<
   | 'TEMPORAL_NAMESPACE'
 >;
 
+type ReviewWorkflowConfig = Pick<
+  AppConfig,
+  | 'OPENCORTEX_REVIEW_TASK_QUEUE'
+  | 'TEMPORAL_ADDRESS'
+  | 'TEMPORAL_NAMESPACE'
+>;
+
 export interface WorkbenchSessionWorkflowStart {
   workflowId: string;
   runId: string;
@@ -250,6 +257,18 @@ export interface WorkbenchSessionWorkflowStart {
 export interface WorkbenchSessionWorkflowSignal {
   workflowId: string;
   signal: 'archiveSession' | 'attachIssue' | 'sendPairPrompt';
+}
+
+export type ReviewWorkflowDecision =
+  | 'approved'
+  | 'rejected'
+  | 'noise'
+  | 'changes_requested';
+
+export interface ReviewWorkflowStart {
+  workflowId: string;
+  runId: string;
+  signal: 'approve' | 'reject' | 'markNoise' | 'requestChanges';
 }
 
 export async function provisionLocalUser(
@@ -402,6 +421,66 @@ export async function sendWorkbenchPairPromptWorkflow(
     };
   } finally {
     await connection.close();
+  }
+}
+
+export async function reviewMemoryEntryWorkflow(
+  config: ReviewWorkflowConfig,
+  params: {
+    entryId: string;
+    ownerId: string;
+    review: ReviewWorkflowDecision;
+    reviewerEmail: string;
+    notes?: string;
+    project?: string;
+  },
+): Promise<ReviewWorkflowStart> {
+  const signal = reviewWorkflowSignal(params.review);
+  const connection = await Connection.connect({
+    address: config.TEMPORAL_ADDRESS,
+  });
+  try {
+    const client = new Client({
+      connection,
+      namespace: config.TEMPORAL_NAMESPACE,
+    });
+    const workflowId = `review-${params.entryId}-${Date.now()}`;
+    const handle = await client.workflow.start('reviewWorkflow', {
+      taskQueue: config.OPENCORTEX_REVIEW_TASK_QUEUE,
+      workflowId,
+      args: [{
+        entryId: params.entryId,
+        ownerId: params.ownerId,
+        reviewerEmail: params.reviewerEmail,
+        project: params.project,
+      }],
+    });
+    await handle.signal(signal, {
+      reviewerEmail: params.reviewerEmail,
+      notes: params.notes,
+    });
+    return {
+      workflowId,
+      runId: handle.firstExecutionRunId,
+      signal,
+    };
+  } finally {
+    await connection.close();
+  }
+}
+
+function reviewWorkflowSignal(
+  review: ReviewWorkflowDecision,
+): ReviewWorkflowStart['signal'] {
+  switch (review) {
+    case 'approved':
+      return 'approve';
+    case 'rejected':
+      return 'reject';
+    case 'noise':
+      return 'markNoise';
+    case 'changes_requested':
+      return 'requestChanges';
   }
 }
 

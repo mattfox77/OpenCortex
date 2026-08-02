@@ -177,6 +177,32 @@ describe('runtime config compatibility', () => {
     expect(legacy.OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL).toBe('10 seconds');
     expect(legacy.OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES).toBe(2);
   });
+
+  it('keeps review workflow integration opt-in', () => {
+    const local = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+    });
+    const workflow = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      OPENCORTEX_REVIEW_MODE: 'workflow',
+      OPENCORTEX_REVIEW_TASK_QUEUE: 'review-decisions',
+    });
+    const legacy = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      DIWAN_REVIEW_MODE: 'workflow',
+      DIWAN_REVIEW_TASK_QUEUE: 'legacy-review-decisions',
+    });
+
+    expect(local.OPENCORTEX_REVIEW_MODE).toBe('local');
+    expect(local.OPENCORTEX_REVIEW_TASK_QUEUE).toBe('cortex-tasks');
+    expect(workflow.OPENCORTEX_REVIEW_MODE).toBe('workflow');
+    expect(workflow.OPENCORTEX_REVIEW_TASK_QUEUE).toBe('review-decisions');
+    expect(legacy.OPENCORTEX_REVIEW_MODE).toBe('workflow');
+    expect(legacy.OPENCORTEX_REVIEW_TASK_QUEUE).toBe('legacy-review-decisions');
+  });
 });
 
 function requiredAuthEnv(): NodeJS.ProcessEnv {

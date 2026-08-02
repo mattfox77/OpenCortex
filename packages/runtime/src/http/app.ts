@@ -12,6 +12,7 @@ import {
   publicRouter,
   rawOpenCodeSessionRedirect,
   runtimeWorkbenchRouter,
+  type ReviewWorkflowStarter,
   type WorkbenchSessionWorkflowArchiver,
   type WorkbenchSessionWorkflowIssueAttacher,
   type WorkbenchSessionWorkflowPairPromptSender,
@@ -42,6 +43,7 @@ export function createApp(
   workbenchSessionWorkflowArchiver?: WorkbenchSessionWorkflowArchiver,
   workbenchSessionWorkflowIssueAttacher?: WorkbenchSessionWorkflowIssueAttacher,
   workbenchSessionWorkflowPairPromptSender?: WorkbenchSessionWorkflowPairPromptSender,
+  reviewWorkflowStarter?: ReviewWorkflowStarter,
 ): express.Express {
   const app = express();
   const mountPath = config.OPENCORTEX_BASE_PATH || '/';
@@ -74,7 +76,7 @@ export function createApp(
     res.json({ ok: true, service: 'opencortex-runtime' }),
   );
   mounted.use('/api', publicRouter(config));
-  mounted.use('/api/memory', memoryRouter(config, memory));
+  mounted.use('/api/memory', memoryRouter(config, memory, reviewWorkflowStarter));
   mounted.use('/api/runtime', runtimeWorkbenchRouter(config, codeSessions, chat));
   mounted.use(
     '/api',

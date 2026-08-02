@@ -27,6 +27,7 @@ import type {
 import type { AuthenticatedUser } from '../src/auth/types.js';
 import type { CodeSession } from '../src/code/sessionLauncher.js';
 import type {
+  ReviewWorkflowStarter,
   WorkbenchSessionWorkflowArchiver,
   WorkbenchSessionWorkflowIssueAttacher,
   WorkbenchSessionWorkflowPairPromptSender,
@@ -69,6 +70,8 @@ function testConfig(): AppConfig {
     OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL: 'http://127.0.0.1:8080/api',
     OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL: '30 seconds',
     OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES: 0,
+    OPENCORTEX_REVIEW_MODE: 'local',
+    OPENCORTEX_REVIEW_TASK_QUEUE: 'cortex-tasks',
     OPENCORTEX_PROVISION_USER_MODE: 'local',
     OPENCORTEX_PROVISIONING_TASK_QUEUE: 'cortex-tasks',
     OPENCORTEX_PROVISIONING_REQUIRED_TOOLS: ['node', 'npm', 'git', 'opencode', 'cortex'],
@@ -108,6 +111,33 @@ function startAppWithMemory(config: AppConfig, memory: MemoryStore) {
     undefined,
     undefined,
     memory,
+  );
+  const listener = app.listen(0);
+  const address = listener.address();
+  if (!address || typeof address === 'string')
+    throw new Error('Expected TCP listener');
+  const base = `http://127.0.0.1:${address.port}`;
+  return { listener, base };
+}
+
+function startAppWithMemoryReviewWorkflow(
+  config: AppConfig,
+  memory: MemoryStore,
+  reviewWorkflowStarter: ReviewWorkflowStarter,
+) {
+  const app = createApp(
+    config,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    memory,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    undefined,
+    reviewWorkflowStarter,
   );
   const listener = app.listen(0);
   const address = listener.address();
@@ -630,6 +660,66 @@ describe('http app', () => {
         notes: 'looks correct',
       }),
     ]);
+  });
+
+  it('starts ReviewWorkflow for memory review decisions in workflow mode', async () => {
+    const config: AppConfig = {
+      ...testConfig(),
+      NODE_ENV: 'development',
+      OPENCORTEX_REVIEW_MODE: 'workflow',
+    };
+    const memory = new FakeMemoryStore();
+    const starts: Parameters<ReviewWorkflowStarter>[1][] = [];
+    const reviewWorkflowStarter: ReviewWorkflowStarter = async (_config, params) => {
+      starts.push(params);
+      return {
+        workflowId: 'review-entry-1',
+        runId: 'run-review-1',
+        signal: 'approve',
+      };
+    };
+    const { listener, base } = startAppWithMemoryReviewWorkflow(
+      config,
+      memory,
+      reviewWorkflowStarter,
+    );
+    server = listener;
+    const minted = await mintInternalToken({
+      user: authUser('owner@acme.test'),
+      scopes: ['memory:write'],
+      secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+    });
+
+    const response = await fetch(`${base}/diwan/api/memory/entries/entry-1/review`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${minted.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        review: 'approved',
+        notes: 'reviewed by workflow',
+      }),
+    });
+
+    expect(response.status).toBe(202);
+    await expect(response.json()).resolves.toEqual({
+      workflow: {
+        workflowId: 'review-entry-1',
+        runId: 'run-review-1',
+        signal: 'approve',
+      },
+    });
+    expect(starts).toEqual([
+      {
+        entryId: 'entry-1',
+        ownerId: 'owner@acme.test',
+        review: 'approved',
+        reviewerEmail: 'owner@acme.test',
+        notes: 'reviewed by workflow',
+      },
+    ]);
+    expect(memory.reviews).toHaveLength(0);
   });
 
   it('isolates personal memory by internal-token identity subject', async () => {
