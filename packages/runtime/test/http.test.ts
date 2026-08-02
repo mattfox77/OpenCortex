@@ -25,6 +25,7 @@ import type {
 } from '../src/workflows/workflowProjectionStore.js';
 import type { AuthenticatedUser } from '../src/auth/types.js';
 import type { CodeSession } from '../src/code/sessionLauncher.js';
+import type { WorkbenchSessionWorkflowStarter } from '../src/http/routes.js';
 
 let server: Server | undefined;
 const backendListeners: net.Server[] = [];
@@ -113,6 +114,7 @@ function startAppWithMemory(config: AppConfig, memory: MemoryStore) {
 function startAppWithWorkflowProjections(
   config: AppConfig,
   workflowProjections: WorkflowProjectionStore,
+  workbenchSessionWorkflowStarter?: WorkbenchSessionWorkflowStarter,
 ) {
   const app = createApp(
     config,
@@ -122,6 +124,7 @@ function startAppWithWorkflowProjections(
     undefined,
     undefined,
     workflowProjections,
+    workbenchSessionWorkflowStarter,
   );
   const listener = app.listen(0);
   const address = listener.address();
@@ -668,6 +671,65 @@ describe('http app', () => {
       ownerId: 'owner@acme.test',
     });
     expect(hidden.status).toBe(404);
+  });
+
+  it('starts WorkbenchSessionWorkflow and returns its projection row in workflow mode', async () => {
+    const config: AppConfig = {
+      ...testConfig(),
+      NODE_ENV: 'development',
+      OPENCORTEX_WORKBENCH_SESSION_MODE: 'workflow',
+    };
+    const workflowStore = new FakeWorkflowProjectionStore([
+      workflowProjection({
+        workflowId: 'workbench-session-owner-1',
+        runId: 'run-workbench-1',
+        workflowType: 'WorkbenchSessionWorkflow',
+        status: 'running',
+        ownerId: 'owner@acme.test',
+        sourceSystem: 'opencortex-runtime',
+        sourceSessionId: 'session-owner',
+        entryIds: [],
+        summary: 'Workbench session session-owner running for owner@acme.test',
+        data: {
+          session: { id: 'session-owner' },
+        },
+      }),
+    ]);
+    const starts: Array<Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>> = [];
+    const starter: WorkbenchSessionWorkflowStarter = async (_config, user) => {
+      starts.push(user);
+      return {
+        workflowId: 'workbench-session-owner-1',
+        runId: 'run-workbench-1',
+      };
+    };
+    const { listener, base } = startAppWithWorkflowProjections(
+      config,
+      workflowStore,
+      starter,
+    );
+    server = listener;
+
+    const response = await fetch(`${base}/diwan/api/code/sessions`, {
+      method: 'POST',
+      headers: { Authorization: 'Dev owner@acme.test' },
+    });
+
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    expect(starts).toHaveLength(1);
+    expect(body.workflow).toEqual({
+      workflowId: 'workbench-session-owner-1',
+      runId: 'run-workbench-1',
+    });
+    expect(body.projection).toMatchObject({
+      workflowId: 'workbench-session-owner-1',
+      runId: 'run-workbench-1',
+      workflowType: 'WorkbenchSessionWorkflow',
+      status: 'running',
+      ownerId: 'owner@acme.test',
+      sourceSessionId: 'session-owner',
+    });
   });
 
   it('requires auth to list code sessions', async () => {

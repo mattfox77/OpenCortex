@@ -12,6 +12,7 @@ import {
   startWorkbenchSessionWorkflow,
   type CodeSession,
   type CodeThread,
+  type WorkbenchSessionWorkflowStart,
 } from '../code/sessionLauncher.js';
 import { isSessionRestorable, SessionStore } from '../code/sessionStore.js';
 import {
@@ -46,6 +47,7 @@ import {
   type JiraSessionLinkSource,
 } from '../jira/jiraTrackingStore.js';
 import {
+  type WorkflowProjection,
   type WorkflowProjectionStatus,
   type WorkflowProjectionStore,
 } from '../workflows/workflowProjectionStore.js';
@@ -74,6 +76,11 @@ const workflowListQuerySchema = z.object({
   sourceSessionId: z.string().min(1).optional(),
   limit: z.coerce.number().int().positive().max(200).optional(),
 });
+
+export type WorkbenchSessionWorkflowStarter = (
+  config: AppConfig,
+  user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
+) => Promise<WorkbenchSessionWorkflowStart>;
 
 export function publicRouter(config: AppConfig): express.Router {
   const router = express.Router();
@@ -171,6 +178,8 @@ export function apiRouter(
   jiraTracking: JiraTrackingStore,
   openCodePromptClient: OpenCodePromptClient = new HttpOpenCodePromptClient(),
   workflowProjections?: WorkflowProjectionStore,
+  workbenchSessionWorkflowStarter: WorkbenchSessionWorkflowStarter =
+    startWorkbenchSessionWorkflow,
 ): express.Router {
   const router = express.Router();
   const launcher = new SessionLauncher(config);
@@ -325,9 +334,15 @@ export function apiRouter(
   router.post('/code/sessions', requireUser, async (req, res, next) => {
     try {
       if (config.OPENCORTEX_WORKBENCH_SESSION_MODE === 'workflow') {
-        const workflow = await startWorkbenchSessionWorkflow(config, req.user!);
+        const workflow = await workbenchSessionWorkflowStarter(config, req.user!);
+        const projection = await workbenchSessionStartProjection(
+          workflowProjections,
+          workflow,
+          req.user!,
+        );
         return res.status(202).json({
           workflow,
+          projection,
           message: 'WorkbenchSessionWorkflow started.',
         });
       }
@@ -1194,6 +1209,35 @@ function requireWorkflowProjectionStore(
     message: 'OPENCORTEX_MEMORY_DATABASE_URL is not configured.',
   });
   return undefined;
+}
+
+async function workbenchSessionStartProjection(
+  workflowProjections: WorkflowProjectionStore | undefined,
+  workflow: WorkbenchSessionWorkflowStart,
+  user: AuthenticatedUser,
+): Promise<WorkflowProjection> {
+  const stored = await workflowProjections?.get(workflow.workflowId, {
+    ownerId: user.email,
+    isSuperAdmin: Boolean(user.isSuperAdmin),
+  });
+  if (stored) {
+    return stored;
+  }
+  const timestamp = new Date().toISOString();
+  return {
+    workflowId: workflow.workflowId,
+    runId: workflow.runId,
+    workflowType: 'WorkbenchSessionWorkflow',
+    status: 'running',
+    ownerId: user.email,
+    entryIds: [],
+    summary: `WorkbenchSessionWorkflow started for ${user.email}`,
+    data: {
+      pendingProjectionWrite: true,
+    },
+    startedAt: timestamp,
+    updatedAt: timestamp,
+  };
 }
 
 function optionalQuery(value: unknown): string | undefined {

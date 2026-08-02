@@ -12,6 +12,7 @@ import {
   publicRouter,
   rawOpenCodeSessionRedirect,
   runtimeWorkbenchRouter,
+  type WorkbenchSessionWorkflowStarter,
 } from './routes.js';
 import { SessionStore } from '../code/sessionStore.js';
 import { ChatStore } from '../chat/chatStore.js';
@@ -34,6 +35,7 @@ export function createApp(
   memory: MemoryStore | undefined = createMemoryStore(config),
   workflowProjections: WorkflowProjectionStore | undefined =
     createWorkflowProjectionStore(config),
+  workbenchSessionWorkflowStarter?: WorkbenchSessionWorkflowStarter,
 ): express.Express {
   const app = express();
   const mountPath = config.OPENCORTEX_BASE_PATH || '/';
@@ -79,6 +81,7 @@ export function createApp(
       jiraTracking,
       undefined,
       workflowProjections,
+      workbenchSessionWorkflowStarter,
     ),
   );
   mounted.use(

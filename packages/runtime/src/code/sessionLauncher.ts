@@ -242,6 +242,11 @@ type WorkbenchSessionWorkflowConfig = Pick<
   | 'TEMPORAL_NAMESPACE'
 >;
 
+export interface WorkbenchSessionWorkflowStart {
+  workflowId: string;
+  runId: string;
+}
+
 export async function provisionLocalUser(
   config: ProvisioningConfig,
   user: Pick<AuthenticatedUser, 'email' | 'groups' | 'linuxUser'>,
@@ -292,7 +297,7 @@ export function userProvisioningWorkflowInput(
 export async function startWorkbenchSessionWorkflow(
   config: WorkbenchSessionWorkflowConfig,
   user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
-): Promise<{ workflowId: string; runId: string }> {
+): Promise<WorkbenchSessionWorkflowStart> {
   const token = await mintRuntimeSessionToken(config, user);
   const connection = await Connection.connect({
     address: config.TEMPORAL_ADDRESS,
