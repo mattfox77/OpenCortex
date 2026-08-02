@@ -21,16 +21,17 @@
     "clean": "rm -rf dist"
   },
   "dependencies": {
-    "@supabase/supabase-js": "^2.49.0",
     "@temporalio/activity": "^1.11.0",
     "@temporalio/client": "^1.11.0",
     "@temporalio/worker": "^1.11.0",
     "@temporalio/workflow": "^1.11.0",
-    "dotenv": "^16.4.0"
+    "dotenv": "^16.4.0",
+    "pg": "^8.22.0"
   },
   "devDependencies": {
     "@temporalio/testing": "^1.21.1",
     "@types/node": "^22.0.0",
+    "@types/pg": "^8.20.3",
     "ts-node": "^10.9.0",
     "typescript": "^5.7.0"
   },

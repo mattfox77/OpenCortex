@@ -1,12 +1,13 @@
 import { Worker, NativeConnection } from '@temporalio/worker';
 import { VersioningBehavior } from '@temporalio/common';
-import { createClient } from '@supabase/supabase-js';
 import * as activities from './activities';
 import * as os from 'os';
 import * as dotenv from 'dotenv';
+import pg from 'pg';
 import packageJson from '../package.json';
 
 dotenv.config();
+const { Pool } = pg;
 
 const WORKER_NAME = process.env.WORKER_NAME || `${os.hostname()}-${process.pid}`;
 const TASK_QUEUES = (process.env.TASK_QUEUES || 'cortex-tasks').split(',').map(q => q.trim());
@@ -23,19 +24,27 @@ const USE_WORKER_VERSIONING =
   process.env.OPENCORTEX_WORKER_VERSIONING === 'true';
 
 async function run() {
-  const supabase = createClient(
-    process.env.SUPABASE_URL!,
-    process.env.SUPABASE_SERVICE_ROLE_KEY!
-  );
+  const memory = new Pool({ connectionString: requiredMemoryDatabaseUrl() });
 
   // Register this worker in Cortex Memory
-  await supabase.from('workers').upsert(
-    {
-      name: WORKER_NAME,
-      kind: process.env.WORKER_TYPE || 'opencode',
-      queues: TASK_QUEUES,
-      capabilities: CAPABILITIES,
-      machine: {
+  await memory.query(
+    `
+      INSERT INTO workers (name, kind, queues, capabilities, machine, status, heartbeat)
+      VALUES ($1, $2, $3, $4, $5, 'online', now())
+      ON CONFLICT (name) DO UPDATE
+      SET kind = EXCLUDED.kind,
+          queues = EXCLUDED.queues,
+          capabilities = EXCLUDED.capabilities,
+          machine = EXCLUDED.machine,
+          status = 'online',
+          heartbeat = now()
+    `,
+    [
+      WORKER_NAME,
+      process.env.WORKER_TYPE || 'opencode',
+      TASK_QUEUES,
+      CAPABILITIES,
+      {
         hostname: os.hostname(),
         platform: os.platform(),
         arch: os.arch(),
@@ -45,10 +54,7 @@ async function run() {
         build_id: WORKER_BUILD_ID,
         worker_versioning: USE_WORKER_VERSIONING,
       },
-      status: 'online',
-      heartbeat: new Date().toISOString(),
-    },
-    { onConflict: 'name' }
+    ],
   );
 
   console.log(`🧠 Open Cortex Worker "${WORKER_NAME}" registered`);
@@ -58,10 +64,10 @@ async function run() {
 
   // Heartbeat to Cortex Memory every 30 seconds
   const heartbeat = setInterval(async () => {
-    await supabase
-      .from('workers')
-      .update({ heartbeat: new Date().toISOString(), status: 'online' })
-      .eq('name', WORKER_NAME);
+    await memory.query(
+      'UPDATE workers SET heartbeat = now(), status = $1 WHERE name = $2',
+      ['online', WORKER_NAME],
+    );
   }, 30_000);
 
   // Connect to Temporal
@@ -104,11 +110,9 @@ async function run() {
   const shutdown = async () => {
     console.log('\n🛑 Shutting down...');
     clearInterval(heartbeat);
-    await supabase
-      .from('workers')
-      .update({ status: 'offline' })
-      .eq('name', WORKER_NAME);
+    await memory.query('UPDATE workers SET status = $1 WHERE name = $2', ['offline', WORKER_NAME]);
     for (const w of workers) w.shutdown();
+    await memory.end();
   };
 
   process.on('SIGINT', shutdown);
@@ -125,4 +129,15 @@ run().catch(err => {
 
 function sanitizeBuildId(value: string): string {
   return value.replace(/[^A-Za-z0-9_.@-]/g, '-').slice(0, 255);
+}
+
+function requiredMemoryDatabaseUrl(): string {
+  const value =
+    process.env.OPENCORTEX_MEMORY_DATABASE_URL ??
+    process.env.DIWAN_MEMORY_DATABASE_URL ??
+    process.env.MEMORY_DATABASE_URL;
+  if (!value) {
+    throw new Error('Set OPENCORTEX_MEMORY_DATABASE_URL for orchestrator worker registration');
+  }
+  return value;
 }

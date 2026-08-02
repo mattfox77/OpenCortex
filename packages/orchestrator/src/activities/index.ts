@@ -1,21 +1,27 @@
 import { Context } from '@temporalio/activity';
-import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
+import pg from 'pg';
 import { dirname, join, relative } from 'path';
 import { TraceContext, withTraceSpan } from '../telemetry';
 
-// --- Shared memory client ---
-let _supabase: SupabaseClient;
-function supabase(): SupabaseClient {
-  if (!_supabase) {
-    _supabase = createClient(
-      process.env.SUPABASE_URL!,
-      process.env.SUPABASE_SERVICE_ROLE_KEY!
-    );
+const { Pool } = pg;
+
+// --- Shared memory database client ---
+let _memoryPool: pg.Pool;
+function memoryPool(): pg.Pool {
+  if (!_memoryPool) {
+    const connectionString =
+      process.env.OPENCORTEX_MEMORY_DATABASE_URL ??
+      process.env.DIWAN_MEMORY_DATABASE_URL ??
+      process.env.MEMORY_DATABASE_URL;
+    if (!connectionString) {
+      throw new Error('Set OPENCORTEX_MEMORY_DATABASE_URL for orchestrator memory access');
+    }
+    _memoryPool = new Pool({ connectionString });
   }
-  return _supabase;
+  return _memoryPool;
 }
 
 const EMBEDDINGS_URL =
@@ -199,18 +205,20 @@ export async function searchBrain(query: string): Promise<string> {
   const embedding = await getEmbedding(query);
   const ownerId = process.env.OPENCORTEX_OWNER_ID ?? process.env.OWNER_ID ?? 'system';
 
-  const { data, error } = await supabase().rpc('search', {
-    q: query,
-    q_embedding: embedding,
-    caller: ownerId,
-    n: 5,
-    include_pending: true,
-  });
+  const result = await memoryPool().query<{
+    title: string | null;
+    content: string;
+    kind: string | null;
+    score: number | string | null;
+  }>(
+    'SELECT * FROM search($1, $2::vector, $3, $4, NULL, NULL, $5, $6, NULL)',
+    [query, vectorLiteral(embedding), ownerId, 5, 0.5, true],
+  );
 
-  if (error || !data?.length) return 'No relevant memory context found.';
+  if (!result.rows.length) return 'No relevant memory context found.';
 
-  return data
-    .map((t: any, i: number) =>
+  return result.rows
+    .map((t, i) =>
       `[${i + 1}] (${Math.round(Number(t.score ?? 0) * 100)}% match, ` +
       `${t.kind ?? 'entry'}) ${t.title ?? '(untitled)'}\n${t.content}`
     )
@@ -228,38 +236,37 @@ export async function captureToBrain(content: string): Promise<void> {
   const ownerId = process.env.OPENCORTEX_OWNER_ID ?? process.env.OWNER_ID ?? 'system';
   const contentHash = sha256Hex(content);
 
-  const existing = await supabase()
-    .from('entries')
-    .select('id')
-    .eq('content_hash', contentHash)
-    .eq('owner_id', ownerId)
-    .maybeSingle();
-
-  if (existing.error) {
-    console.error('Failed to lookup memory capture:', existing.error.message);
+  let existing: pg.QueryResult<{ id: string }>;
+  try {
+    existing = await memoryPool().query(
+      'SELECT id FROM entries WHERE content_hash = $1 AND owner_id = $2 LIMIT 1',
+      [contentHash, ownerId],
+    );
+  } catch (error) {
+    console.error('Failed to lookup memory capture:', errorMessage(error));
     return;
   }
-  if (existing.data?.id) {
+  if (existing.rows[0]?.id) {
     return;
   }
 
-  const { error } = await supabase()
-    .from('entries')
-    .insert({
-      content,
-      title: firstLineTitle(content),
-      embedding,
-      kind: 'thought',
-      scope: 'team',
-      owner_id: ownerId,
-      author: 'agent',
-      content_hash: contentHash,
-      source_system: 'opencortex',
-      meta: { ...metadata, source: 'opencortex' },
-    });
-
-  if (error) {
-    console.error('Failed to capture to memory:', error.message);
+  try {
+    await memoryPool().query(
+      `
+        INSERT INTO entries (
+          content, title, embedding, kind, scope, owner_id, author,
+          content_hash, source_system, meta
+        )
+        VALUES ($1, $2, $3::vector, 'thought', 'team', $4, 'agent', $5, 'opencortex', $6)
+        ON CONFLICT DO NOTHING
+      `,
+      [content, firstLineTitle(content), vectorLiteral(embedding), ownerId, contentHash, {
+        ...metadata,
+        source: 'opencortex',
+      }],
+    );
+  } catch (error) {
+    console.error('Failed to capture to memory:', errorMessage(error));
   }
 }
 
@@ -273,32 +280,27 @@ export async function updateLedger(params: {
   input?: any;
   output?: any;
 }): Promise<void> {
-  const { data: existing } = await supabase()
-    .from('task_ledger')
-    .select('id')
-    .eq('temporal_workflow_id', params.workflowId)
-    .maybeSingle();
-
-  if (existing) {
-    await supabase()
-      .from('task_ledger')
-      .update({
-        status: params.status,
-        output: params.output || {},
-        completed_at: ['completed', 'failed', 'cancelled'].includes(params.status)
-          ? new Date().toISOString()
-          : undefined,
-      })
-      .eq('temporal_workflow_id', params.workflowId);
-  } else {
-    await supabase().from('task_ledger').insert({
-      temporal_workflow_id: params.workflowId,
-      task_type: params.taskType || 'custom',
-      status: params.status,
-      input: params.input || {},
-      started_at: new Date().toISOString(),
-    });
-  }
+  await memoryPool().query(
+    `
+      INSERT INTO task_ledger (
+        temporal_workflow_id, task_type, status, input, output, started_at, completed_at
+      )
+      VALUES ($1, $2, $3, $4, $5, now(), $6)
+      ON CONFLICT (temporal_workflow_id) DO UPDATE
+      SET status = EXCLUDED.status,
+          output = EXCLUDED.output,
+          completed_at = COALESCE(EXCLUDED.completed_at, task_ledger.completed_at),
+          updated_at = now()
+    `,
+    [
+      params.workflowId,
+      params.taskType || 'custom',
+      params.status,
+      params.input || {},
+      params.output || {},
+      ['completed', 'failed', 'cancelled'].includes(params.status) ? new Date().toISOString() : null,
+    ],
+  );
 }
 
 // ================================================================
@@ -308,13 +310,11 @@ export async function getWorkflowContext(
   workflowId: string,
   key: string
 ): Promise<any> {
-  const { data } = await supabase()
-    .from('workflow_context')
-    .select('context_value')
-    .eq('workflow_id', workflowId)
-    .eq('context_key', key)
-    .maybeSingle();
-  return data?.context_value;
+  const result = await memoryPool().query<{ context_value: unknown }>(
+    'SELECT context_value FROM workflow_context WHERE workflow_id = $1 AND context_key = $2 LIMIT 1',
+    [workflowId, key],
+  );
+  return result.rows[0]?.context_value;
 }
 
 export async function setWorkflowContext(
@@ -322,15 +322,16 @@ export async function setWorkflowContext(
   key: string,
   value: any
 ): Promise<void> {
-  await supabase().from('workflow_context').upsert(
-    {
-      workflow_id: workflowId,
-      context_key: key,
-      context_value: value,
-      updated_by: process.env.WORKER_NAME || 'unknown',
-      updated_at: new Date().toISOString(),
-    },
-    { onConflict: 'workflow_id,context_key' }
+  await memoryPool().query(
+    `
+      INSERT INTO workflow_context (workflow_id, context_key, context_value, updated_by, updated_at)
+      VALUES ($1, $2, $3, $4, now())
+      ON CONFLICT (workflow_id, context_key) DO UPDATE
+      SET context_value = EXCLUDED.context_value,
+          updated_by = EXCLUDED.updated_by,
+          updated_at = now()
+    `,
+    [workflowId, key, value, process.env.WORKER_NAME || 'unknown'],
   );
 }
 
@@ -751,36 +752,60 @@ export async function upsertArtifactSyncState(params: {
     'artifact_sync.owner_id': params.ownerId,
     'artifact_sync.status': params.status,
   }, async () => {
-    let query = supabase()
-      .from('sync_state')
-      .select('id')
-      .eq('source_system', params.sourceSystem)
-      .eq('owner_id', params.ownerId);
-    query = params.project ? query.eq('project', params.project) : query.is('project', null);
-    query = params.repo ? query.eq('repo', params.repo) : query.is('repo', null);
-    const existing = await query.maybeSingle();
-    if (existing.error) {
-      throw new Error(`Artifact sync state lookup failed: ${existing.error.message}`);
+    const existing = await memoryPool().query<{ id: string }>(
+      `
+        SELECT id
+        FROM sync_state
+        WHERE source_system = $1
+          AND owner_id = $2
+          AND project IS NOT DISTINCT FROM $3
+          AND repo IS NOT DISTINCT FROM $4
+        LIMIT 1
+      `,
+      [params.sourceSystem, params.ownerId, params.project ?? null, params.repo ?? null],
+    );
+
+    if (existing.rows[0]?.id) {
+      await memoryPool().query(
+        `
+          UPDATE sync_state
+          SET last_cursor = $2,
+              last_run_at = now(),
+              status = $3,
+              stats = $4,
+              error = $5
+          WHERE id = $1
+        `,
+        [
+          existing.rows[0].id,
+          params.lastCursor ?? null,
+          params.status,
+          params.stats ?? {},
+          params.error ?? null,
+        ],
+      );
+      return;
     }
 
-    const values = {
-      source_system: params.sourceSystem,
-      owner_id: params.ownerId,
-      project: params.project ?? null,
-      repo: params.repo ?? null,
-      last_cursor: params.lastCursor ?? null,
-      last_run_at: new Date().toISOString(),
-      status: params.status,
-      stats: params.stats ?? {},
-      error: params.error ?? null,
-    };
-
-    const result = existing.data?.id
-      ? await supabase().from('sync_state').update(values).eq('id', existing.data.id)
-      : await supabase().from('sync_state').insert(values);
-    if (result.error) {
-      throw new Error(`Artifact sync state upsert failed: ${result.error.message}`);
-    }
+    await memoryPool().query(
+      `
+        INSERT INTO sync_state (
+          source_system, owner_id, project, repo, last_cursor, last_run_at,
+          status, stats, error
+        )
+        VALUES ($1, $2, $3, $4, $5, now(), $6, $7, $8)
+      `,
+      [
+        params.sourceSystem,
+        params.ownerId,
+        params.project ?? null,
+        params.repo ?? null,
+        params.lastCursor ?? null,
+        params.status,
+        params.stats ?? {},
+        params.error ?? null,
+      ],
+    );
   });
 }
 
@@ -830,47 +855,59 @@ export async function storeOriginalArtifact(params: {
   writeFileSync(objectPath, params.content, { encoding: 'utf8' });
 
   const mimeType = params.mimeType ?? inferMimeType(params.artifactName);
-  const insert = await supabase()
-    .from('artifacts')
-    .insert({
-      source_system: params.sourceSystem,
-      source_path: sourcePath,
-      source_session_id: params.sourceSessionId ?? null,
-      project: params.project ?? null,
-      repo: params.repo ?? null,
-      session_group: params.sourceSessionId ?? null,
-      scope: params.scope ?? 'personal',
-      owner_id: params.ownerId,
-      identity_subject: params.identitySubject ?? null,
-      sha256,
-      size_bytes: Buffer.byteLength(params.content, 'utf8'),
-      mime_type: mimeType,
-      storage_uri: storageUri,
-      storage_key: storageKey,
-      tool_name: params.toolName ?? null,
-      meta: {
-        artifactName: params.artifactName,
-        workflowId: params.workflowId,
-        runId: params.runId,
-        objectStore: {
-          kind: 'local-file',
-          bucket: OBJECTS_BUCKET,
-          baseDir: OBJECTS_LOCAL_DIR,
+  let insert: pg.QueryResult<ArtifactRow>;
+  try {
+    insert = await memoryPool().query<ArtifactRow>(
+      `
+        INSERT INTO artifacts (
+          source_system, source_path, source_session_id, project, repo,
+          session_group, scope, owner_id, identity_subject, sha256, size_bytes,
+          mime_type, storage_uri, storage_key, tool_name, meta
+        )
+        VALUES (
+          $1, $2, $3, $4, $5,
+          $6, $7, $8, $9, $10, $11,
+          $12, $13, $14, $15, $16
+        )
+        RETURNING id, sha256, size_bytes, mime_type, storage_uri, storage_key, source_path
+      `,
+      [
+        params.sourceSystem,
+        sourcePath,
+        params.sourceSessionId ?? null,
+        params.project ?? null,
+        params.repo ?? null,
+        params.sourceSessionId ?? null,
+        params.scope ?? 'personal',
+        params.ownerId,
+        params.identitySubject ?? null,
+        sha256,
+        Buffer.byteLength(params.content, 'utf8'),
+        mimeType,
+        storageUri,
+        storageKey,
+        params.toolName ?? null,
+        {
+          artifactName: params.artifactName,
+          workflowId: params.workflowId,
+          runId: params.runId,
+          objectStore: {
+            kind: 'local-file',
+            bucket: OBJECTS_BUCKET,
+            baseDir: OBJECTS_LOCAL_DIR,
+          },
         },
-      },
-    })
-    .select('id,sha256,size_bytes,mime_type,storage_uri,storage_key,source_path')
-    .single();
-
-  if (insert.error) {
+      ],
+    );
+  } catch (error) {
     const raced = await findArtifact(params.sourceSystem, sourcePath, sha256);
     if (raced) {
       return raced;
     }
-    throw new Error(`Artifact insert failed: ${insert.error.message}`);
+    throw new Error(`Artifact insert failed: ${errorMessage(error)}`);
   }
 
-  return artifactRowToStored(insert.data);
+  return artifactRowToStored(insert.rows[0]);
   });
 }
 
@@ -988,55 +1025,55 @@ export async function writeMemoryChunks(params: {
 
   for (const chunk of params.chunks) {
     const contentHash = sha256Hex(`${params.artifact.sha256}:${chunk.index}:${chunk.content}`);
-    const existing = await supabase()
-      .from('entries')
-      .select('id')
-      .eq('content_hash', contentHash)
-      .eq('owner_id', params.ownerId)
-      .maybeSingle();
-    if (existing.error) {
-      throw new Error(`Entry lookup failed: ${existing.error.message}`);
-    }
-    if (existing.data?.id) {
-      entryIds.push(existing.data.id);
+    const existing = await memoryPool().query<{ id: string }>(
+      'SELECT id FROM entries WHERE content_hash = $1 AND owner_id = $2 LIMIT 1',
+      [contentHash, params.ownerId],
+    );
+    if (existing.rows[0]?.id) {
+      entryIds.push(existing.rows[0].id);
       continue;
     }
 
     const embedding = await getEmbedding(chunk.content);
-    const inserted = await supabase()
-      .from('entries')
-      .insert({
-        content: chunk.content,
-        title: `${params.artifact.sourcePath}#${chunk.index + 1}`,
-        embedding,
-        kind: 'chunk',
-        chunk_index: chunk.index,
-        heading: chunk.heading ?? null,
-        project: params.project ?? null,
-        scope: params.scope ?? 'personal',
-        owner_id: params.ownerId,
-        identity_subject: params.identitySubject ?? null,
-        author: 'agent',
-        content_hash: contentHash,
-        source_system: params.sourceSystem,
-        source_session_id: params.sourceSessionId ?? null,
-        repo: params.repo ?? null,
-        tool_name: params.toolName ?? null,
-        meta: {
+    const inserted = await memoryPool().query<{ id: string }>(
+      `
+        INSERT INTO entries (
+          content, title, embedding, kind, chunk_index, heading, project,
+          scope, owner_id, identity_subject, author, content_hash,
+          source_system, source_session_id, repo, tool_name, meta
+        )
+        VALUES (
+          $1, $2, $3::vector, 'chunk', $4, $5, $6,
+          $7, $8, $9, 'agent', $10,
+          $11, $12, $13, $14, $15
+        )
+        RETURNING id
+      `,
+      [
+        chunk.content,
+        `${params.artifact.sourcePath}#${chunk.index + 1}`,
+        vectorLiteral(embedding),
+        chunk.index,
+        chunk.heading ?? null,
+        params.project ?? null,
+        params.scope ?? 'personal',
+        params.ownerId,
+        params.identitySubject ?? null,
+        contentHash,
+        params.sourceSystem,
+        params.sourceSessionId ?? null,
+        params.repo ?? null,
+        params.toolName ?? null,
+        {
           artifactId: params.artifact.artifactId,
           artifactSha256: params.artifact.sha256,
           workflowId: params.workflowId,
           runId: params.runId,
           storageUri: params.artifact.storageUri,
         },
-      })
-      .select('id')
-      .single();
-
-    if (inserted.error) {
-      throw new Error(`Entry insert failed: ${inserted.error.message}`);
-    }
-    entryIds.push(inserted.data.id);
+      ],
+    );
+    entryIds.push(inserted.rows[0].id);
   }
 
   return { entryIds };
@@ -1061,34 +1098,26 @@ export async function linkArtifactEntries(params: {
     'memory.entry_count': params.entryIds.length,
   }, async () => {
   for (const entryId of params.entryIds) {
-    const existing = await supabase()
-      .from('artifact_links')
-      .select('id')
-      .eq('artifact_id', params.artifactId)
-      .eq('entry_id', entryId)
-      .eq('relationship', 'indexed_by')
-      .maybeSingle();
-    if (existing.error) {
-      throw new Error(`Artifact link lookup failed: ${existing.error.message}`);
-    }
-    if (existing.data?.id) {
-      continue;
-    }
-    const inserted = await supabase()
-      .from('artifact_links')
-      .insert({
-        artifact_id: params.artifactId,
-        entry_id: entryId,
-        relationship: 'indexed_by',
-        owner_id: params.ownerId,
-        meta: {
+    await memoryPool().query(
+      `
+        INSERT INTO artifact_links (artifact_id, entry_id, relationship, owner_id, meta)
+        SELECT $1, $2, 'indexed_by', $3, $4
+        WHERE NOT EXISTS (
+          SELECT 1
+          FROM artifact_links
+          WHERE artifact_id = $1 AND entry_id = $2 AND relationship = 'indexed_by'
+        )
+      `,
+      [
+        params.artifactId,
+        entryId,
+        params.ownerId,
+        {
           workflowId: params.workflowId,
           runId: params.runId,
         },
-      });
-    if (inserted.error) {
-      throw new Error(`Artifact link insert failed: ${inserted.error.message}`);
-    }
+      ],
+    );
   }
   });
 }
@@ -1114,31 +1143,37 @@ export async function writeIngestAuditEvent(params: {
     'memory.artifact_id': params.artifactId,
     'memory.entry_count': params.entryIds.length,
   }, async () => {
-  const existing = await supabase()
-    .from('log')
-    .select('id')
-    .eq('kind', 'ingest')
-    .eq('owner_id', params.ownerId)
-    .contains('data', { workflowId: params.workflowId })
-    .maybeSingle();
-  if (existing.error) {
-    throw new Error(`Ingest audit lookup failed: ${existing.error.message}`);
-  }
-  if (existing.data?.id) {
-    return { logId: existing.data.id };
+  const existing = await memoryPool().query<{ id: string }>(
+    `
+      SELECT id
+      FROM log
+      WHERE kind = 'ingest'
+        AND owner_id = $1
+        AND data @> $2::jsonb
+      LIMIT 1
+    `,
+    [params.ownerId, JSON.stringify({ workflowId: params.workflowId })],
+  );
+  if (existing.rows[0]?.id) {
+    return { logId: existing.rows[0].id };
   }
 
-  const inserted = await supabase()
-    .from('log')
-    .insert({
-      kind: 'ingest',
-      status: 'pass',
-      summary: `Ingested artifact ${params.artifactId} into ${params.entryIds.length} memory chunk(s)`,
-      project: params.project ?? null,
-      owner_id: params.ownerId,
-      identity_subject: params.identitySubject ?? null,
-      worker: process.env.WORKER_NAME || 'opencortex-orchestrator',
-      data: {
+  const inserted = await memoryPool().query<{ id: string }>(
+    `
+      INSERT INTO log (
+        kind, status, summary, project, owner_id, identity_subject,
+        worker, data, entry_id
+      )
+      VALUES ('ingest', 'pass', $1, $2, $3, $4, $5, $6, $7)
+      RETURNING id
+    `,
+    [
+      `Ingested artifact ${params.artifactId} into ${params.entryIds.length} memory chunk(s)`,
+      params.project ?? null,
+      params.ownerId,
+      params.identitySubject ?? null,
+      process.env.WORKER_NAME || 'opencortex-orchestrator',
+      {
         artifactId: params.artifactId,
         entryIds: params.entryIds,
         sourceSystem: params.sourceSystem,
@@ -1146,15 +1181,10 @@ export async function writeIngestAuditEvent(params: {
         workflowId: params.workflowId,
         runId: params.runId,
       },
-      entry_id: params.entryIds[0] ?? null,
-    })
-    .select('id')
-    .single();
-
-  if (inserted.error) {
-    throw new Error(`Ingest audit insert failed: ${inserted.error.message}`);
-  }
-  return { logId: inserted.data.id };
+      params.entryIds[0] ?? null,
+    ],
+  );
+  return { logId: inserted.rows[0].id };
   });
 }
 
@@ -1182,30 +1212,49 @@ export async function upsertWorkflowProjection(params: {
     'workflow.type': params.workflowType,
     'workflow.status': params.status,
   }, async () => {
-  const upserted = await supabase()
-    .from('workflow_projection')
-    .upsert(
-      {
-        workflow_id: params.workflowId,
-        run_id: params.runId,
-        workflow_type: params.workflowType,
-        status: params.status,
-        owner_id: params.ownerId,
-        project: params.project ?? null,
-        source_system: params.sourceSystem ?? null,
-        source_session_id: params.sourceSessionId ?? null,
-        artifact_id: params.artifactId ?? null,
-        entry_ids: params.entryIds ?? [],
-        summary: params.summary,
-        data: params.data ?? {},
-        completed_at: params.status === 'completed' ? new Date().toISOString() : null,
-      },
-      { onConflict: 'workflow_id' },
-    );
-
-  if (upserted.error) {
-    throw new Error(`Workflow projection upsert failed: ${upserted.error.message}`);
-  }
+  await memoryPool().query(
+    `
+      INSERT INTO workflow_projection (
+        workflow_id, run_id, workflow_type, status, owner_id, project,
+        source_system, source_session_id, artifact_id, entry_ids, summary,
+        data, started_at, completed_at
+      )
+      VALUES (
+        $1, $2, $3, $4, $5, $6,
+        $7, $8, $9, $10, $11,
+        $12, now(), $13
+      )
+      ON CONFLICT (workflow_id) DO UPDATE
+      SET run_id = EXCLUDED.run_id,
+          workflow_type = EXCLUDED.workflow_type,
+          status = EXCLUDED.status,
+          owner_id = EXCLUDED.owner_id,
+          project = EXCLUDED.project,
+          source_system = EXCLUDED.source_system,
+          source_session_id = EXCLUDED.source_session_id,
+          artifact_id = EXCLUDED.artifact_id,
+          entry_ids = EXCLUDED.entry_ids,
+          summary = EXCLUDED.summary,
+          data = EXCLUDED.data,
+          completed_at = EXCLUDED.completed_at,
+          updated_at = now()
+    `,
+    [
+      params.workflowId,
+      params.runId,
+      params.workflowType,
+      params.status,
+      params.ownerId,
+      params.project ?? null,
+      params.sourceSystem ?? null,
+      params.sourceSessionId ?? null,
+      params.artifactId ?? null,
+      params.entryIds ?? [],
+      params.summary,
+      params.data ?? {},
+      params.status === 'completed' ? new Date().toISOString() : null,
+    ],
+  );
   });
 }
 
@@ -1228,48 +1277,53 @@ export async function updateMemoryEntryReview(params: {
     'workflow.id': params.workflowId,
     'workflow.run_id': params.runId,
   }, async () => {
-    const updated = await supabase()
-      .from('entries')
-      .update({
-        review: params.review,
-      })
-      .eq('id', params.entryId)
-      .eq('owner_id', params.ownerId)
-      .select('id,owner_id,project,review')
-      .single();
+    const updated = await memoryPool().query<{
+      id: string;
+      owner_id: string;
+      project: string | null;
+      review: MemoryEntryReview;
+    }>(
+      `
+        UPDATE entries
+        SET review = $1
+        WHERE id = $2 AND owner_id = $3
+        RETURNING id, owner_id, project, review
+      `,
+      [params.review, params.entryId, params.ownerId],
+    );
 
-    if (updated.error) {
-      throw new Error(`Memory review update failed: ${updated.error.message}`);
+    if (!updated.rows[0]) {
+      throw new Error(`Memory review update failed: entry ${params.entryId} not found`);
     }
 
-    const logged = await supabase()
-      .from('log')
-      .insert({
-        kind: 'review',
-        status: 'pass',
-        summary: `Reviewed memory entry ${params.entryId}: ${params.review}`,
-        project: updated.data.project ?? null,
-        owner_id: params.ownerId,
-        entry_id: params.entryId,
-        worker: process.env.WORKER_NAME || 'opencortex-orchestrator',
-        data: {
+    await memoryPool().query(
+      `
+        INSERT INTO log (
+          kind, status, summary, project, owner_id, entry_id, worker, data
+        )
+        VALUES ('review', 'pass', $1, $2, $3, $4, $5, $6)
+      `,
+      [
+        `Reviewed memory entry ${params.entryId}: ${params.review}`,
+        updated.rows[0].project ?? null,
+        params.ownerId,
+        params.entryId,
+        process.env.WORKER_NAME || 'opencortex-orchestrator',
+        {
           review: params.review,
           reviewerEmail: params.reviewerEmail ?? params.ownerId,
           notes: params.notes ?? null,
           workflowId: params.workflowId ?? null,
           runId: params.runId ?? null,
         },
-      });
-
-    if (logged.error) {
-      throw new Error(`Memory review audit insert failed: ${logged.error.message}`);
-    }
+      ],
+    );
 
     return {
-      entryId: updated.data.id,
-      ownerId: updated.data.owner_id,
-      project: updated.data.project ?? undefined,
-      review: updated.data.review as MemoryEntryReview,
+      entryId: updated.rows[0].id,
+      ownerId: updated.rows[0].owner_id,
+      project: updated.rows[0].project ?? undefined,
+      review: updated.rows[0].review,
     };
   });
 }
@@ -1477,21 +1531,20 @@ async function findArtifact(
   sourcePath: string,
   sha256: string,
 ): Promise<StoredArtifact | undefined> {
-  const existing = await supabase()
-    .from('artifacts')
-    .select('id,sha256,size_bytes,mime_type,storage_uri,storage_key,source_path')
-    .eq('source_system', sourceSystem)
-    .eq('source_path', sourcePath)
-    .eq('sha256', sha256)
-    .maybeSingle();
+  const existing = await memoryPool().query<ArtifactRow>(
+    `
+      SELECT id, sha256, size_bytes, mime_type, storage_uri, storage_key, source_path
+      FROM artifacts
+      WHERE source_system = $1 AND source_path = $2 AND sha256 = $3
+      LIMIT 1
+    `,
+    [sourceSystem, sourcePath, sha256],
+  );
 
-  if (existing.error) {
-    throw new Error(`Artifact lookup failed: ${existing.error.message}`);
-  }
-  return existing.data ? artifactRowToStored(existing.data) : undefined;
+  return existing.rows[0] ? artifactRowToStored(existing.rows[0]) : undefined;
 }
 
-function artifactRowToStored(row: {
+type ArtifactRow = {
   id: string;
   sha256: string;
   size_bytes: number;
@@ -1499,7 +1552,9 @@ function artifactRowToStored(row: {
   storage_uri: string | null;
   storage_key: string | null;
   source_path: string;
-}): StoredArtifact {
+};
+
+function artifactRowToStored(row: ArtifactRow): StoredArtifact {
   return {
     artifactId: row.id,
     sha256: row.sha256,
@@ -1513,6 +1568,19 @@ function artifactRowToStored(row: {
 
 function sha256Hex(value: string): string {
   return createHash('sha256').update(value, 'utf8').digest('hex');
+}
+
+function vectorLiteral(values: number[]): string {
+  if (values.length !== EMBEDDINGS_DIMENSIONS) {
+    throw new Error(
+      `Embedding dimension mismatch: expected ${EMBEDDINGS_DIMENSIONS}, got ${values.length}`,
+    );
+  }
+  return `[${values.join(',')}]`;
+}
+
+function errorMessage(error: unknown): string {
+  return error instanceof Error ? error.message : String(error);
 }
 
 function objectStorageKey(params: {

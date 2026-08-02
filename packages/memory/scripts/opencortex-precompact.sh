@@ -34,7 +34,7 @@ PROJECT=$(basename "$(pwd)")
 TIMESTAMP=$(date +%Y%m%d-%H%M%S)
 
 # Check if memory capture is available
-if ! command -v cortex >/dev/null 2>&1 && ! command -v brain >/dev/null 2>&1; then
+if ! command -v cortex >/dev/null 2>&1; then
   exit 0
 fi
 
@@ -55,10 +55,6 @@ if [ -z "$TRANSCRIPT" ] && [ -d "$HOME/.claude/projects" ]; then
 fi
 
 if [ -z "$TRANSCRIPT" ] || [ ! -f "$TRANSCRIPT" ]; then
-  # No transcript found — archive what we can via auto
-  if command -v brain >/dev/null 2>&1; then
-    brain archive auto 2>/dev/null &
-  fi
   exit 0
 fi
 
@@ -69,28 +65,14 @@ if [ "$WORD_COUNT" -lt 500 ]; then
   exit 0
 fi
 
-if command -v cortex >/dev/null 2>&1; then
-  cat "$TRANSCRIPT" | cortex memory capture - \
-    -t "Pre-compaction archive: ${PROJECT}" \
-    -p "$PROJECT" \
-    -s personal \
-    -k document \
-    --source-system opencortex-precompact \
-    --session-id "precompact-${TIMESTAMP}" \
-    --tool claude-code \
-    > /dev/null 2>&1 &
-else
-  # Run rescue in background (don't block the compaction)
-  cat "$TRANSCRIPT" | brain archive rescue \
-    -p "$PROJECT" \
-    -s "precompact-${TIMESTAMP}" \
-    > /dev/null 2>&1 &
-
-  # Log it
-  brain log "Pre-compaction archive: ${PROJECT} (${WORD_COUNT} words)" \
-    --type milestone \
-    -p "$PROJECT" \
-    2>/dev/null &
-fi
+cat "$TRANSCRIPT" | cortex memory capture - \
+  -t "Pre-compaction archive: ${PROJECT}" \
+  -p "$PROJECT" \
+  -s personal \
+  -k document \
+  --source-system opencortex-precompact \
+  --session-id "precompact-${TIMESTAMP}" \
+  --tool claude-code \
+  > /dev/null 2>&1 &
 
 exit 0

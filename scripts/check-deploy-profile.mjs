@@ -7,7 +7,6 @@ const quadletDir = join("deploy", "podman-quadlet");
 const requiredFiles = [
   "opencortex-network.network",
   "opencortex-memory-db.container",
-  "opencortex-memory-api.container",
   "opencortex-objects.container",
   "opencortex-embeddings.container",
   "opencortex-temporal.container",
@@ -18,10 +17,6 @@ const requiredFiles = [
 ];
 
 const fileChecks = {
-  "opencortex-memory-api.container": [
-    "Environment=PGRST_DB_ANON_ROLE=opencortex_memory_api",
-    "Network=opencortex.network",
-  ],
   "opencortex-objects.container": [
     "ContainerName=opencortex-objects",
     "Exec=server -dir=/data -s3 -s3.port=8333 -volume.max=0",

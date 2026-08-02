@@ -9,8 +9,6 @@ Required secrets:
 
 ```bash
 printf '%s' "$POSTGRES_PASSWORD" | podman secret create opencortex_postgres_password -
-printf '%s' "postgres://opencortex:${POSTGRES_PASSWORD}@opencortex-memory-db:5432/opencortex_memory" | podman secret create opencortex_memory_db_uri -
-printf '%s' "$MEMORY_JWT_SECRET" | podman secret create opencortex_memory_jwt_secret -
 printf '%s' "$DEX_CLIENT_SECRET" | podman secret create opencortex_dex_client_secret -
 ```
 
@@ -25,7 +23,6 @@ cp config/otel-collector.yaml ~/.config/opencortex/otel-collector.yaml
 systemctl --user daemon-reload
 systemctl --user start opencortex-dex.service
 systemctl --user start opencortex-memory-db.service
-systemctl --user start opencortex-memory-api.service
 systemctl --user start opencortex-objects.service
 systemctl --user start opencortex-embeddings.service
 systemctl --user start opencortex-temporal.service
@@ -34,9 +31,9 @@ systemctl --user start opencortex-jaeger.service
 systemctl --user start opencortex-otel.service
 ```
 
-`opencortex-memory-api` is PostgREST and is intentionally internal-only. It
-joins `opencortex.network` and does not publish port `3000` to the host. Public
-memory access must go through the OpenCortex API layer.
+PostgREST is not part of the deployment profile. Public memory access goes
+through the OpenCortex API layer; internal services connect to Postgres with
+`OPENCORTEX_MEMORY_DATABASE_URL`.
 
 `opencortex-temporal` uses the same Postgres container, but stores Temporal data
 in `opencortex_temporal` and visibility data in
