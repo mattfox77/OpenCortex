@@ -231,6 +231,17 @@ type ProvisioningConfig = Pick<
   | 'TEMPORAL_NAMESPACE'
 >;
 
+type WorkbenchSessionWorkflowConfig = Pick<
+  AppConfig,
+  | 'OPENCORTEX_INTERNAL_TOKEN_SECRET'
+  | 'OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES'
+  | 'OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL'
+  | 'OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL'
+  | 'OPENCORTEX_WORKBENCH_SESSION_TASK_QUEUE'
+  | 'TEMPORAL_ADDRESS'
+  | 'TEMPORAL_NAMESPACE'
+>;
+
 export async function provisionLocalUser(
   config: ProvisioningConfig,
   user: Pick<AuthenticatedUser, 'email' | 'groups' | 'linuxUser'>,
@@ -278,6 +289,40 @@ export function userProvisioningWorkflowInput(
   };
 }
 
+export async function startWorkbenchSessionWorkflow(
+  config: WorkbenchSessionWorkflowConfig,
+  user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
+): Promise<{ workflowId: string; runId: string }> {
+  const token = await mintRuntimeSessionToken(config, user);
+  const connection = await Connection.connect({
+    address: config.TEMPORAL_ADDRESS,
+  });
+  try {
+    const client = new Client({
+      connection,
+      namespace: config.TEMPORAL_NAMESPACE,
+    });
+    const workflowId = `workbench-session-${user.linuxUser}-${Date.now()}`;
+    const handle = await client.workflow.start('workbenchSessionWorkflow', {
+      taskQueue: config.OPENCORTEX_WORKBENCH_SESSION_TASK_QUEUE,
+      workflowId,
+      args: [{
+        ownerId: user.email,
+        runtimeBaseUrl: config.OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL,
+        authorizationHeader: `Bearer ${token}`,
+        monitorInterval: config.OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL,
+        maxProbeIterations: config.OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES,
+      }],
+    });
+    return {
+      workflowId,
+      runId: handle.firstExecutionRunId,
+    };
+  } finally {
+    await connection.close();
+  }
+}
+
 async function provisionUserViaWorkflow(
   config: ProvisioningConfig,
   user: Pick<AuthenticatedUser, 'email' | 'groups' | 'linuxUser'>,
@@ -299,6 +344,25 @@ async function provisionUserViaWorkflow(
   } finally {
     await connection.close();
   }
+}
+
+async function mintRuntimeSessionToken(
+  config: Pick<AppConfig, 'OPENCORTEX_INTERNAL_TOKEN_SECRET'>,
+  user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
+): Promise<string> {
+  const { mintInternalToken } = await import('../auth/internalToken.js');
+  const minted = await mintInternalToken({
+    user: {
+      sub: user.sub,
+      email: user.email,
+      groups: [],
+      linuxUser: user.linuxUser,
+    },
+    scopes: ['session'],
+    secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+    ttlSeconds: 3600,
+  });
+  return minted.token;
 }
 
 function prepareWorkbenchRuntime(launchPlan: WorkbenchLaunchPlan): string {

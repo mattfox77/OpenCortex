@@ -57,6 +57,14 @@ function testConfig(): AppConfig {
     OPENCORTEX_EXEC_MODE: 'dry-run',
     OPENCORTEX_WORKBENCH_PORT_BASE: 4100,
     OPENCORTEX_WORKBENCH_BIN: '/usr/local/bin/opencode',
+    OPENCORTEX_WORKBENCH_SESSION_MODE: 'local',
+    OPENCORTEX_WORKBENCH_SESSION_TASK_QUEUE: 'cortex-tasks',
+    OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL: 'http://127.0.0.1:8080/api',
+    OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL: '30 seconds',
+    OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES: 0,
+    OPENCORTEX_PROVISION_USER_MODE: 'local',
+    OPENCORTEX_PROVISIONING_TASK_QUEUE: 'cortex-tasks',
+    OPENCORTEX_PROVISIONING_REQUIRED_TOOLS: ['node', 'npm', 'git', 'opencode', 'cortex'],
     OPENCORTEX_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
     OPENCORTEX_JIRA_BASE_URL: 'https://jira.example.test',
     SLACK_BOT_TOKEN: '',
@@ -665,6 +673,50 @@ describe('http app', () => {
   it('requires auth to list code sessions', async () => {
     const response = await request('/diwan/api/code/sessions');
     expect(response.status).toBe(401);
+  });
+
+  it('lets WorkbenchSessionWorkflow use the internal runtime session API', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+    const minted = await mintInternalToken({
+      user: {
+        sub: 'workflow:workbench-session',
+        email: 'owner@acme.test',
+        groups: [],
+        linuxUser: 'owner',
+      },
+      scopes: ['session'],
+      secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+      ttlSeconds: 60,
+    });
+    const auth = { Authorization: `Bearer ${minted.token}` };
+
+    const created = await fetch(`${base}/diwan/api/runtime/code/sessions`, {
+      method: 'POST',
+      headers: auth,
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json();
+    expect(createdBody.session.ownerEmail).toBe('owner@acme.test');
+
+    const listed = await fetch(`${base}/diwan/api/runtime/code/sessions`, {
+      headers: auth,
+    });
+    expect(listed.status).toBe(200);
+    const listedBody = await listed.json();
+    expect(listedBody.sessions.map((item: { id: string }) => item.id)).toEqual([
+      createdBody.session.id,
+    ]);
+
+    const archived = await fetch(
+      `${base}/diwan/api/runtime/code/sessions/${createdBody.session.id}`,
+      {
+        method: 'DELETE',
+        headers: auth,
+      },
+    );
+    expect(archived.status).toBe(200);
   });
 
   it('restores a previously created session on a later GET (same server)', async () => {

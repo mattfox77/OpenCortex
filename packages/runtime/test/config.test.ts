@@ -137,6 +137,46 @@ describe('runtime config compatibility', () => {
     expect(workflow.TEMPORAL_ADDRESS).toBe('temporal.example.com:7233');
     expect(workflow.TEMPORAL_NAMESPACE).toBe('opencortex');
   });
+
+  it('keeps workbench session workflow integration opt-in', () => {
+    const local = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+    });
+    const workflow = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      OPENCORTEX_WORKBENCH_SESSION_MODE: 'workflow',
+      OPENCORTEX_WORKBENCH_SESSION_TASK_QUEUE: 'workbench-sessions',
+      OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL: 'http://runtime.internal/api',
+      OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL: '5 seconds',
+      OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES: '3',
+    });
+
+    expect(local.OPENCORTEX_WORKBENCH_SESSION_MODE).toBe('local');
+    expect(local.OPENCORTEX_WORKBENCH_SESSION_TASK_QUEUE).toBe('cortex-tasks');
+    expect(local.OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES).toBe(0);
+    expect(workflow.OPENCORTEX_WORKBENCH_SESSION_MODE).toBe('workflow');
+    expect(workflow.OPENCORTEX_WORKBENCH_SESSION_TASK_QUEUE).toBe('workbench-sessions');
+    expect(workflow.OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL).toBe('http://runtime.internal/api');
+    expect(workflow.OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL).toBe('5 seconds');
+    expect(workflow.OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES).toBe(3);
+
+    const legacy = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      DIWAN_WORKBENCH_SESSION_MODE: 'workflow',
+      DIWAN_WORKBENCH_SESSION_TASK_QUEUE: 'legacy-workbench-sessions',
+      DIWAN_WORKBENCH_SESSION_RUNTIME_BASE_URL: 'http://legacy-runtime.internal/api',
+      DIWAN_WORKBENCH_SESSION_MONITOR_INTERVAL: '10 seconds',
+      DIWAN_WORKBENCH_SESSION_MAX_PROBES: '2',
+    });
+    expect(legacy.OPENCORTEX_WORKBENCH_SESSION_MODE).toBe('workflow');
+    expect(legacy.OPENCORTEX_WORKBENCH_SESSION_TASK_QUEUE).toBe('legacy-workbench-sessions');
+    expect(legacy.OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL).toBe('http://legacy-runtime.internal/api');
+    expect(legacy.OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL).toBe('10 seconds');
+    expect(legacy.OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES).toBe(2);
+  });
 });
 
 function requiredAuthEnv(): NodeJS.ProcessEnv {

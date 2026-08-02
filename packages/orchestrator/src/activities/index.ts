@@ -492,7 +492,7 @@ export async function startRuntimeWorkbenchSession(params: {
     'workflow.id': params.workflowId,
     'workflow.run_id': params.runId,
   }, async () => {
-    const payload = await runtimeJson(params, '/code/sessions', {
+    const payload = await runtimeJson(params, '/runtime/code/sessions', {
       method: 'POST',
     }) as { session?: RuntimeWorkbenchSession; channel?: Record<string, unknown> };
     if (!payload.session?.id) {
@@ -518,7 +518,7 @@ export async function probeRuntimeWorkbenchSession(params: {
     'workflow.run_id': params.runId,
     'workbench.session_id': params.sessionId,
   }, async () => {
-    const payload = await runtimeJson(params, '/code/sessions', {
+    const payload = await runtimeJson(params, '/runtime/code/sessions', {
       method: 'GET',
     }) as { sessions?: RuntimeWorkbenchSession[] };
     const session = (payload.sessions ?? []).find(item => item.id === params.sessionId);
@@ -545,7 +545,7 @@ export async function archiveRuntimeWorkbenchSession(params: {
   }, async () => {
     const payload = await runtimeJson(
       params,
-      `/code/sessions/${encodeURIComponent(params.sessionId)}`,
+      `/runtime/code/sessions/${encodeURIComponent(params.sessionId)}`,
       { method: 'DELETE' },
       [404],
     ) as { session?: RuntimeWorkbenchSession; channel?: Record<string, unknown> };

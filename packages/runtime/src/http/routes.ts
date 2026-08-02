@@ -9,6 +9,7 @@ import {
   activeCodeThread,
   SessionLauncher,
   sessionWithActiveThread,
+  startWorkbenchSessionWorkflow,
   type CodeSession,
   type CodeThread,
 } from '../code/sessionLauncher.js';
@@ -323,28 +324,25 @@ export function apiRouter(
 
   router.post('/code/sessions', requireUser, async (req, res, next) => {
     try {
-      const existing = await reusableWorkspaceSession(
+      if (config.OPENCORTEX_WORKBENCH_SESSION_MODE === 'workflow') {
+        const workflow = await startWorkbenchSessionWorkflow(config, req.user!);
+        return res.status(202).json({
+          workflow,
+          message: 'WorkbenchSessionWorkflow started.',
+        });
+      }
+      const result = await launchCodeSessionForUser({
         sessions,
-        launcher,
-        req.user!,
-      );
-      const session = existing ?? (await launcher.launch(req.user!));
-      sessions.set(session.id, session);
-      const channel = chat.ensureSessionChannel(session, req.user!);
-      const updatedChannel = await ensureSlackSessionBinding(
-        slack,
         chat,
-        session,
-        channel,
-      );
-      events.publish({
-        type: 'session.started',
-        channelId: updatedChannel.id,
-        payload: { session, channel: updatedChannel },
+        slack,
+        events,
+        launcher,
+        user: req.user!,
       });
-      res
-        .status(existing ? 200 : 201)
-        .json({ session, channel: updatedChannel });
+      res.status(result.existing ? 200 : 201).json({
+        session: result.session,
+        channel: result.channel,
+      });
     } catch (error) {
       next(error);
     }
@@ -964,6 +962,82 @@ export function apiRouter(
   return router;
 }
 
+export function runtimeWorkbenchRouter(
+  config: AppConfig,
+  sessions: SessionStore,
+  chat: ChatStore,
+): express.Router {
+  const router = express.Router();
+  const launcher = new SessionLauncher(config);
+  const events = new ChatEventHub(chat);
+  const slack = new SlackClient(config);
+
+  router.post(
+    '/code/sessions',
+    requireInternalToken(config, ['session']),
+    async (_req, res, next) => {
+      try {
+        const token = res.locals.internalToken as VerifiedInternalToken;
+        const result = await launchCodeSessionForUser({
+          sessions,
+          chat,
+          slack,
+          events,
+          launcher,
+          user: userFromInternalToken(token),
+        });
+        return res.status(result.existing ? 200 : 201).json({
+          session: result.session,
+          channel: result.channel,
+        });
+      } catch (error) {
+        return next(error);
+      }
+    },
+  );
+
+  router.get(
+    '/code/sessions',
+    requireInternalToken(config, ['session']),
+    async (_req, res, next) => {
+      try {
+        const token = res.locals.internalToken as VerifiedInternalToken;
+        const user = userFromInternalToken(token);
+        await ensureOwnedSessionsRunning(sessions, chat, launcher, user);
+        await refreshVisibleSessionNames(sessions, chat, user);
+        return res.json({
+          sessions: visibleCodeSessionViews(sessions, chat, user),
+        });
+      } catch (error) {
+        return next(error);
+      }
+    },
+  );
+
+  router.delete(
+    '/code/sessions/:id',
+    requireInternalToken(config, ['session']),
+    (req, res) => {
+      const token = res.locals.internalToken as VerifiedInternalToken;
+      const user = userFromInternalToken(token);
+      const session = sessions.get(String(req.params.id));
+      if (!session || session.ownerEmail !== user.email) {
+        return res.status(404).json({ error: 'code_session_not_found' });
+      }
+      const channel = chat.archiveSessionChannel(session);
+      sessions.delete(session.id);
+      events.publish({
+        type: 'session.archived',
+        channelId: channel?.id ?? `session-${session.id}`,
+        payload: { session, channel },
+      });
+      return res.json({ session, channel });
+    },
+  );
+
+  return router;
+}
+
 export function memoryRouter(
   config: AppConfig,
   memory: MemoryStore | undefined,
@@ -1372,6 +1446,40 @@ async function reusableWorkspaceSession(
   return relaunchSession(sessions, launcher, session);
 }
 
+async function launchCodeSessionForUser(params: {
+  sessions: SessionStore;
+  chat: ChatStore;
+  slack: SlackClient;
+  events: ChatEventHub;
+  launcher: SessionLauncher;
+  user: AuthenticatedUser;
+}): Promise<{ session: CodeSession; channel: ChatChannel; existing: boolean }> {
+  const existing = await reusableWorkspaceSession(
+    params.sessions,
+    params.launcher,
+    params.user,
+  );
+  const session = existing ?? (await params.launcher.launch(params.user));
+  params.sessions.set(session.id, session);
+  const channel = params.chat.ensureSessionChannel(session, params.user);
+  const updatedChannel = await ensureSlackSessionBinding(
+    params.slack,
+    params.chat,
+    session,
+    channel,
+  );
+  params.events.publish({
+    type: 'session.started',
+    channelId: updatedChannel.id,
+    payload: { session, channel: updatedChannel },
+  });
+  return {
+    session,
+    channel: updatedChannel,
+    existing: Boolean(existing),
+  };
+}
+
 async function ensureOwnedSessionsRunning(
   sessions: SessionStore,
   chat: ChatStore,
@@ -1539,6 +1647,15 @@ function userFromSessionOwner(session: CodeSession): AuthenticatedUser {
     email: session.ownerEmail,
     groups: [],
     linuxUser: session.linuxUser,
+  };
+}
+
+function userFromInternalToken(token: VerifiedInternalToken): AuthenticatedUser {
+  return {
+    sub: token.subject,
+    email: token.ownerEmail,
+    groups: [],
+    linuxUser: token.linuxUser,
   };
 }
 

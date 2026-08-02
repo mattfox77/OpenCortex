@@ -9,6 +9,11 @@ const config = {
   OPENCORTEX_PROVISIONING_REQUIRED_TOOLS: ['node', 'npm', 'git', 'opencode', 'cortex'],
   OPENCORTEX_PROVISIONING_TASK_QUEUE: 'cortex-tasks',
   OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
+  OPENCORTEX_WORKBENCH_SESSION_MODE: 'local',
+  OPENCORTEX_WORKBENCH_SESSION_TASK_QUEUE: 'cortex-tasks',
+  OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL: 'http://127.0.0.1:8080/api',
+  OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL: '30 seconds',
+  OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES: 0,
   OPENCORTEX_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
 } as AppConfig;
 

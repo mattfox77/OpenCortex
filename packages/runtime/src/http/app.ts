@@ -11,6 +11,7 @@ import {
   memoryRouter,
   publicRouter,
   rawOpenCodeSessionRedirect,
+  runtimeWorkbenchRouter,
 } from './routes.js';
 import { SessionStore } from '../code/sessionStore.js';
 import { ChatStore } from '../chat/chatStore.js';
@@ -66,6 +67,7 @@ export function createApp(
   );
   mounted.use('/api', publicRouter(config));
   mounted.use('/api/memory', memoryRouter(config, memory));
+  mounted.use('/api/runtime', runtimeWorkbenchRouter(config, codeSessions, chat));
   mounted.use(
     '/api',
     oidcAuth(config),
