@@ -1,7 +1,7 @@
 # Skill Bundle Manifest
 
-`@opencortex/skills` defines the neutral OpenCortex skill bundle manifest used
-by later publishing and provisioning workflows.
+`@opencortex/skills` defines the neutral OpenCortex skill bundle manifest and
+ships the default skill packs under `packages/skills/skills/`.
 
 Runtime publishing creates archives with a top-level `skills/` directory plus:
 
@@ -19,3 +19,10 @@ unsigned bundles in either path.
 The skill bundle system is in scope for OpenCortex. Importing existing
 BrainTrust or DSN skill corpuses is a separate, deferred compatibility tool and
 is represented only as optional `deferredImport` metadata.
+
+The default platform bundle includes:
+
+- `opencortex-memory`: use `cortex` memory capture/recall and avoid legacy
+  BrainTrust commands.
+- `opencortex-workbench`: operate inside provisioned OpenCortex coding
+  sessions with per-user isolation and review workflow expectations.

@@ -14,13 +14,15 @@ set -euo pipefail
 #   scripts/publish-skills.sh
 #
 # Env:
-#   OPENCORTEX_SKILLS_SOURCE      (required) dir with skill packs
+#   OPENCORTEX_SKILLS_SOURCE      dir with skill packs (default: packages/skills/skills)
 #   OPENCORTEX_SKILLS_BUNDLE_PATH (default: ./opencortex-skills.tar.gz)
 #   OPENCORTEX_SKILLS_BUNDLE_VERSION version recorded in the bundle manifest
 #   OPENCORTEX_SKILLS_PRIVATE_KEY_FILE optional Ed25519 PEM key used to sign
 #   OPENCORTEX_SKILLS_PRIVATE_KEY_PEM  optional Ed25519 PEM key used to sign
 
-skills_src="${OPENCORTEX_SKILLS_SOURCE:-${DIWAN_SKILLS_SOURCE:-}}"
+script_dir="$(cd "$(dirname "$0")" && pwd)"
+default_skills_src="${script_dir}/../../skills/skills"
+skills_src="${OPENCORTEX_SKILLS_SOURCE:-${DIWAN_SKILLS_SOURCE:-$default_skills_src}}"
 bundle_path="${OPENCORTEX_SKILLS_BUNDLE_PATH:-${DIWAN_SKILLS_BUNDLE_PATH:-./opencortex-skills.tar.gz}}"
 
 if [ -z "$skills_src" ]; then
