@@ -6,7 +6,7 @@
 # - owner insert allowed
 # - cross-owner insert denied
 # - personal-row visibility isolation
-# - provision denied for non-admin key
+# - legacy human keys denied
 #
 # Usage:
 #   ./security-smoke.sh
@@ -106,8 +106,9 @@ check_failure() {
 RAND=$(date +%s)
 OWNER_A="smoke_owner_a_${RAND}"
 OWNER_B="smoke_owner_b_${RAND}"
-MEMBER_KEY_A="smoke-key-a-${RAND}"
-MEMBER_KEY_B="smoke-key-b-${RAND}"
+AGENT_KEY_A="smoke-agent-key-a-${RAND}"
+AGENT_KEY_B="smoke-agent-key-b-${RAND}"
+MEMBER_KEY_A="smoke-member-key-a-${RAND}"
 ADMIN_KEY="smoke-admin-key-${RAND}"
 ENTRY_A_TITLE="smoke-row-a-${RAND}"
 ENTRY_B_TITLE="smoke-row-b-${RAND}"
@@ -120,8 +121,9 @@ trap cleanup EXIT
 
 run_sql "INSERT INTO keys (hash, owner_id, name, role)
   VALUES
+    (encode(digest('${AGENT_KEY_A}', 'sha256'), 'hex'), '${OWNER_A}', 'Smoke Agent A', 'agent'),
+    (encode(digest('${AGENT_KEY_B}', 'sha256'), 'hex'), '${OWNER_B}', 'Smoke Agent B', 'agent'),
     (encode(digest('${MEMBER_KEY_A}', 'sha256'), 'hex'), '${OWNER_A}', 'Smoke Member A', 'member'),
-    (encode(digest('${MEMBER_KEY_B}', 'sha256'), 'hex'), '${OWNER_B}', 'Smoke Member B', 'member'),
     (encode(digest('${ADMIN_KEY}', 'sha256'), 'hex'), '${OWNER_A}', 'Smoke Admin', 'admin')"
 
 run_sql "INSERT INTO entries (content, title, kind, scope, owner_id, author, review)
@@ -129,10 +131,10 @@ run_sql "INSERT INTO entries (content, title, kind, scope, owner_id, author, rev
     ('seed a', '${ENTRY_A_TITLE}', 'finding', 'personal', '${OWNER_A}', 'user', 'approved'),
     ('seed b', '${ENTRY_B_TITLE}', 'finding', 'personal', '${OWNER_B}', 'user', 'approved')"
 
-check_success "owner insert allowed" "
+check_success "service-account owner insert allowed" "
 BEGIN;
 SET LOCAL ROLE opencortex_memory_api;
-SELECT set_config('request.headers', '{\"apikey\":\"${MEMBER_KEY_A}\"}', true);
+SELECT set_config('request.headers', '{\"apikey\":\"${AGENT_KEY_A}\"}', true);
 INSERT INTO entries (content, title, kind, scope, owner_id, author, review)
 VALUES ('ok', 'smoke-insert-ok-${RAND}', 'finding', 'personal', '${OWNER_A}', 'user', 'approved');
 ROLLBACK;"
@@ -140,7 +142,7 @@ ROLLBACK;"
 check_failure "cross-owner insert denied" "
 BEGIN;
 SET LOCAL ROLE opencortex_memory_api;
-SELECT set_config('request.headers', '{\"apikey\":\"${MEMBER_KEY_A}\"}', true);
+SELECT set_config('request.headers', '{\"apikey\":\"${AGENT_KEY_A}\"}', true);
 INSERT INTO entries (content, title, kind, scope, owner_id, author, review)
 VALUES ('deny', 'smoke-insert-deny-${RAND}', 'finding', 'personal', '${OWNER_B}', 'user', 'approved');
 ROLLBACK;"
@@ -148,7 +150,7 @@ ROLLBACK;"
 VISIBLE_RAW=$(run_sql "
 BEGIN;
 SET LOCAL ROLE opencortex_memory_api;
-SELECT set_config('request.headers', '{\"apikey\":\"${MEMBER_KEY_A}\"}', true);
+SELECT set_config('request.headers', '{\"apikey\":\"${AGENT_KEY_A}\"}', true);
 SELECT count(*)
 FROM entries
 WHERE title IN ('${ENTRY_A_TITLE}', '${ENTRY_B_TITLE}')
@@ -164,24 +166,29 @@ else
   fail "personal visibility isolated"
 fi
 
-check_failure "member cannot provision" "
+check_failure "service account cannot provision" "
+BEGIN;
+SET LOCAL ROLE opencortex_memory_api;
+SELECT set_config('request.headers', '{\"apikey\":\"${AGENT_KEY_A}\"}', true);
+SELECT provision('smoke-new-${RAND}', 'Smoke New', 'agent');
+ROLLBACK;"
+
+check_failure "legacy member key denied" "
 BEGIN;
 SET LOCAL ROLE opencortex_memory_api;
 SELECT set_config('request.headers', '{\"apikey\":\"${MEMBER_KEY_A}\"}', true);
-SELECT provision('smoke-new-${RAND}', 'Smoke New', 'member');
+SELECT count(*) FROM entries;
 ROLLBACK;"
 
-check_failure "admin cannot provision human key" "
+check_failure "legacy admin key denied" "
 BEGIN;
 SET LOCAL ROLE opencortex_memory_api;
 SELECT set_config('request.headers', '{\"apikey\":\"${ADMIN_KEY}\"}', true);
-SELECT provision('smoke-human-${RAND}', 'Smoke Human', 'member');
+SELECT count(*) FROM entries;
 ROLLBACK;"
 
-check_success "admin can provision service account key" "
+check_success "direct provisioning can issue service account key" "
 BEGIN;
-SET LOCAL ROLE opencortex_memory_api;
-SELECT set_config('request.headers', '{\"apikey\":\"${ADMIN_KEY}\"}', true);
 SELECT provision('smoke-agent-${RAND}', 'Smoke Agent', 'agent');
 ROLLBACK;"
 
