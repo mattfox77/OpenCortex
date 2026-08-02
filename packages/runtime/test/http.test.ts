@@ -430,6 +430,31 @@ describe('http app', () => {
     });
   });
 
+  it('exposes runtime metrics for collector scraping', async () => {
+    const config = testConfig();
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
+    sessions.set('live', codeSession({ id: 'live' }));
+    const app = createApp(config, sessions);
+    server = app.listen(0);
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected TCP listener');
+    }
+    const base = `http://127.0.0.1:${address.port}`;
+
+    await fetch(`${base}/diwan/api/health`);
+    const metrics = await fetch(`${base}/metrics`);
+
+    expect(metrics.status).toBe(200);
+    expect(metrics.headers.get('content-type')).toContain('text/plain');
+    const body = await metrics.text();
+    expect(body).toContain('opencortex_runtime_up 1');
+    expect(body).toContain('opencortex_runtime_sessions_active 1');
+    expect(body).toContain('opencortex_runtime_http_requests_total');
+    expect(body).toContain('status_code="200"');
+    expect(body).not.toContain('route="/metrics"');
+  });
+
   it('accepts legacy auth cookies during the OpenCortex cookie rename window', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const { listener, base } = startApp(config);

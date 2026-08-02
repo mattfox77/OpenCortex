@@ -55,10 +55,11 @@ development. In-container callers use
 `http://opencortex-embeddings:7997/v1/embeddings`.
 
 `opencortex-otel` accepts OTLP/gRPC and OTLP/HTTP on localhost ports `4317` and
-`4318`, then forwards traces to `opencortex-jaeger`. Configure services with
-`OTEL_ENDPOINT=http://opencortex-otel:4318` inside the Quadlet network, or
-`OTEL_ENDPOINT=http://localhost:4318` for local host processes. Jaeger UI is
-available at `http://localhost:16686`.
+`4318`, then forwards traces to `opencortex-jaeger`. It also scrapes runtime
+Prometheus metrics from the host service at `host.containers.internal:8080`.
+Configure services with `OTEL_ENDPOINT=http://opencortex-otel:4318` inside the
+Quadlet network, or `OTEL_ENDPOINT=http://localhost:4318` for local host
+processes. Jaeger UI is available at `http://localhost:16686`.
 
 TLS is intentionally not represented here. The staging host terminates HTTPS
 with `tailscale serve` outside the container stack.

@@ -29,6 +29,7 @@ import {
   createWorkflowProjectionStore,
   type WorkflowProjectionStore,
 } from '../workflows/workflowProjectionStore.js';
+import { RuntimeMetrics, runtimeMetricsMiddleware } from './metrics.js';
 
 export function createApp(
   config: AppConfig,
@@ -51,6 +52,7 @@ export function createApp(
 ): express.Express {
   const app = express();
   const mountPath = config.OPENCORTEX_BASE_PATH || '/';
+  const metrics = new RuntimeMetrics();
   const publicDir = new URL('../ui/public', import.meta.url).pathname;
   const indexPath = new URL('../ui/public/index.html', import.meta.url)
     .pathname;
@@ -60,6 +62,7 @@ export function createApp(
   );
 
   app.use(helmet());
+  app.use(runtimeMetricsMiddleware(metrics));
   // Parse JSON bodies for OpenCortex API, but NOT for the OpenCode session
   // proxy. http-proxy streams the raw request body to the backend; if
   // express.json() drains it first, proxied POSTs (e.g. the chat prompt_async)
@@ -78,6 +81,9 @@ export function createApp(
   const mounted = express.Router();
   mounted.use('/api/health', (_req, res) =>
     res.json({ ok: true, service: 'opencortex-runtime' }),
+  );
+  mounted.get('/api/metrics', (_req, res) =>
+    res.type('text/plain; version=0.0.4').send(metrics.render(codeSessions)),
   );
   mounted.use('/api', publicRouter(config));
   mounted.use('/api/memory', memoryRouter(config, memory, reviewWorkflowStarter));
@@ -128,6 +134,9 @@ export function createApp(
   if (mountPath !== '/') {
     app.get('/health', (_req, res) =>
       res.json({ ok: true, service: 'opencortex-runtime' }),
+    );
+    app.get('/metrics', (_req, res) =>
+      res.type('text/plain; version=0.0.4').send(metrics.render(codeSessions)),
     );
   }
 

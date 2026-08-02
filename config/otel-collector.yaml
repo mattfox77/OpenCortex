@@ -5,6 +5,13 @@ receivers:
         endpoint: 0.0.0.0:4317
       http:
         endpoint: 0.0.0.0:4318
+  prometheus:
+    config:
+      scrape_configs:
+        - job_name: opencortex-runtime
+          metrics_path: /metrics
+          static_configs:
+            - targets: [host.containers.internal:8080]
 
 processors:
   batch: {}
@@ -23,3 +30,7 @@ service:
       receivers: [otlp]
       processors: [batch]
       exporters: [otlp/jaeger, debug]
+    metrics:
+      receivers: [prometheus]
+      processors: [batch]
+      exporters: [debug]
