@@ -3,6 +3,7 @@ import type { Duration } from '@temporalio/common';
 import {
   cortexTask,
   cortexMonitor,
+  artifactSyncWorkflow,
   memoryIngestWorkflow,
   userProvisioningWorkflow,
   activityRollupWorkflow,
@@ -17,6 +18,7 @@ import {
   statusQuery,
 } from './workflows';
 import type { CortexTaskInput } from './workflows/cortex';
+import type { ArtifactSyncInput } from './workflows/artifactSync';
 import type { MemoryIngestInput } from './workflows/memoryIngest';
 import type { UserProvisioningInput } from './workflows/userProvisioning';
 import type { ActivityRollupInput } from './workflows/activityRollup';
@@ -168,6 +170,52 @@ export async function startMemoryIngest(
   }));
 
   console.log(`✅ Started memory ingest workflow: ${workflowId}`);
+  console.log(`   Trace: ${traceContext.traceId}`);
+  return handle;
+}
+
+// --- Start an artifact sync workflow ---
+export async function startArtifactSync(
+  params: ArtifactSyncInput & {
+    queue?: string;
+    workflowId?: string;
+  },
+) {
+  const client = await getClient();
+  const sourceSystem = params.sourceSystem ?? 'opencortex-artifact-sync';
+  const workflowId =
+    params.workflowId ??
+    `artifact-sync-${sourceSystem}-${Date.now()}`;
+  const traceContext = params.traceContext ?? newTraceContext();
+
+  const handle = await withTraceSpan('opencortex.artifact_sync.start_workflow', traceContext, {
+    'workflow.id': workflowId,
+    'workflow.type': 'ArtifactSyncWorkflow',
+    'artifact_sync.owner_id': params.ownerId,
+    'artifact_sync.source_system': sourceSystem,
+    'artifact_sync.root_dir': params.rootDir,
+  }, async (workflowTraceContext) => client.workflow.start(artifactSyncWorkflow, {
+    taskQueue: params.queue || 'cortex-tasks',
+    workflowId,
+    args: [{
+      rootDir: params.rootDir,
+      ownerId: params.ownerId,
+      sourceSystem,
+      sourceSessionId: params.sourceSessionId,
+      project: params.project,
+      repo: params.repo,
+      scope: params.scope,
+      toolName: params.toolName,
+      identitySubject: params.identitySubject,
+      includeExtensions: params.includeExtensions,
+      excludeDirs: params.excludeDirs,
+      maxFiles: params.maxFiles,
+      maxBytes: params.maxBytes,
+      traceContext: workflowTraceContext ?? traceContext,
+    }],
+  }));
+
+  console.log(`✅ Started artifact sync workflow: ${workflowId}`);
   console.log(`   Trace: ${traceContext.traceId}`);
   return handle;
 }

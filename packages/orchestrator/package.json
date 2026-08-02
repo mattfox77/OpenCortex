@@ -11,6 +11,7 @@
     "workbench-session": "ts-node scripts/start-workbench-session.ts",
     "workbench-session:signal": "ts-node scripts/signal-workbench-session.ts",
     "ingest": "ts-node scripts/ingest-memory.ts",
+    "artifact-sync": "ts-node scripts/artifact-sync.ts",
     "provision-user": "ts-node scripts/provision-user.ts",
     "activity-rollup": "ts-node scripts/activity-rollup.ts",
     "rebuild-projection": "ts-node scripts/rebuild-projection.ts",

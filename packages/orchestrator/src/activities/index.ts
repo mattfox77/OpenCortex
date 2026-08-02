@@ -2,8 +2,8 @@ import { Context } from '@temporalio/activity';
 import { createClient, SupabaseClient } from '@supabase/supabase-js';
 import { execFileSync } from 'child_process';
 import { createHash } from 'crypto';
-import { existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from 'fs';
-import { dirname, join } from 'path';
+import { existsSync, mkdirSync, readFileSync, readdirSync, statSync, writeFileSync } from 'fs';
+import { dirname, join, relative } from 'path';
 import { TraceContext, withTraceSpan } from '../telemetry';
 
 // --- Shared memory client ---
@@ -145,6 +145,16 @@ export interface RuntimePairPromptDraft {
 
 export interface RuntimePairPromptResult {
   draft: RuntimePairPromptDraft;
+}
+
+export interface ArtifactSyncFile {
+  artifactName: string;
+  sourcePath: string;
+  content: string;
+  sha256: string;
+  sizeBytes: number;
+  mimeType: string;
+  modifiedAt: string;
 }
 
 // ================================================================
@@ -636,6 +646,142 @@ export async function rejectRuntimePairPrompt(params: {
       headers: { 'Content-Type': 'application/json' },
     },
   ) as Promise<RuntimePairPromptResult>);
+}
+
+// ================================================================
+// ACTIVITY: Scan filesystem artifacts for ArtifactSyncWorkflow
+// ================================================================
+export async function scanArtifactFiles(params: {
+  rootDir: string;
+  sourceSystem: string;
+  includeExtensions?: string[];
+  excludeDirs?: string[];
+  maxFiles?: number;
+  maxBytes?: number;
+  traceContext?: TraceContext;
+}): Promise<{ rootDir: string; files: ArtifactSyncFile[] }> {
+  return withTraceSpan('opencortex.artifact_sync.scan_files', params.traceContext, {
+    'artifact_sync.root_dir': params.rootDir,
+    'artifact_sync.source_system': params.sourceSystem,
+  }, async () => {
+    const rootDir = params.rootDir;
+    if (!existsSync(rootDir) || !statSync(rootDir).isDirectory()) {
+      throw new Error(`Artifact sync root is not a directory: ${rootDir}`);
+    }
+    const maxFiles = params.maxFiles ?? 200;
+    const maxBytes = params.maxBytes ?? 1024 * 1024;
+    const includeExtensions = new Set(
+      (params.includeExtensions ?? ['.md', '.markdown', '.txt', '.log', '.json', '.jsonl', '.yaml', '.yml'])
+        .map(value => value.toLowerCase()),
+    );
+    const excludeDirs = new Set(params.excludeDirs ?? [
+      '.git',
+      'node_modules',
+      'dist',
+      'build',
+      '.next',
+      '.turbo',
+    ]);
+    const files: ArtifactSyncFile[] = [];
+    const stack = [rootDir];
+
+    while (stack.length > 0 && files.length < maxFiles) {
+      const dir = stack.pop()!;
+      for (const entry of readdirSync(dir, { withFileTypes: true })) {
+        if (entry.name.startsWith('.') && entry.name !== '.opencortex') {
+          continue;
+        }
+        const path = join(dir, entry.name);
+        if (entry.isDirectory()) {
+          if (!excludeDirs.has(entry.name)) {
+            stack.push(path);
+          }
+          continue;
+        }
+        if (!entry.isFile()) {
+          continue;
+        }
+        const extension = fileExtension(entry.name);
+        if (!includeExtensions.has(extension)) {
+          continue;
+        }
+        const stat = statSync(path);
+        if (stat.size > maxBytes) {
+          continue;
+        }
+        let content: string;
+        try {
+          content = readFileSync(path, 'utf8');
+        } catch {
+          continue;
+        }
+        const sourcePath = relative(rootDir, path) || entry.name;
+        files.push({
+          artifactName: entry.name,
+          sourcePath,
+          content,
+          sha256: sha256Hex(content),
+          sizeBytes: Buffer.byteLength(content, 'utf8'),
+          mimeType: inferMimeType(entry.name),
+          modifiedAt: stat.mtime.toISOString(),
+        });
+        if (files.length >= maxFiles) {
+          break;
+        }
+      }
+    }
+
+    return { rootDir, files };
+  });
+}
+
+export async function upsertArtifactSyncState(params: {
+  sourceSystem: string;
+  ownerId: string;
+  status: 'running' | 'ok' | 'failed';
+  project?: string;
+  repo?: string;
+  lastCursor?: string;
+  stats?: Record<string, unknown>;
+  error?: string;
+  traceContext?: TraceContext;
+}): Promise<void> {
+  return withTraceSpan('opencortex.artifact_sync.upsert_state', params.traceContext, {
+    'artifact_sync.source_system': params.sourceSystem,
+    'artifact_sync.owner_id': params.ownerId,
+    'artifact_sync.status': params.status,
+  }, async () => {
+    let query = supabase()
+      .from('sync_state')
+      .select('id')
+      .eq('source_system', params.sourceSystem)
+      .eq('owner_id', params.ownerId);
+    query = params.project ? query.eq('project', params.project) : query.is('project', null);
+    query = params.repo ? query.eq('repo', params.repo) : query.is('repo', null);
+    const existing = await query.maybeSingle();
+    if (existing.error) {
+      throw new Error(`Artifact sync state lookup failed: ${existing.error.message}`);
+    }
+
+    const values = {
+      source_system: params.sourceSystem,
+      owner_id: params.ownerId,
+      project: params.project ?? null,
+      repo: params.repo ?? null,
+      last_cursor: params.lastCursor ?? null,
+      last_run_at: new Date().toISOString(),
+      status: params.status,
+      stats: params.stats ?? {},
+      error: params.error ?? null,
+    };
+
+    const result = existing.data?.id
+      ? await supabase().from('sync_state').update(values).eq('id', existing.data.id)
+      : await supabase().from('sync_state').insert(values);
+    if (result.error) {
+      throw new Error(`Artifact sync state upsert failed: ${result.error.message}`);
+    }
+  });
 }
 
 // ================================================================
@@ -1405,6 +1551,11 @@ function inferMimeType(name: string): string {
     return 'text/plain';
   }
   return 'application/octet-stream';
+}
+
+function fileExtension(name: string): string {
+  const match = /\.[^.]+$/.exec(name);
+  return match?.[0]?.toLowerCase() ?? '';
 }
 
 function firstLineTitle(content: string): string {
