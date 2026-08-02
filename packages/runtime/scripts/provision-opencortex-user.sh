@@ -71,7 +71,8 @@ ensure_linux_user() {
 
 ensure_linux_user
 
-home="/home/$user"
+home_root="${OPENCORTEX_HOME_ROOT:-/home}"
+home="${home_root%/}/$user"
 
 # Per-user git-root "repos" folder in the user's home. This is the cwd the
 # embedded OpenCode session opens into, and the landing place for repos the

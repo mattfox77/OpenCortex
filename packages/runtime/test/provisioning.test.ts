@@ -1,5 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { readFileSync } from 'node:fs';
+import { existsSync, readFileSync } from 'node:fs';
+import { mkdir, mkdtemp, rm, writeFile } from 'node:fs/promises';
+import { tmpdir } from 'node:os';
+import path from 'node:path';
+import { spawnSync } from 'node:child_process';
 import { provisioningCommands } from '../src/system/provisioning.js';
 import type { AppConfig } from '../src/config/config.js';
 
@@ -118,4 +122,130 @@ describe('user provisioner', () => {
     expect(provisioner).toContain('max_attempts=20');
     expect(provisioner).toContain('retrying after passwd lock contention');
   });
+
+  it('seeds staged neutral skills into Codex and OpenCode directories', async () => {
+    const root = await mkdtemp(path.join(tmpdir(), 'opencortex-provision-'));
+    try {
+      const bin = path.join(root, 'bin');
+      const homeRoot = path.join(root, 'home');
+      const workspaceRoot = path.join(root, 'workspaces');
+      const skillsSource = path.join(root, 'staged-skills');
+
+      await mkdir(path.join(skillsSource, 'opencortex-memory'), { recursive: true });
+      await mkdir(path.join(skillsSource, 'opencortex-workbench'), { recursive: true });
+      await writeFile(
+        path.join(skillsSource, 'opencortex-memory', 'SKILL.md'),
+        '---\nname: opencortex-memory\ndescription: Memory acceptance fixture.\n---\n',
+      );
+      await writeFile(
+        path.join(skillsSource, 'opencortex-workbench', 'SKILL.md'),
+        '---\nname: opencortex-workbench\ndescription: Workbench acceptance fixture.\n---\n',
+      );
+      await installProvisioningMocks(bin);
+
+      const result = spawnSync('bash', ['scripts/provision-opencortex-user.sh', 'alice'], {
+        cwd: process.cwd(),
+        encoding: 'utf8',
+        env: {
+          ...process.env,
+          PATH: `${bin}:${process.env.PATH ?? ''}`,
+          OPENCORTEX_HOME_ROOT: homeRoot,
+          OPENCORTEX_WORKSPACE_ROOT: workspaceRoot,
+          OPENCORTEX_SKILLS_DIR: skillsSource,
+        },
+      });
+
+      expect(result.status, result.stderr).toBe(0);
+      for (const target of ['.codex/skills', '.opencode/skills']) {
+        expect(
+          existsSync(
+            path.join(homeRoot, 'alice', target, 'opencortex-memory', 'SKILL.md'),
+          ),
+        ).toBe(true);
+        expect(
+          existsSync(
+            path.join(homeRoot, 'alice', target, 'opencortex-workbench', 'SKILL.md'),
+          ),
+        ).toBe(true);
+      }
+    } finally {
+      await rm(root, { recursive: true, force: true });
+    }
+  });
 });
+
+async function installProvisioningMocks(bin: string) {
+  await mkdir(bin, { recursive: true });
+  await writeExecutable(path.join(bin, 'id'), '#!/usr/bin/env bash\nexit 0\n');
+  await writeExecutable(path.join(bin, 'chown'), '#!/usr/bin/env bash\nexit 0\n');
+  await writeExecutable(path.join(bin, 'chmod'), '#!/usr/bin/env bash\nexit 0\n');
+  await writeExecutable(
+    path.join(bin, 'install'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -gt 0 ] && [ "$1" = "-d" ]; then
+  shift
+  while [ "$#" -gt 0 ]; do
+    case "$1" in
+      -o|-g|-m)
+        shift 2
+        ;;
+      -*)
+        shift
+        ;;
+      *)
+        mkdir -p "$1"
+        shift
+        ;;
+    esac
+  done
+  exit 0
+fi
+exec /usr/bin/install "$@"
+`,
+  );
+  await writeExecutable(
+    path.join(bin, 'sudo'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -ge 2 ] && [ "$1" = "-u" ]; then
+  shift 2
+fi
+exec "$@"
+`,
+  );
+  await writeExecutable(
+    path.join(bin, 'git'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+if [ "$#" -ge 4 ] && [ "$1" = "-C" ] && [ "$3" = "init" ]; then
+  mkdir -p "$2/.git"
+fi
+`,
+  );
+  await writeExecutable(
+    path.join(bin, 'rsync'),
+    `#!/usr/bin/env bash
+set -euo pipefail
+args=()
+for arg in "$@"; do
+  case "$arg" in
+    -*)
+      ;;
+    *)
+      args+=("$arg")
+      ;;
+  esac
+done
+last_index=$((\${#args[@]} - 1))
+src="\${args[$last_index - 1]}"
+dest="\${args[$last_index]}"
+mkdir -p "$dest"
+cp -a "$src"/. "$dest"/
+`,
+  );
+}
+
+async function writeExecutable(file: string, contents: string) {
+  await writeFile(file, contents, { mode: 0o755 });
+}
