@@ -10,6 +10,7 @@ import {
   archiveWorkbenchSessionWorkflow,
   attachWorkbenchIssueWorkflow,
   SessionLauncher,
+  sendWorkbenchPairPromptWorkflow,
   sessionWithActiveThread,
   startWorkbenchSessionWorkflow,
   type CodeSession,
@@ -95,6 +96,12 @@ export type WorkbenchSessionWorkflowIssueAttacher = (
   config: AppConfig,
   workflowId: string,
   params: { issueKey: string; url?: string },
+) => Promise<WorkbenchSessionWorkflowSignal>;
+
+export type WorkbenchSessionWorkflowPairPromptSender = (
+  config: AppConfig,
+  workflowId: string,
+  params: { prompt: string; threadId?: string },
 ) => Promise<WorkbenchSessionWorkflowSignal>;
 
 export function publicRouter(config: AppConfig): express.Router {
@@ -199,6 +206,8 @@ export function apiRouter(
     archiveWorkbenchSessionWorkflow,
   workbenchSessionWorkflowIssueAttacher: WorkbenchSessionWorkflowIssueAttacher =
     attachWorkbenchIssueWorkflow,
+  workbenchSessionWorkflowPairPromptSender: WorkbenchSessionWorkflowPairPromptSender =
+    sendWorkbenchPairPromptWorkflow,
 ): express.Router {
   const router = express.Router();
   const launcher = new SessionLauncher(config);
@@ -744,7 +753,19 @@ export function apiRouter(
             body: 'Pair prompt was sent to OpenCode.',
             draft,
           });
-          return res.json({ draft });
+          const workflowSignal =
+            config.OPENCORTEX_WORKBENCH_SESSION_MODE === 'workflow'
+              ? await sendPairPromptToWorkbenchWorkflow({
+                  workflowProjections,
+                  pairPromptSender: workbenchSessionWorkflowPairPromptSender,
+                  config,
+                  session: resolved.session,
+                  user: req.user!,
+                  prompt: draft.reviewSnapshotText!,
+                  threadId: resolved.session.activeThreadId,
+                })
+              : undefined;
+          return res.json({ draft, workflowSignal });
         } catch (error) {
           draft = pairPrompts.markFailed(draft.id, {
             actor: req.user!,
@@ -1300,7 +1321,7 @@ async function workbenchSessionProjectionForSession(
   user: AuthenticatedUser,
 ): Promise<WorkflowProjection | undefined> {
   const projections = await workflowProjections?.list({
-    ownerId: user.email,
+    ownerId: session.ownerEmail,
     isSuperAdmin: Boolean(user.isSuperAdmin),
     workflowType: 'WorkbenchSessionWorkflow',
     status: 'running',
@@ -1341,6 +1362,29 @@ async function attachIssuesToWorkbenchWorkflow(params: {
     }));
   }
   return signals;
+}
+
+async function sendPairPromptToWorkbenchWorkflow(params: {
+  workflowProjections: WorkflowProjectionStore | undefined;
+  pairPromptSender: WorkbenchSessionWorkflowPairPromptSender;
+  config: AppConfig;
+  session: CodeSession;
+  user: AuthenticatedUser;
+  prompt: string;
+  threadId?: string;
+}): Promise<WorkbenchSessionWorkflowSignal | undefined> {
+  const projection = await workbenchSessionProjectionForSession(
+    params.workflowProjections,
+    params.session,
+    params.user,
+  );
+  if (!projection) {
+    return undefined;
+  }
+  return params.pairPromptSender(params.config, projection.workflowId, {
+    prompt: params.prompt,
+    threadId: params.threadId,
+  });
 }
 
 function optionalQuery(value: unknown): string | undefined {

@@ -14,6 +14,7 @@ import {
   runtimeWorkbenchRouter,
   type WorkbenchSessionWorkflowArchiver,
   type WorkbenchSessionWorkflowIssueAttacher,
+  type WorkbenchSessionWorkflowPairPromptSender,
   type WorkbenchSessionWorkflowStarter,
 } from './routes.js';
 import { SessionStore } from '../code/sessionStore.js';
@@ -40,6 +41,7 @@ export function createApp(
   workbenchSessionWorkflowStarter?: WorkbenchSessionWorkflowStarter,
   workbenchSessionWorkflowArchiver?: WorkbenchSessionWorkflowArchiver,
   workbenchSessionWorkflowIssueAttacher?: WorkbenchSessionWorkflowIssueAttacher,
+  workbenchSessionWorkflowPairPromptSender?: WorkbenchSessionWorkflowPairPromptSender,
 ): express.Express {
   const app = express();
   const mountPath = config.OPENCORTEX_BASE_PATH || '/';
@@ -88,6 +90,7 @@ export function createApp(
       workbenchSessionWorkflowStarter,
       workbenchSessionWorkflowArchiver,
       workbenchSessionWorkflowIssueAttacher,
+      workbenchSessionWorkflowPairPromptSender,
     ),
   );
   mounted.use(

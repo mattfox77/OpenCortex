@@ -28,6 +28,7 @@ import type { CodeSession } from '../src/code/sessionLauncher.js';
 import type {
   WorkbenchSessionWorkflowArchiver,
   WorkbenchSessionWorkflowIssueAttacher,
+  WorkbenchSessionWorkflowPairPromptSender,
   WorkbenchSessionWorkflowStarter,
 } from '../src/http/routes.js';
 
@@ -2152,5 +2153,124 @@ describe('http app', () => {
     expect(JSON.parse(openCode.requests[0].body)).toEqual({
       parts: [{ type: 'text', text: 'approved exact prompt' }],
     });
+  });
+
+  it('signals WorkbenchSessionWorkflow after a pair prompt send in workflow mode', async () => {
+    const openCode = await fakeOpenCode((req, res) => {
+      if (req.url === '/api/session/ses_opencode/prompt_async') {
+        res.statusCode = 204;
+        res.end();
+        return;
+      }
+      res.statusCode = 404;
+      res.end('{}');
+    });
+    const config: AppConfig = {
+      ...testConfig(),
+      NODE_ENV: 'development',
+      OPENCORTEX_WORKBENCH_SESSION_MODE: 'workflow',
+    };
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
+    const chat = new ChatStore(config);
+    const owner = authUser('owner@acme.test');
+    const session = codeSession({
+      id: 'session-with-opencode-id',
+      openCodeSessionId: 'ses_opencode',
+      activeThreadId: 'thread-current',
+      port: openCode.port,
+      urlPath: '/diwan/code/session/session-with-opencode-id/',
+    });
+    sessions.set(session.id, session);
+    const channel = chat.ensureSessionChannel(session, owner);
+    chat.shareChannel(channel.id, 'reviewer@acme.test', owner);
+    const workflowStore = new FakeWorkflowProjectionStore([
+      workflowProjection({
+        workflowId: 'workbench-session-owner-1',
+        runId: 'run-workbench-1',
+        workflowType: 'WorkbenchSessionWorkflow',
+        status: 'running',
+        ownerId: owner.email,
+        sourceSystem: 'opencortex-runtime',
+        sourceSessionId: session.id,
+        entryIds: [],
+      }),
+    ]);
+    const pairPromptSignals: Array<{
+      workflowId: string;
+      params: { prompt: string; threadId?: string };
+    }> = [];
+    const pairPromptSender: WorkbenchSessionWorkflowPairPromptSender = async (
+      _config,
+      workflowId,
+      params,
+    ) => {
+      pairPromptSignals.push({ workflowId, params });
+      return {
+        workflowId,
+        signal: 'sendPairPrompt',
+      };
+    };
+    const app = createApp(
+      config,
+      sessions,
+      chat,
+      undefined,
+      undefined,
+      undefined,
+      workflowStore,
+      undefined,
+      undefined,
+      undefined,
+      pairPromptSender,
+    );
+    const listener = app.listen(0);
+    server = listener;
+    const address = listener.address();
+    if (!address || typeof address === 'string')
+      throw new Error('Expected TCP listener');
+    const base = `http://127.0.0.1:${address.port}`;
+    const ownerAuth = {
+      Authorization: 'Dev owner@acme.test',
+      'Content-Type': 'application/json',
+    };
+    const reviewerAuth = {
+      Authorization: 'Dev reviewer@acme.test',
+      'Content-Type': 'application/json',
+    };
+
+    const created = await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/pair-prompts`,
+      {
+        method: 'POST',
+        headers: ownerAuth,
+        body: JSON.stringify({ initialText: 'workflow prompt' }),
+      },
+    );
+    const createdBody = await created.json();
+    await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/pair-prompts/${createdBody.draft.id}/ready`,
+      { method: 'POST', headers: ownerAuth },
+    );
+
+    const approved = await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/pair-prompts/${createdBody.draft.id}/approve`,
+      { method: 'POST', headers: reviewerAuth },
+    );
+
+    expect(approved.status).toBe(200);
+    const approvedBody = await approved.json();
+    expect(approvedBody.workflowSignal).toEqual({
+      workflowId: 'workbench-session-owner-1',
+      signal: 'sendPairPrompt',
+    });
+    expect(pairPromptSignals).toEqual([
+      {
+        workflowId: 'workbench-session-owner-1',
+        params: {
+          prompt: 'workflow prompt',
+          threadId: 'thread-current',
+        },
+      },
+    ]);
   });
 });

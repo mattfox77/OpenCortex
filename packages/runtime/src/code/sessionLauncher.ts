@@ -249,7 +249,7 @@ export interface WorkbenchSessionWorkflowStart {
 
 export interface WorkbenchSessionWorkflowSignal {
   workflowId: string;
-  signal: 'archiveSession' | 'attachIssue';
+  signal: 'archiveSession' | 'attachIssue' | 'sendPairPrompt';
 }
 
 export async function provisionLocalUser(
@@ -375,6 +375,30 @@ export async function attachWorkbenchIssueWorkflow(
     return {
       workflowId,
       signal: 'attachIssue',
+    };
+  } finally {
+    await connection.close();
+  }
+}
+
+export async function sendWorkbenchPairPromptWorkflow(
+  config: Pick<AppConfig, 'TEMPORAL_ADDRESS' | 'TEMPORAL_NAMESPACE'>,
+  workflowId: string,
+  params: { prompt: string; threadId?: string },
+): Promise<WorkbenchSessionWorkflowSignal> {
+  const connection = await Connection.connect({
+    address: config.TEMPORAL_ADDRESS,
+  });
+  try {
+    const client = new Client({
+      connection,
+      namespace: config.TEMPORAL_NAMESPACE,
+    });
+    const handle = client.workflow.getHandle(workflowId);
+    await handle.signal('sendPairPrompt', params);
+    return {
+      workflowId,
+      signal: 'sendPairPrompt',
     };
   } finally {
     await connection.close();
