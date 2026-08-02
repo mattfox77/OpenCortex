@@ -25,7 +25,10 @@ import type {
 } from '../src/workflows/workflowProjectionStore.js';
 import type { AuthenticatedUser } from '../src/auth/types.js';
 import type { CodeSession } from '../src/code/sessionLauncher.js';
-import type { WorkbenchSessionWorkflowStarter } from '../src/http/routes.js';
+import type {
+  WorkbenchSessionWorkflowArchiver,
+  WorkbenchSessionWorkflowStarter,
+} from '../src/http/routes.js';
 
 let server: Server | undefined;
 const backendListeners: net.Server[] = [];
@@ -115,6 +118,7 @@ function startAppWithWorkflowProjections(
   config: AppConfig,
   workflowProjections: WorkflowProjectionStore,
   workbenchSessionWorkflowStarter?: WorkbenchSessionWorkflowStarter,
+  workbenchSessionWorkflowArchiver?: WorkbenchSessionWorkflowArchiver,
 ) {
   const app = createApp(
     config,
@@ -125,6 +129,7 @@ function startAppWithWorkflowProjections(
     undefined,
     workflowProjections,
     workbenchSessionWorkflowStarter,
+    workbenchSessionWorkflowArchiver,
   );
   const listener = app.listen(0);
   const address = listener.address();
@@ -729,6 +734,85 @@ describe('http app', () => {
       status: 'running',
       ownerId: 'owner@acme.test',
       sourceSessionId: 'session-owner',
+    });
+  });
+
+  it('signals WorkbenchSessionWorkflow archive instead of deleting directly in workflow mode', async () => {
+    const config: AppConfig = {
+      ...testConfig(),
+      NODE_ENV: 'development',
+      OPENCORTEX_WORKBENCH_SESSION_MODE: 'workflow',
+    };
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
+    sessions.set('session-owner', codeSession({
+      id: 'session-owner',
+      ownerEmail: 'owner@acme.test',
+      linuxUser: 'owner',
+    }));
+    const workflowStore = new FakeWorkflowProjectionStore([
+      workflowProjection({
+        workflowId: 'workbench-session-owner-1',
+        runId: 'run-workbench-1',
+        workflowType: 'WorkbenchSessionWorkflow',
+        status: 'running',
+        ownerId: 'owner@acme.test',
+        sourceSystem: 'opencortex-runtime',
+        sourceSessionId: 'session-owner',
+        entryIds: [],
+      }),
+    ]);
+    const archiveSignals: Array<{ workflowId: string; reason?: string }> = [];
+    const archiver: WorkbenchSessionWorkflowArchiver = async (
+      _config,
+      workflowId,
+      reason,
+    ) => {
+      archiveSignals.push({ workflowId, reason });
+      return {
+        workflowId,
+        signal: 'archiveSession',
+      };
+    };
+    const app = createApp(
+      config,
+      sessions,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      workflowStore,
+      undefined,
+      archiver,
+    );
+    const listener = app.listen(0);
+    server = listener;
+    const address = listener.address();
+    if (!address || typeof address === 'string')
+      throw new Error('Expected TCP listener');
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const response = await fetch(`${base}/diwan/api/code/sessions/session-owner`, {
+      method: 'DELETE',
+      headers: { Authorization: 'Dev owner@acme.test' },
+    });
+
+    expect(response.status).toBe(202);
+    const body = await response.json();
+    expect(archiveSignals).toEqual([
+      {
+        workflowId: 'workbench-session-owner-1',
+        reason: 'Archive requested for session session-owner',
+      },
+    ]);
+    expect(sessions.get('session-owner')).toBeDefined();
+    expect(body.workflow).toEqual({
+      workflowId: 'workbench-session-owner-1',
+      signal: 'archiveSession',
+    });
+    expect(body.projection).toMatchObject({
+      workflowId: 'workbench-session-owner-1',
+      sourceSessionId: 'session-owner',
+      status: 'running',
     });
   });
 

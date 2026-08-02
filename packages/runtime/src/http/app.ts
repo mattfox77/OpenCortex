@@ -12,6 +12,7 @@ import {
   publicRouter,
   rawOpenCodeSessionRedirect,
   runtimeWorkbenchRouter,
+  type WorkbenchSessionWorkflowArchiver,
   type WorkbenchSessionWorkflowStarter,
 } from './routes.js';
 import { SessionStore } from '../code/sessionStore.js';
@@ -36,6 +37,7 @@ export function createApp(
   workflowProjections: WorkflowProjectionStore | undefined =
     createWorkflowProjectionStore(config),
   workbenchSessionWorkflowStarter?: WorkbenchSessionWorkflowStarter,
+  workbenchSessionWorkflowArchiver?: WorkbenchSessionWorkflowArchiver,
 ): express.Express {
   const app = express();
   const mountPath = config.OPENCORTEX_BASE_PATH || '/';
@@ -82,6 +84,7 @@ export function createApp(
       undefined,
       workflowProjections,
       workbenchSessionWorkflowStarter,
+      workbenchSessionWorkflowArchiver,
     ),
   );
   mounted.use(

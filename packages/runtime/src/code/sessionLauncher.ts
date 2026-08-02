@@ -247,6 +247,11 @@ export interface WorkbenchSessionWorkflowStart {
   runId: string;
 }
 
+export interface WorkbenchSessionWorkflowSignal {
+  workflowId: string;
+  signal: 'archiveSession';
+}
+
 export async function provisionLocalUser(
   config: ProvisioningConfig,
   user: Pick<AuthenticatedUser, 'email' | 'groups' | 'linuxUser'>,
@@ -322,6 +327,30 @@ export async function startWorkbenchSessionWorkflow(
     return {
       workflowId,
       runId: handle.firstExecutionRunId,
+    };
+  } finally {
+    await connection.close();
+  }
+}
+
+export async function archiveWorkbenchSessionWorkflow(
+  config: Pick<AppConfig, 'TEMPORAL_ADDRESS' | 'TEMPORAL_NAMESPACE'>,
+  workflowId: string,
+  reason?: string,
+): Promise<WorkbenchSessionWorkflowSignal> {
+  const connection = await Connection.connect({
+    address: config.TEMPORAL_ADDRESS,
+  });
+  try {
+    const client = new Client({
+      connection,
+      namespace: config.TEMPORAL_NAMESPACE,
+    });
+    const handle = client.workflow.getHandle(workflowId);
+    await handle.signal('archiveSession', { reason });
+    return {
+      workflowId,
+      signal: 'archiveSession',
     };
   } finally {
     await connection.close();

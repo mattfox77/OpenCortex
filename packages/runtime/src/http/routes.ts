@@ -7,11 +7,13 @@ import { ChatEventHub } from '../chat/eventHub.js';
 import { SlackClient } from '../chat/slackClient.js';
 import {
   activeCodeThread,
+  archiveWorkbenchSessionWorkflow,
   SessionLauncher,
   sessionWithActiveThread,
   startWorkbenchSessionWorkflow,
   type CodeSession,
   type CodeThread,
+  type WorkbenchSessionWorkflowSignal,
   type WorkbenchSessionWorkflowStart,
 } from '../code/sessionLauncher.js';
 import { isSessionRestorable, SessionStore } from '../code/sessionStore.js';
@@ -81,6 +83,12 @@ export type WorkbenchSessionWorkflowStarter = (
   config: AppConfig,
   user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
 ) => Promise<WorkbenchSessionWorkflowStart>;
+
+export type WorkbenchSessionWorkflowArchiver = (
+  config: AppConfig,
+  workflowId: string,
+  reason?: string,
+) => Promise<WorkbenchSessionWorkflowSignal>;
 
 export function publicRouter(config: AppConfig): express.Router {
   const router = express.Router();
@@ -180,6 +188,8 @@ export function apiRouter(
   workflowProjections?: WorkflowProjectionStore,
   workbenchSessionWorkflowStarter: WorkbenchSessionWorkflowStarter =
     startWorkbenchSessionWorkflow,
+  workbenchSessionWorkflowArchiver: WorkbenchSessionWorkflowArchiver =
+    archiveWorkbenchSessionWorkflow,
 ): express.Router {
   const router = express.Router();
   const launcher = new SessionLauncher(config);
@@ -377,22 +387,46 @@ export function apiRouter(
     });
   });
 
-  router.delete('/code/sessions/:id', requireUser, (req, res) => {
-    const session = sessions.get(String(req.params.id));
-    if (
-      !session ||
-      (session.ownerEmail !== req.user!.email && !req.user!.isSuperAdmin)
-    ) {
-      return res.status(404).json({ error: 'code_session_not_found' });
+  router.delete('/code/sessions/:id', requireUser, async (req, res, next) => {
+    try {
+      const session = sessions.get(String(req.params.id));
+      if (
+        !session ||
+        (session.ownerEmail !== req.user!.email && !req.user!.isSuperAdmin)
+      ) {
+        return res.status(404).json({ error: 'code_session_not_found' });
+      }
+      if (config.OPENCORTEX_WORKBENCH_SESSION_MODE === 'workflow') {
+        const projection = await workbenchSessionProjectionForSession(
+          workflowProjections,
+          session,
+          req.user!,
+        );
+        if (!projection) {
+          return res.status(404).json({ error: 'workflow_projection_not_found' });
+        }
+        const workflow = await workbenchSessionWorkflowArchiver(
+          config,
+          projection.workflowId,
+          `Archive requested for session ${session.id}`,
+        );
+        return res.status(202).json({
+          workflow,
+          projection,
+          message: 'archiveSession signal sent.',
+        });
+      }
+      const channel = chat.archiveSessionChannel(session);
+      sessions.delete(session.id);
+      events.publish({
+        type: 'session.archived',
+        channelId: channel?.id ?? `session-${session.id}`,
+        payload: { session, channel },
+      });
+      return res.json({ session, channel });
+    } catch (error) {
+      return next(error);
     }
-    const channel = chat.archiveSessionChannel(session);
-    sessions.delete(session.id);
-    events.publish({
-      type: 'session.archived',
-      channelId: channel?.id ?? `session-${session.id}`,
-      payload: { session, channel },
-    });
-    return res.json({ session, channel });
   });
 
   router.get('/code/sessions/:id/channel', requireUser, (req, res) => {
@@ -1238,6 +1272,23 @@ async function workbenchSessionStartProjection(
     startedAt: timestamp,
     updatedAt: timestamp,
   };
+}
+
+async function workbenchSessionProjectionForSession(
+  workflowProjections: WorkflowProjectionStore | undefined,
+  session: CodeSession,
+  user: AuthenticatedUser,
+): Promise<WorkflowProjection | undefined> {
+  const projections = await workflowProjections?.list({
+    ownerId: user.email,
+    isSuperAdmin: Boolean(user.isSuperAdmin),
+    workflowType: 'WorkbenchSessionWorkflow',
+    status: 'running',
+    sourceSystem: 'opencortex-runtime',
+    sourceSessionId: session.id,
+    limit: 1,
+  });
+  return projections?.[0];
 }
 
 function optionalQuery(value: unknown): string | undefined {
