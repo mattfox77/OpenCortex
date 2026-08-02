@@ -9,6 +9,7 @@ export const internalTokenScopes = [
   'memory:read',
   'memory:write',
   'session',
+  'pair-prompt',
 ] as const;
 
 export type InternalTokenScope = typeof internalTokenScopes[number];

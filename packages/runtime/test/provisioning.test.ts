@@ -16,6 +16,9 @@ const config = {
   OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES: 0,
   OPENCORTEX_REVIEW_MODE: 'local',
   OPENCORTEX_REVIEW_TASK_QUEUE: 'cortex-tasks',
+  OPENCORTEX_PAIR_PROMPT_MODE: 'local',
+  OPENCORTEX_PAIR_PROMPT_TASK_QUEUE: 'cortex-tasks',
+  OPENCORTEX_PAIR_PROMPT_RUNTIME_BASE_URL: 'http://127.0.0.1:8080/api',
   OPENCORTEX_PROVISION_USER_SCRIPT: '/opt/opencortex/scripts/provision-opencortex-user.sh',
 } as AppConfig;
 

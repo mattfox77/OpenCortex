@@ -9,6 +9,7 @@ import {
   activeCodeThread,
   archiveWorkbenchSessionWorkflow,
   attachWorkbenchIssueWorkflow,
+  pairPromptReviewWorkflow,
   reviewMemoryEntryWorkflow,
   SessionLauncher,
   sendWorkbenchPairPromptWorkflow,
@@ -16,6 +17,8 @@ import {
   startWorkbenchSessionWorkflow,
   type CodeSession,
   type CodeThread,
+  type PairPromptWorkflowDecision,
+  type PairPromptWorkflowStart,
   type ReviewWorkflowDecision,
   type ReviewWorkflowStart,
   type WorkbenchSessionWorkflowSignal,
@@ -129,6 +132,19 @@ export type ReviewWorkflowStarter = (
   },
 ) => Promise<ReviewWorkflowStart>;
 
+export type PairPromptWorkflowStarter = (
+  config: AppConfig,
+  user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
+  params: {
+    sessionId: string;
+    draftId: string;
+    channelId: string;
+    ownerId: string;
+    decision: PairPromptWorkflowDecision;
+    reason?: string;
+  },
+) => Promise<PairPromptWorkflowStart>;
+
 export function publicRouter(config: AppConfig): express.Router {
   const router = express.Router();
 
@@ -233,6 +249,8 @@ export function apiRouter(
     attachWorkbenchIssueWorkflow,
   workbenchSessionWorkflowPairPromptSender: WorkbenchSessionWorkflowPairPromptSender =
     sendWorkbenchPairPromptWorkflow,
+  pairPromptWorkflowStarter: PairPromptWorkflowStarter =
+    pairPromptReviewWorkflow,
 ): express.Router {
   const router = express.Router();
   const launcher = new SessionLauncher(config);
@@ -703,6 +721,22 @@ export function apiRouter(
         if (!resolved) {
           return res.status(404).json({ error: 'pair_prompt_not_found' });
         }
+        if (config.OPENCORTEX_PAIR_PROMPT_MODE === 'workflow') {
+          pairPrompts.assertReadyForReview(resolved.draft.id, req.user!);
+          const workflow = await pairPromptWorkflowStarter(config, req.user!, {
+            sessionId: resolved.session.id,
+            draftId: resolved.draft.id,
+            channelId: resolved.channel.id,
+            ownerId: resolved.session.ownerEmail,
+            decision: 'reject',
+            reason: body.reason,
+          });
+          return res.status(202).json({
+            draft: resolved.draft,
+            workflow,
+            message: 'PairPromptWorkflow reject signal sent.',
+          });
+        }
         const draft = pairPrompts.reject(
           resolved.draft.id,
           req.user!,
@@ -736,75 +770,35 @@ export function apiRouter(
         if (!resolved) {
           return res.status(404).json({ error: 'pair_prompt_not_found' });
         }
-        let draft = pairPrompts.startSending(resolved.draft.id, req.user!);
-        await publishPairPromptEvent(chat, events, resolved.channel.id, {
-          type: 'pairPrompt.sending',
-          body: `${req.user!.email} approved a pair prompt; sending to OpenCode.`,
-          draft,
+        if (config.OPENCORTEX_PAIR_PROMPT_MODE === 'workflow') {
+          pairPrompts.assertReadyForReview(resolved.draft.id, req.user!);
+          const workflow = await pairPromptWorkflowStarter(config, req.user!, {
+            sessionId: resolved.session.id,
+            draftId: resolved.draft.id,
+            channelId: resolved.channel.id,
+            ownerId: resolved.session.ownerEmail,
+            decision: 'approve',
+          });
+          return res.status(202).json({
+            draft: resolved.draft,
+            workflow,
+            message: 'PairPromptWorkflow approve signal sent.',
+          });
+        }
+        const result = await approvePairPrompt({
+          config,
+          chat,
+          events,
+          pairPrompts,
+          openCodePromptClient,
+          workflowProjections,
+          workbenchSessionWorkflowPairPromptSender,
+          resolved,
+          user: req.user!,
+          signalWorkbenchWorkflow:
+            config.OPENCORTEX_WORKBENCH_SESSION_MODE === 'workflow',
         });
-
-        const opencodeSessionId =
-          draft.opencodeSessionId ?? resolved.session.openCodeSessionId;
-        if (!opencodeSessionId) {
-          draft = pairPrompts.markFailed(draft.id, {
-            actor: req.user!,
-            failureCode: 'missing_opencode_session_id',
-            failureMessage:
-              'OpenCortex does not yet know the active OpenCode internal session ID.',
-          });
-          await publishPairPromptEvent(chat, events, resolved.channel.id, {
-            type: 'pairPrompt.failed',
-            body: 'Pair prompt send failed before reaching OpenCode.',
-            draft,
-          });
-          return res.status(409).json({ draft });
-        }
-
-        try {
-          const result = await openCodePromptClient.sendPrompt({
-            session: resolved.session,
-            opencodeSessionId,
-            promptText: draft.reviewSnapshotText!,
-            draftId: draft.id,
-            approvedByEmail: req.user!.email,
-          });
-          draft = pairPrompts.markSent(
-            draft.id,
-            req.user!,
-            result.openCodeMessageId,
-          );
-          await publishPairPromptEvent(chat, events, resolved.channel.id, {
-            type: 'pairPrompt.sent',
-            body: 'Pair prompt was sent to OpenCode.',
-            draft,
-          });
-          const workflowSignal =
-            config.OPENCORTEX_WORKBENCH_SESSION_MODE === 'workflow'
-              ? await sendPairPromptToWorkbenchWorkflow({
-                  workflowProjections,
-                  pairPromptSender: workbenchSessionWorkflowPairPromptSender,
-                  config,
-                  session: resolved.session,
-                  user: req.user!,
-                  prompt: draft.reviewSnapshotText!,
-                  threadId: resolved.session.activeThreadId,
-                })
-              : undefined;
-          return res.json({ draft, workflowSignal });
-        } catch (error) {
-          draft = pairPrompts.markFailed(draft.id, {
-            actor: req.user!,
-            failureCode: 'opencode_send_failed',
-            failureMessage:
-              error instanceof Error ? error.message : 'OpenCode send failed',
-          });
-          await publishPairPromptEvent(chat, events, resolved.channel.id, {
-            type: 'pairPrompt.failed',
-            body: 'Pair prompt send failed.',
-            draft,
-          });
-          return res.status(502).json({ draft });
-        }
+        return res.status(result.status).json(result.body);
       } catch (error) {
         return next(error);
       }
@@ -1081,6 +1075,8 @@ export function runtimeWorkbenchRouter(
   config: AppConfig,
   sessions: SessionStore,
   chat: ChatStore,
+  pairPrompts: PairPromptStore,
+  openCodePromptClient: OpenCodePromptClient = new HttpOpenCodePromptClient(),
 ): express.Router {
   const router = express.Router();
   const launcher = new SessionLauncher(config);
@@ -1147,6 +1143,75 @@ export function runtimeWorkbenchRouter(
         payload: { session, channel },
       });
       return res.json({ session, channel });
+    },
+  );
+
+  router.post(
+    '/code/sessions/:id/pair-prompts/:draftId/reject',
+    requireInternalToken(config, ['pair-prompt']),
+    async (req, res, next) => {
+      try {
+        const body = z.object({ reason: z.string().optional() }).parse(req.body);
+        const token = res.locals.internalToken as VerifiedInternalToken;
+        const user = userFromInternalToken(token);
+        const resolved = resolveDraftAccess(
+          sessions,
+          chat,
+          pairPrompts,
+          String(req.params.id),
+          String(req.params.draftId),
+          user,
+        );
+        if (!resolved) {
+          return res.status(404).json({ error: 'pair_prompt_not_found' });
+        }
+        const draft = pairPrompts.reject(resolved.draft.id, user, body.reason);
+        await publishPairPromptEvent(chat, events, resolved.channel.id, {
+          type: 'pairPrompt.rejected',
+          body: `${user.email} rejected a pair prompt.`,
+          draft,
+        });
+        return res.json({ draft });
+      } catch (error) {
+        return next(error);
+      }
+    },
+  );
+
+  router.post(
+    '/code/sessions/:id/pair-prompts/:draftId/approve',
+    requireInternalToken(config, ['pair-prompt']),
+    async (req, res, next) => {
+      try {
+        const token = res.locals.internalToken as VerifiedInternalToken;
+        const user = userFromInternalToken(token);
+        const resolved = resolveDraftAccess(
+          sessions,
+          chat,
+          pairPrompts,
+          String(req.params.id),
+          String(req.params.draftId),
+          user,
+        );
+        if (!resolved) {
+          return res.status(404).json({ error: 'pair_prompt_not_found' });
+        }
+        const result = await approvePairPrompt({
+          config,
+          chat,
+          events,
+          pairPrompts,
+          openCodePromptClient,
+          workflowProjections: undefined,
+          workbenchSessionWorkflowPairPromptSender: undefined,
+          resolved,
+          user,
+          signalWorkbenchWorkflow: false,
+        });
+        return res.status(result.status).json(result.body);
+      } catch (error) {
+        return next(error);
+      }
     },
   );
 
@@ -1479,6 +1544,103 @@ async function sendPairPromptToWorkbenchWorkflow(params: {
     prompt: params.prompt,
     threadId: params.threadId,
   });
+}
+
+async function approvePairPrompt(params: {
+  config: AppConfig;
+  chat: ChatStore;
+  events: ChatEventHub;
+  pairPrompts: PairPromptStore;
+  openCodePromptClient: OpenCodePromptClient;
+  workflowProjections: WorkflowProjectionStore | undefined;
+  workbenchSessionWorkflowPairPromptSender:
+    | WorkbenchSessionWorkflowPairPromptSender
+    | undefined;
+  resolved: { session: CodeSession; channel: ChatChannel; draft: PairPromptDraft };
+  user: AuthenticatedUser;
+  signalWorkbenchWorkflow: boolean;
+}): Promise<{
+  status: number;
+  body: {
+    draft: PairPromptDraft;
+    workflowSignal?: WorkbenchSessionWorkflowSignal;
+  };
+}> {
+  let draft = params.pairPrompts.startSending(
+    params.resolved.draft.id,
+    params.user,
+  );
+  await publishPairPromptEvent(params.chat, params.events, params.resolved.channel.id, {
+    type: 'pairPrompt.sending',
+    body: `${params.user.email} approved a pair prompt; sending to OpenCode.`,
+    draft,
+  });
+
+  const opencodeSessionId =
+    draft.opencodeSessionId ?? params.resolved.session.openCodeSessionId;
+  if (!opencodeSessionId) {
+    draft = params.pairPrompts.markFailed(draft.id, {
+      actor: params.user,
+      failureCode: 'missing_opencode_session_id',
+      failureMessage:
+        'OpenCortex does not yet know the active OpenCode internal session ID.',
+    });
+    await publishPairPromptEvent(params.chat, params.events, params.resolved.channel.id, {
+      type: 'pairPrompt.failed',
+      body: 'Pair prompt send failed before reaching OpenCode.',
+      draft,
+    });
+    return { status: 409, body: { draft } };
+  }
+
+  try {
+    const result = await params.openCodePromptClient.sendPrompt({
+      session: params.resolved.session,
+      opencodeSessionId,
+      promptText: draft.reviewSnapshotText!,
+      draftId: draft.id,
+      approvedByEmail: params.user.email,
+    });
+    draft = params.pairPrompts.markSent(
+      draft.id,
+      params.user,
+      result.openCodeMessageId,
+    );
+    await publishPairPromptEvent(params.chat, params.events, params.resolved.channel.id, {
+      type: 'pairPrompt.sent',
+      body: 'Pair prompt was sent to OpenCode.',
+      draft,
+    });
+    const workflowSignal =
+      params.signalWorkbenchWorkflow && params.workbenchSessionWorkflowPairPromptSender
+        ? await sendPairPromptToWorkbenchWorkflow({
+            workflowProjections: params.workflowProjections,
+            pairPromptSender: params.workbenchSessionWorkflowPairPromptSender,
+            config: params.config,
+            session: params.resolved.session,
+            user: params.user,
+            prompt: draft.reviewSnapshotText!,
+            threadId: params.resolved.session.activeThreadId,
+          })
+        : undefined;
+    return {
+      status: 200,
+      body: { draft, ...(workflowSignal ? { workflowSignal } : {}) },
+    };
+  } catch (error) {
+    draft = params.pairPrompts.markFailed(draft.id, {
+      actor: params.user,
+      failureCode: 'opencode_send_failed',
+      failureMessage:
+        error instanceof Error ? error.message : 'OpenCode send failed',
+    });
+    await publishPairPromptEvent(params.chat, params.events, params.resolved.channel.id, {
+      type: 'pairPrompt.failed',
+      body: 'Pair prompt send failed.',
+      draft,
+    });
+    return { status: 502, body: { draft } };
+  }
 }
 
 function optionalQuery(value: unknown): string | undefined {

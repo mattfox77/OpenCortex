@@ -215,6 +215,12 @@ export class PairPromptStore {
     return this.requireDraft(draftId);
   }
 
+  assertReadyForReview(draftId: string, actor: AuthenticatedUser): PairPromptDraft {
+    const draft = this.requireDraft(draftId);
+    this.assertReviewerAllowed(draft, actor, 'ready');
+    return draft;
+  }
+
   startSending(draftId: string, actor: AuthenticatedUser): PairPromptDraft {
     const draft = this.requireDraft(draftId);
     this.assertReviewerAllowed(draft, actor, 'ready', 'failed');

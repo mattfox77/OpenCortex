@@ -27,6 +27,7 @@ import type {
 import type { AuthenticatedUser } from '../src/auth/types.js';
 import type { CodeSession } from '../src/code/sessionLauncher.js';
 import type {
+  PairPromptWorkflowStarter,
   ReviewWorkflowStarter,
   WorkbenchSessionWorkflowArchiver,
   WorkbenchSessionWorkflowIssueAttacher,
@@ -72,6 +73,9 @@ function testConfig(): AppConfig {
     OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES: 0,
     OPENCORTEX_REVIEW_MODE: 'local',
     OPENCORTEX_REVIEW_TASK_QUEUE: 'cortex-tasks',
+    OPENCORTEX_PAIR_PROMPT_MODE: 'local',
+    OPENCORTEX_PAIR_PROMPT_TASK_QUEUE: 'cortex-tasks',
+    OPENCORTEX_PAIR_PROMPT_RUNTIME_BASE_URL: 'http://127.0.0.1:8080/api',
     OPENCORTEX_PROVISION_USER_MODE: 'local',
     OPENCORTEX_PROVISIONING_TASK_QUEUE: 'cortex-tasks',
     OPENCORTEX_PROVISIONING_REQUIRED_TOOLS: ['node', 'npm', 'git', 'opencode', 'cortex'],
@@ -2243,6 +2247,103 @@ describe('http app', () => {
     const approvalBody = await reviewerApproval.json();
     expect(approvalBody.draft.status).toBe('failed');
     expect(approvalBody.draft.failureCode).toBe('missing_opencode_session_id');
+  });
+
+  it('starts PairPromptWorkflow for approvals in pair-prompt workflow mode', async () => {
+    const config: AppConfig = {
+      ...testConfig(),
+      NODE_ENV: 'development',
+      OPENCORTEX_PAIR_PROMPT_MODE: 'workflow',
+    };
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
+    const chat = new ChatStore(config);
+    const owner = authUser('owner@acme.test');
+    const session = codeSession({
+      id: 'session-with-opencode-id',
+      openCodeSessionId: 'ses_opencode',
+    });
+    sessions.set(session.id, session);
+    const channel = chat.ensureSessionChannel(session, owner);
+    chat.shareChannel(channel.id, 'reviewer@acme.test', owner);
+    const starts: Parameters<PairPromptWorkflowStarter>[2][] = [];
+    const pairPromptWorkflowStarter: PairPromptWorkflowStarter = async (
+      _config,
+      _user,
+      params,
+    ) => {
+      starts.push(params);
+      return {
+        workflowId: 'pair-prompt-workflow-1',
+        runId: 'run-pair-prompt-1',
+        signal: 'approve',
+      };
+    };
+    const app = createApp(
+      config,
+      sessions,
+      chat,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      pairPromptWorkflowStarter,
+    );
+    const listener = app.listen(0);
+    server = listener;
+    const address = listener.address();
+    if (!address || typeof address === 'string')
+      throw new Error('Expected TCP listener');
+    const base = `http://127.0.0.1:${address.port}`;
+    const ownerAuth = {
+      Authorization: 'Dev owner@acme.test',
+      'Content-Type': 'application/json',
+    };
+    const reviewerAuth = {
+      Authorization: 'Dev reviewer@acme.test',
+      'Content-Type': 'application/json',
+    };
+
+    const created = await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/pair-prompts`,
+      {
+        method: 'POST',
+        headers: ownerAuth,
+        body: JSON.stringify({ initialText: 'workflow approved prompt' }),
+      },
+    );
+    const createdBody = await created.json();
+    await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/pair-prompts/${createdBody.draft.id}/ready`,
+      { method: 'POST', headers: ownerAuth },
+    );
+
+    const approved = await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/pair-prompts/${createdBody.draft.id}/approve`,
+      { method: 'POST', headers: reviewerAuth },
+    );
+
+    expect(approved.status).toBe(202);
+    const approvedBody = await approved.json();
+    expect(approvedBody.draft.status).toBe('ready');
+    expect(approvedBody.workflow).toEqual({
+      workflowId: 'pair-prompt-workflow-1',
+      runId: 'run-pair-prompt-1',
+      signal: 'approve',
+    });
+    expect(starts).toEqual([
+      {
+        sessionId: session.id,
+        draftId: createdBody.draft.id,
+        channelId: channel.id,
+        ownerId: 'owner@acme.test',
+        decision: 'approve',
+      },
+    ]);
   });
 
   it('sends an approved pair prompt to the stored OpenCode session', async () => {

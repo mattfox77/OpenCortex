@@ -131,6 +131,22 @@ export interface ReviewMemoryEntryResult {
   review: MemoryEntryReview;
 }
 
+export interface RuntimePairPromptDraft {
+  id: string;
+  sessionId: string;
+  channelId: string;
+  status: string;
+  reviewSnapshotText?: string;
+  reviewedByEmail?: string;
+  openCodeMessageId?: string;
+  failureCode?: string;
+  failureMessage?: string;
+}
+
+export interface RuntimePairPromptResult {
+  draft: RuntimePairPromptDraft;
+}
+
 // ================================================================
 // ACTIVITY: Execute a CLI command via OpenCode
 // ================================================================
@@ -569,6 +585,57 @@ export async function archiveRuntimeWorkbenchSession(params: {
       ...(payload.channel ? { channel: payload.channel } : {}),
     };
   });
+}
+
+// ================================================================
+// ACTIVITY: Apply pair-prompt review decisions through runtime
+// ================================================================
+export async function approveRuntimePairPrompt(params: {
+  sessionId: string;
+  draftId: string;
+  runtimeBaseUrl?: string;
+  authorizationHeader?: string;
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
+}): Promise<RuntimePairPromptResult> {
+  return withTraceSpan('opencortex.pair_prompt.approve_runtime', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'workbench.session_id': params.sessionId,
+    'pair_prompt.draft_id': params.draftId,
+  }, async () => runtimeJson(
+    params,
+    `/runtime/code/sessions/${encodeURIComponent(params.sessionId)}/pair-prompts/${encodeURIComponent(params.draftId)}/approve`,
+    { method: 'POST' },
+    [409, 502],
+  ) as Promise<RuntimePairPromptResult>);
+}
+
+export async function rejectRuntimePairPrompt(params: {
+  sessionId: string;
+  draftId: string;
+  reason?: string;
+  runtimeBaseUrl?: string;
+  authorizationHeader?: string;
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
+}): Promise<RuntimePairPromptResult> {
+  return withTraceSpan('opencortex.pair_prompt.reject_runtime', params.traceContext, {
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+    'workbench.session_id': params.sessionId,
+    'pair_prompt.draft_id': params.draftId,
+  }, async () => runtimeJson(
+    params,
+    `/runtime/code/sessions/${encodeURIComponent(params.sessionId)}/pair-prompts/${encodeURIComponent(params.draftId)}/reject`,
+    {
+      method: 'POST',
+      body: JSON.stringify({ reason: params.reason }),
+      headers: { 'Content-Type': 'application/json' },
+    },
+  ) as Promise<RuntimePairPromptResult>);
 }
 
 // ================================================================

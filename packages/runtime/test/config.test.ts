@@ -203,6 +203,37 @@ describe('runtime config compatibility', () => {
     expect(legacy.OPENCORTEX_REVIEW_MODE).toBe('workflow');
     expect(legacy.OPENCORTEX_REVIEW_TASK_QUEUE).toBe('legacy-review-decisions');
   });
+
+  it('keeps pair-prompt workflow integration opt-in', () => {
+    const local = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+    });
+    const workflow = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      OPENCORTEX_PAIR_PROMPT_MODE: 'workflow',
+      OPENCORTEX_PAIR_PROMPT_TASK_QUEUE: 'pair-prompts',
+      OPENCORTEX_PAIR_PROMPT_RUNTIME_BASE_URL: 'http://runtime.internal/api',
+    });
+    const legacy = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      DIWAN_PAIR_PROMPT_MODE: 'workflow',
+      DIWAN_PAIR_PROMPT_TASK_QUEUE: 'legacy-pair-prompts',
+      DIWAN_PAIR_PROMPT_RUNTIME_BASE_URL: 'http://legacy-runtime.internal/api',
+    });
+
+    expect(local.OPENCORTEX_PAIR_PROMPT_MODE).toBe('local');
+    expect(local.OPENCORTEX_PAIR_PROMPT_TASK_QUEUE).toBe('cortex-tasks');
+    expect(local.OPENCORTEX_PAIR_PROMPT_RUNTIME_BASE_URL).toBe('http://127.0.0.1:8080/api');
+    expect(workflow.OPENCORTEX_PAIR_PROMPT_MODE).toBe('workflow');
+    expect(workflow.OPENCORTEX_PAIR_PROMPT_TASK_QUEUE).toBe('pair-prompts');
+    expect(workflow.OPENCORTEX_PAIR_PROMPT_RUNTIME_BASE_URL).toBe('http://runtime.internal/api');
+    expect(legacy.OPENCORTEX_PAIR_PROMPT_MODE).toBe('workflow');
+    expect(legacy.OPENCORTEX_PAIR_PROMPT_TASK_QUEUE).toBe('legacy-pair-prompts');
+    expect(legacy.OPENCORTEX_PAIR_PROMPT_RUNTIME_BASE_URL).toBe('http://legacy-runtime.internal/api');
+  });
 });
 
 function requiredAuthEnv(): NodeJS.ProcessEnv {

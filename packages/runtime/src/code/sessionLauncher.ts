@@ -249,6 +249,15 @@ type ReviewWorkflowConfig = Pick<
   | 'TEMPORAL_NAMESPACE'
 >;
 
+type PairPromptWorkflowConfig = Pick<
+  AppConfig,
+  | 'OPENCORTEX_INTERNAL_TOKEN_SECRET'
+  | 'OPENCORTEX_PAIR_PROMPT_RUNTIME_BASE_URL'
+  | 'OPENCORTEX_PAIR_PROMPT_TASK_QUEUE'
+  | 'TEMPORAL_ADDRESS'
+  | 'TEMPORAL_NAMESPACE'
+>;
+
 export interface WorkbenchSessionWorkflowStart {
   workflowId: string;
   runId: string;
@@ -269,6 +278,14 @@ export interface ReviewWorkflowStart {
   workflowId: string;
   runId: string;
   signal: 'approve' | 'reject' | 'markNoise' | 'requestChanges';
+}
+
+export type PairPromptWorkflowDecision = 'approve' | 'reject';
+
+export interface PairPromptWorkflowStart {
+  workflowId: string;
+  runId: string;
+  signal: PairPromptWorkflowDecision;
 }
 
 export async function provisionLocalUser(
@@ -469,6 +486,57 @@ export async function reviewMemoryEntryWorkflow(
   }
 }
 
+export async function pairPromptReviewWorkflow(
+  config: PairPromptWorkflowConfig,
+  user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
+  params: {
+    sessionId: string;
+    draftId: string;
+    channelId: string;
+    ownerId: string;
+    decision: PairPromptWorkflowDecision;
+    reason?: string;
+    workflowId?: string;
+  },
+): Promise<PairPromptWorkflowStart> {
+  const token = await mintInternalWorkflowToken(config, user, ['pair-prompt']);
+  const connection = await Connection.connect({
+    address: config.TEMPORAL_ADDRESS,
+  });
+  try {
+    const client = new Client({
+      connection,
+      namespace: config.TEMPORAL_NAMESPACE,
+    });
+    const workflowId =
+      params.workflowId ??
+      `pair-prompt-${params.draftId}-${Date.now()}`;
+    const handle = await client.workflow.start('pairPromptWorkflow', {
+      taskQueue: config.OPENCORTEX_PAIR_PROMPT_TASK_QUEUE,
+      workflowId,
+      args: [{
+        sessionId: params.sessionId,
+        draftId: params.draftId,
+        channelId: params.channelId,
+        ownerId: params.ownerId,
+        runtimeBaseUrl: config.OPENCORTEX_PAIR_PROMPT_RUNTIME_BASE_URL,
+        authorizationHeader: `Bearer ${token}`,
+      }],
+    });
+    await handle.signal(params.decision, {
+      reviewerEmail: user.email,
+      reason: params.reason,
+    });
+    return {
+      workflowId,
+      runId: handle.firstExecutionRunId,
+      signal: params.decision,
+    };
+  } finally {
+    await connection.close();
+  }
+}
+
 function reviewWorkflowSignal(
   review: ReviewWorkflowDecision,
 ): ReviewWorkflowStart['signal'] {
@@ -520,6 +588,26 @@ async function mintRuntimeSessionToken(
       linuxUser: user.linuxUser,
     },
     scopes: ['session'],
+    secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+    ttlSeconds: 3600,
+  });
+  return minted.token;
+}
+
+async function mintInternalWorkflowToken(
+  config: Pick<AppConfig, 'OPENCORTEX_INTERNAL_TOKEN_SECRET'>,
+  user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
+  scopes: Array<'pair-prompt'>,
+): Promise<string> {
+  const { mintInternalToken } = await import('../auth/internalToken.js');
+  const minted = await mintInternalToken({
+    user: {
+      sub: user.sub,
+      email: user.email,
+      groups: [],
+      linuxUser: user.linuxUser,
+    },
+    scopes,
     secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
     ttlSeconds: 3600,
   });

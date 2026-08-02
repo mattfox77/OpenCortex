@@ -12,6 +12,7 @@ import {
   publicRouter,
   rawOpenCodeSessionRedirect,
   runtimeWorkbenchRouter,
+  type PairPromptWorkflowStarter,
   type ReviewWorkflowStarter,
   type WorkbenchSessionWorkflowArchiver,
   type WorkbenchSessionWorkflowIssueAttacher,
@@ -44,6 +45,7 @@ export function createApp(
   workbenchSessionWorkflowIssueAttacher?: WorkbenchSessionWorkflowIssueAttacher,
   workbenchSessionWorkflowPairPromptSender?: WorkbenchSessionWorkflowPairPromptSender,
   reviewWorkflowStarter?: ReviewWorkflowStarter,
+  pairPromptWorkflowStarter?: PairPromptWorkflowStarter,
 ): express.Express {
   const app = express();
   const mountPath = config.OPENCORTEX_BASE_PATH || '/';
@@ -77,7 +79,10 @@ export function createApp(
   );
   mounted.use('/api', publicRouter(config));
   mounted.use('/api/memory', memoryRouter(config, memory, reviewWorkflowStarter));
-  mounted.use('/api/runtime', runtimeWorkbenchRouter(config, codeSessions, chat));
+  mounted.use(
+    '/api/runtime',
+    runtimeWorkbenchRouter(config, codeSessions, chat, pairPrompts),
+  );
   mounted.use(
     '/api',
     oidcAuth(config),
@@ -93,6 +98,7 @@ export function createApp(
       workbenchSessionWorkflowArchiver,
       workbenchSessionWorkflowIssueAttacher,
       workbenchSessionWorkflowPairPromptSender,
+      pairPromptWorkflowStarter,
     ),
   );
   mounted.use(
