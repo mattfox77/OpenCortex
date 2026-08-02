@@ -8,6 +8,7 @@ import { SlackClient } from '../chat/slackClient.js';
 import {
   activeCodeThread,
   archiveWorkbenchSessionWorkflow,
+  attachWorkbenchIssueWorkflow,
   SessionLauncher,
   sessionWithActiveThread,
   startWorkbenchSessionWorkflow,
@@ -88,6 +89,12 @@ export type WorkbenchSessionWorkflowArchiver = (
   config: AppConfig,
   workflowId: string,
   reason?: string,
+) => Promise<WorkbenchSessionWorkflowSignal>;
+
+export type WorkbenchSessionWorkflowIssueAttacher = (
+  config: AppConfig,
+  workflowId: string,
+  params: { issueKey: string; url?: string },
 ) => Promise<WorkbenchSessionWorkflowSignal>;
 
 export function publicRouter(config: AppConfig): express.Router {
@@ -190,6 +197,8 @@ export function apiRouter(
     startWorkbenchSessionWorkflow,
   workbenchSessionWorkflowArchiver: WorkbenchSessionWorkflowArchiver =
     archiveWorkbenchSessionWorkflow,
+  workbenchSessionWorkflowIssueAttacher: WorkbenchSessionWorkflowIssueAttacher =
+    attachWorkbenchIssueWorkflow,
 ): express.Router {
   const router = express.Router();
   const launcher = new SessionLauncher(config);
@@ -781,7 +790,7 @@ export function apiRouter(
   router.post(
     '/code/sessions/:id/jira-links',
     requireUser,
-    (req, res, next) => {
+    async (req, res, next) => {
       try {
         const body = z
           .object({
@@ -847,7 +856,18 @@ export function apiRouter(
           channelId: resolved.channel.id,
           payload: { sessionId: resolved.session.id, links },
         });
-        return res.status(201).json({ links });
+        const workflowSignals =
+          config.OPENCORTEX_WORKBENCH_SESSION_MODE === 'workflow'
+            ? await attachIssuesToWorkbenchWorkflow({
+                workflowProjections,
+                issueAttacher: workbenchSessionWorkflowIssueAttacher,
+                config,
+                session: resolved.session,
+                user: req.user!,
+                links,
+              })
+            : [];
+        return res.status(201).json({ links, workflowSignals });
       } catch (error) {
         return next(error);
       }
@@ -1289,6 +1309,38 @@ async function workbenchSessionProjectionForSession(
     limit: 1,
   });
   return projections?.[0];
+}
+
+async function attachIssuesToWorkbenchWorkflow(params: {
+  workflowProjections: WorkflowProjectionStore | undefined;
+  issueAttacher: WorkbenchSessionWorkflowIssueAttacher;
+  config: AppConfig;
+  session: CodeSession;
+  user: AuthenticatedUser;
+  links: Array<{ kind: string; targetKey?: string; targetUrl?: string }>;
+}): Promise<WorkbenchSessionWorkflowSignal[]> {
+  const issueLinks = params.links.filter(
+    link => link.kind === 'issue' && link.targetKey,
+  );
+  if (issueLinks.length === 0) {
+    return [];
+  }
+  const projection = await workbenchSessionProjectionForSession(
+    params.workflowProjections,
+    params.session,
+    params.user,
+  );
+  if (!projection) {
+    return [];
+  }
+  const signals: WorkbenchSessionWorkflowSignal[] = [];
+  for (const link of issueLinks) {
+    signals.push(await params.issueAttacher(params.config, projection.workflowId, {
+      issueKey: link.targetKey!,
+      url: link.targetUrl,
+    }));
+  }
+  return signals;
 }
 
 function optionalQuery(value: unknown): string | undefined {

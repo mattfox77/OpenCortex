@@ -27,6 +27,7 @@ import type { AuthenticatedUser } from '../src/auth/types.js';
 import type { CodeSession } from '../src/code/sessionLauncher.js';
 import type {
   WorkbenchSessionWorkflowArchiver,
+  WorkbenchSessionWorkflowIssueAttacher,
   WorkbenchSessionWorkflowStarter,
 } from '../src/http/routes.js';
 
@@ -1770,6 +1771,95 @@ describe('http app', () => {
     expect(detailBody.integrationFormat.descriptionSection).toContain(
       '## OpenCortex Integration',
     );
+  });
+
+  it('signals WorkbenchSessionWorkflow when an issue is attached in workflow mode', async () => {
+    const config: AppConfig = {
+      ...testConfig(),
+      NODE_ENV: 'development',
+      OPENCORTEX_WORKBENCH_SESSION_MODE: 'workflow',
+    };
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
+    const chat = new ChatStore(config);
+    const owner = authUser('owner@acme.test');
+    const session = codeSession({
+      id: 'session-owner',
+      ownerEmail: owner.email,
+      linuxUser: owner.linuxUser,
+    });
+    sessions.set(session.id, session);
+    chat.ensureSessionChannel(session, owner);
+    const workflowStore = new FakeWorkflowProjectionStore([
+      workflowProjection({
+        workflowId: 'workbench-session-owner-1',
+        runId: 'run-workbench-1',
+        workflowType: 'WorkbenchSessionWorkflow',
+        status: 'running',
+        ownerId: owner.email,
+        sourceSystem: 'opencortex-runtime',
+        sourceSessionId: session.id,
+        entryIds: [],
+      }),
+    ]);
+    const issueSignals: Array<{
+      workflowId: string;
+      params: { issueKey: string; url?: string };
+    }> = [];
+    const issueAttacher: WorkbenchSessionWorkflowIssueAttacher = async (
+      _config,
+      workflowId,
+      params,
+    ) => {
+      issueSignals.push({ workflowId, params });
+      return {
+        workflowId,
+        signal: 'attachIssue',
+      };
+    };
+    const app = createApp(
+      config,
+      sessions,
+      chat,
+      undefined,
+      undefined,
+      undefined,
+      workflowStore,
+      undefined,
+      undefined,
+      issueAttacher,
+    );
+    server = app.listen(0);
+    const address = server.address();
+    if (!address || typeof address === 'string')
+      throw new Error('Expected TCP listener');
+    const base = `http://127.0.0.1:${address.port}`;
+
+    const response = await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/jira-links`,
+      {
+        method: 'POST',
+        headers: {
+          Authorization: 'Dev owner@acme.test',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ reference: 'OC-456' }),
+      },
+    );
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(issueSignals).toEqual([
+      {
+        workflowId: 'workbench-session-owner-1',
+        params: { issueKey: 'OC-456' },
+      },
+    ]);
+    expect(body.workflowSignals).toEqual([
+      {
+        workflowId: 'workbench-session-owner-1',
+        signal: 'attachIssue',
+      },
+    ]);
   });
 
   it('lets shared session members manually tag teams and search by team', async () => {
