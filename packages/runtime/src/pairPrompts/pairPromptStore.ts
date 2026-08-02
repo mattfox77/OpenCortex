@@ -37,6 +37,13 @@ export interface PairPromptDraft {
   failureMessage?: string;
   retryCount: number;
   openCodeMessageId?: string;
+  workflowId?: string;
+  workflowRunId?: string;
+  workflowStartedAt?: string;
+  responseText?: string;
+  responseCapturedAt?: string;
+  responseSource?: string;
+  responseMessageId?: string;
 }
 
 type StoredPairPromptDraft = Omit<PairPromptDraft, 'sessionId'> & {
@@ -90,6 +97,21 @@ type PairPromptEvent =
       reviewedByEmail?: string;
       failureCode: string;
       failureMessage: string;
+    }
+  | {
+      type: 'workflowStarted';
+      draftId: string;
+      workflowId: string;
+      runId: string;
+      startedAt: string;
+    }
+  | {
+      type: 'responseCaptured';
+      draftId: string;
+      capturedAt: string;
+      text: string;
+      source?: string;
+      messageId?: string;
     };
 
 const maxPromptBytes = 64 * 1024;
@@ -269,6 +291,39 @@ export class PairPromptStore {
     return this.requireDraft(draftId);
   }
 
+  markWorkflowStarted(
+    draftId: string,
+    workflow: { workflowId: string; runId: string },
+  ): PairPromptDraft {
+    this.record({
+      type: 'workflowStarted',
+      draftId,
+      workflowId: workflow.workflowId,
+      runId: workflow.runId,
+      startedAt: new Date().toISOString(),
+    });
+    return this.requireDraft(draftId);
+  }
+
+  captureResponse(
+    draftId: string,
+    input: { text: string; source?: string; messageId?: string },
+  ): PairPromptDraft {
+    const text = normalizePromptText(input.text);
+    if (!text.trim()) {
+      throw new Error('Pair prompt response text is required');
+    }
+    this.record({
+      type: 'responseCaptured',
+      draftId,
+      capturedAt: new Date().toISOString(),
+      text,
+      source: input.source?.trim() || undefined,
+      messageId: input.messageId?.trim() || undefined,
+    });
+    return this.requireDraft(draftId);
+  }
+
   private assertReviewerAllowed(
     draft: PairPromptDraft,
     actor: AuthenticatedUser,
@@ -352,6 +407,17 @@ export class PairPromptStore {
         draft.failedAt = event.failedAt;
         draft.failureCode = event.failureCode;
         draft.failureMessage = event.failureMessage;
+        break;
+      case 'workflowStarted':
+        draft.workflowId = event.workflowId;
+        draft.workflowRunId = event.runId;
+        draft.workflowStartedAt = event.startedAt;
+        break;
+      case 'responseCaptured':
+        draft.responseText = event.text;
+        draft.responseCapturedAt = event.capturedAt;
+        draft.responseSource = event.source;
+        draft.responseMessageId = event.messageId;
         break;
     }
   }

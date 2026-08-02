@@ -13,6 +13,7 @@ import {
   rawOpenCodeSessionRedirect,
   runtimeWorkbenchRouter,
   type PairPromptWorkflowStarter,
+  type PairPromptResponseSignaler,
   type ReviewWorkflowStarter,
   type WorkbenchSessionWorkflowArchiver,
   type WorkbenchSessionWorkflowIssueAttacher,
@@ -46,6 +47,7 @@ export function createApp(
   workbenchSessionWorkflowPairPromptSender?: WorkbenchSessionWorkflowPairPromptSender,
   reviewWorkflowStarter?: ReviewWorkflowStarter,
   pairPromptWorkflowStarter?: PairPromptWorkflowStarter,
+  pairPromptResponseSignaler?: PairPromptResponseSignaler,
 ): express.Express {
   const app = express();
   const mountPath = config.OPENCORTEX_BASE_PATH || '/';
@@ -99,6 +101,7 @@ export function createApp(
       workbenchSessionWorkflowIssueAttacher,
       workbenchSessionWorkflowPairPromptSender,
       pairPromptWorkflowStarter,
+      pairPromptResponseSignaler,
     ),
   );
   mounted.use(

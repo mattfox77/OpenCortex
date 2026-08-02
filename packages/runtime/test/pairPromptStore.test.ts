@@ -125,4 +125,32 @@ describe("PairPromptStore", () => {
     expect(prompts.listForSession("sess-1")).toHaveLength(1);
     expect(prompts.get("pair-legacy")).not.toHaveProperty("diwanSessionId");
   });
+
+  it("records workflow metadata and captured responses", () => {
+    const prompts = store();
+    const draft = prompts.create({
+      session: session(),
+      channelId: "session-channel",
+      actor: user("owner@acme.test"),
+      initialText: "review this"
+    });
+
+    prompts.markWorkflowStarted(draft.id, {
+      workflowId: "pair-prompt-workflow-1",
+      runId: "run-1"
+    });
+    const captured = prompts.captureResponse(draft.id, {
+      text: "OpenCode response",
+      source: "opencode",
+      messageId: "msg-1"
+    });
+
+    expect(captured).toMatchObject({
+      workflowId: "pair-prompt-workflow-1",
+      workflowRunId: "run-1",
+      responseText: "OpenCode response",
+      responseSource: "opencode",
+      responseMessageId: "msg-1"
+    });
+  });
 });

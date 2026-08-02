@@ -288,6 +288,11 @@ export interface PairPromptWorkflowStart {
   signal: PairPromptWorkflowDecision;
 }
 
+export interface PairPromptResponseWorkflowSignal {
+  workflowId: string;
+  signal: 'captureResponse';
+}
+
 export async function provisionLocalUser(
   config: ProvisioningConfig,
   user: Pick<AuthenticatedUser, 'email' | 'groups' | 'linuxUser'>,
@@ -531,6 +536,30 @@ export async function pairPromptReviewWorkflow(
       workflowId,
       runId: handle.firstExecutionRunId,
       signal: params.decision,
+    };
+  } finally {
+    await connection.close();
+  }
+}
+
+export async function capturePairPromptResponseWorkflow(
+  config: Pick<AppConfig, 'TEMPORAL_ADDRESS' | 'TEMPORAL_NAMESPACE'>,
+  workflowId: string,
+  params: { text: string; source?: string; messageId?: string },
+): Promise<PairPromptResponseWorkflowSignal> {
+  const connection = await Connection.connect({
+    address: config.TEMPORAL_ADDRESS,
+  });
+  try {
+    const client = new Client({
+      connection,
+      namespace: config.TEMPORAL_NAMESPACE,
+    });
+    const handle = client.workflow.getHandle(workflowId);
+    await handle.signal('captureResponse', params);
+    return {
+      workflowId,
+      signal: 'captureResponse',
     };
   } finally {
     await connection.close();

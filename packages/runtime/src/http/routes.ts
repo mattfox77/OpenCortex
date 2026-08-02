@@ -9,6 +9,7 @@ import {
   activeCodeThread,
   archiveWorkbenchSessionWorkflow,
   attachWorkbenchIssueWorkflow,
+  capturePairPromptResponseWorkflow,
   pairPromptReviewWorkflow,
   reviewMemoryEntryWorkflow,
   SessionLauncher,
@@ -18,6 +19,7 @@ import {
   type CodeSession,
   type CodeThread,
   type PairPromptWorkflowDecision,
+  type PairPromptResponseWorkflowSignal,
   type PairPromptWorkflowStart,
   type ReviewWorkflowDecision,
   type ReviewWorkflowStart,
@@ -145,6 +147,12 @@ export type PairPromptWorkflowStarter = (
   },
 ) => Promise<PairPromptWorkflowStart>;
 
+export type PairPromptResponseSignaler = (
+  config: AppConfig,
+  workflowId: string,
+  params: { text: string; source?: string; messageId?: string },
+) => Promise<PairPromptResponseWorkflowSignal>;
+
 export function publicRouter(config: AppConfig): express.Router {
   const router = express.Router();
 
@@ -251,6 +259,8 @@ export function apiRouter(
     sendWorkbenchPairPromptWorkflow,
   pairPromptWorkflowStarter: PairPromptWorkflowStarter =
     pairPromptReviewWorkflow,
+  pairPromptResponseSignaler: PairPromptResponseSignaler =
+    capturePairPromptResponseWorkflow,
 ): express.Router {
   const router = express.Router();
   const launcher = new SessionLauncher(config);
@@ -731,8 +741,12 @@ export function apiRouter(
             decision: 'reject',
             reason: body.reason,
           });
+          const draft = pairPrompts.markWorkflowStarted(
+            resolved.draft.id,
+            workflow,
+          );
           return res.status(202).json({
-            draft: resolved.draft,
+            draft,
             workflow,
             message: 'PairPromptWorkflow reject signal sent.',
           });
@@ -779,8 +793,12 @@ export function apiRouter(
             ownerId: resolved.session.ownerEmail,
             decision: 'approve',
           });
+          const draft = pairPrompts.markWorkflowStarted(
+            resolved.draft.id,
+            workflow,
+          );
           return res.status(202).json({
-            draft: resolved.draft,
+            draft,
             workflow,
             message: 'PairPromptWorkflow approve signal sent.',
           });
@@ -799,6 +817,57 @@ export function apiRouter(
             config.OPENCORTEX_WORKBENCH_SESSION_MODE === 'workflow',
         });
         return res.status(result.status).json(result.body);
+      } catch (error) {
+        return next(error);
+      }
+    },
+  );
+
+  router.post(
+    '/code/sessions/:id/pair-prompts/:draftId/response',
+    requireUser,
+    async (req, res, next) => {
+      try {
+        const body = z
+          .object({
+            text: z.string().min(1),
+            source: z.string().min(1).optional(),
+            messageId: z.string().min(1).optional(),
+          })
+          .parse(req.body);
+        const resolved = resolveDraftAccess(
+          sessions,
+          chat,
+          pairPrompts,
+          String(req.params.id),
+          String(req.params.draftId),
+          req.user!,
+        );
+        if (!resolved) {
+          return res.status(404).json({ error: 'pair_prompt_not_found' });
+        }
+        const draft = pairPrompts.captureResponse(resolved.draft.id, {
+          text: body.text,
+          source: body.source ?? 'opencode',
+          messageId: body.messageId,
+        });
+        await publishPairPromptEvent(chat, events, resolved.channel.id, {
+          type: 'pairPrompt.responseCaptured',
+          body: 'Pair prompt response was captured.',
+          draft,
+        });
+        const workflowSignal =
+          config.OPENCORTEX_PAIR_PROMPT_MODE === 'workflow' && draft.workflowId
+            ? await pairPromptResponseSignaler(config, draft.workflowId, {
+                text: body.text,
+                source: body.source ?? 'opencode',
+                messageId: body.messageId,
+              })
+            : undefined;
+        return res.status(201).json({
+          draft,
+          ...(workflowSignal ? { workflowSignal } : {}),
+        });
       } catch (error) {
         return next(error);
       }
@@ -1841,7 +1910,8 @@ async function publishPairPromptEvent(
       | 'pairPrompt.rejected'
       | 'pairPrompt.sending'
       | 'pairPrompt.sent'
-      | 'pairPrompt.failed';
+      | 'pairPrompt.failed'
+      | 'pairPrompt.responseCaptured';
     body: string;
     draft: unknown;
   },

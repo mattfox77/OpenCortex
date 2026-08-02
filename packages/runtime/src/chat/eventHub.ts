@@ -17,6 +17,7 @@ export interface ChatEventEnvelope {
     | 'pairPrompt.sending'
     | 'pairPrompt.sent'
     | 'pairPrompt.failed'
+    | 'pairPrompt.responseCaptured'
     | 'jiraLinks.updated'
     | 'session.started'
     | 'session.archived';

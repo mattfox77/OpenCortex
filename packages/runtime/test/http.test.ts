@@ -28,6 +28,7 @@ import type { AuthenticatedUser } from '../src/auth/types.js';
 import type { CodeSession } from '../src/code/sessionLauncher.js';
 import type {
   PairPromptWorkflowStarter,
+  PairPromptResponseSignaler,
   ReviewWorkflowStarter,
   WorkbenchSessionWorkflowArchiver,
   WorkbenchSessionWorkflowIssueAttacher,
@@ -2342,6 +2343,125 @@ describe('http app', () => {
         channelId: channel.id,
         ownerId: 'owner@acme.test',
         decision: 'approve',
+      },
+    ]);
+  });
+
+  it('captures pair prompt responses and signals the active workflow', async () => {
+    const config: AppConfig = {
+      ...testConfig(),
+      NODE_ENV: 'development',
+      OPENCORTEX_PAIR_PROMPT_MODE: 'workflow',
+    };
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
+    const chat = new ChatStore(config);
+    const owner = authUser('owner@acme.test');
+    const session = codeSession({
+      id: 'session-with-opencode-id',
+      openCodeSessionId: 'ses_opencode',
+    });
+    sessions.set(session.id, session);
+    const channel = chat.ensureSessionChannel(session, owner);
+    chat.shareChannel(channel.id, 'reviewer@acme.test', owner);
+    const pairPromptWorkflowStarter: PairPromptWorkflowStarter = async () => ({
+      workflowId: 'pair-prompt-workflow-1',
+      runId: 'run-pair-prompt-1',
+      signal: 'approve',
+    });
+    const responseSignals: Array<{
+      workflowId: string;
+      params: Parameters<PairPromptResponseSignaler>[2];
+    }> = [];
+    const pairPromptResponseSignaler: PairPromptResponseSignaler = async (
+      _config,
+      workflowId,
+      params,
+    ) => {
+      responseSignals.push({ workflowId, params });
+      return { workflowId, signal: 'captureResponse' };
+    };
+    const app = createApp(
+      config,
+      sessions,
+      chat,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      pairPromptWorkflowStarter,
+      pairPromptResponseSignaler,
+    );
+    const listener = app.listen(0);
+    server = listener;
+    const address = listener.address();
+    if (!address || typeof address === 'string')
+      throw new Error('Expected TCP listener');
+    const base = `http://127.0.0.1:${address.port}`;
+    const ownerAuth = {
+      Authorization: 'Dev owner@acme.test',
+      'Content-Type': 'application/json',
+    };
+    const reviewerAuth = {
+      Authorization: 'Dev reviewer@acme.test',
+      'Content-Type': 'application/json',
+    };
+
+    const created = await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/pair-prompts`,
+      {
+        method: 'POST',
+        headers: ownerAuth,
+        body: JSON.stringify({ initialText: 'workflow approved prompt' }),
+      },
+    );
+    const createdBody = await created.json();
+    await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/pair-prompts/${createdBody.draft.id}/ready`,
+      { method: 'POST', headers: ownerAuth },
+    );
+    await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/pair-prompts/${createdBody.draft.id}/approve`,
+      { method: 'POST', headers: reviewerAuth },
+    );
+
+    const captured = await fetch(
+      `${base}/diwan/api/code/sessions/${session.id}/pair-prompts/${createdBody.draft.id}/response`,
+      {
+        method: 'POST',
+        headers: reviewerAuth,
+        body: JSON.stringify({
+          text: 'OpenCode completed the requested change.',
+          source: 'opencode',
+          messageId: 'msg-1',
+        }),
+      },
+    );
+
+    expect(captured.status).toBe(201);
+    const capturedBody = await captured.json();
+    expect(capturedBody.draft).toMatchObject({
+      responseText: 'OpenCode completed the requested change.',
+      responseSource: 'opencode',
+      responseMessageId: 'msg-1',
+      workflowId: 'pair-prompt-workflow-1',
+    });
+    expect(capturedBody.workflowSignal).toEqual({
+      workflowId: 'pair-prompt-workflow-1',
+      signal: 'captureResponse',
+    });
+    expect(responseSignals).toEqual([
+      {
+        workflowId: 'pair-prompt-workflow-1',
+        params: {
+          text: 'OpenCode completed the requested change.',
+          source: 'opencode',
+          messageId: 'msg-1',
+        },
       },
     ]);
   });

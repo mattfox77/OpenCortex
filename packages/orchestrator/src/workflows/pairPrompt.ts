@@ -24,10 +24,18 @@ export interface PairPromptSignalInput {
   reason?: string;
 }
 
+export interface PairPromptResponseSignalInput {
+  text: string;
+  source?: string;
+  messageId?: string;
+}
+
 export type PairPromptDecision = 'approve' | 'reject';
 
 export const approvePairPromptSignal = defineSignal<[PairPromptSignalInput]>('approve');
 export const rejectPairPromptSignal = defineSignal<[PairPromptSignalInput]>('reject');
+export const capturePairPromptResponseSignal =
+  defineSignal<[PairPromptResponseSignalInput]>('captureResponse');
 
 export interface PairPromptWorkflowInput {
   sessionId: string;
@@ -49,6 +57,7 @@ export interface PairPromptWorkflowResult {
   decision: PairPromptDecision;
   reviewedBy: string;
   result: RuntimePairPromptResult;
+  response?: PairPromptResponseSignalInput;
 }
 
 interface PendingDecision {
@@ -64,6 +73,7 @@ export async function pairPromptWorkflow(
   const workflowId = info.workflowId;
   const runId = info.runId;
   let pendingDecision: PendingDecision | undefined;
+  let capturedResponse: PairPromptResponseSignalInput | undefined;
 
   const decide = (decision: PairPromptDecision, data: PairPromptSignalInput) => {
     if (!pendingDecision) {
@@ -77,6 +87,9 @@ export async function pairPromptWorkflow(
 
   setHandler(approvePairPromptSignal, data => decide('approve', data));
   setHandler(rejectPairPromptSignal, data => decide('reject', data));
+  setHandler(capturePairPromptResponseSignal, data => {
+    capturedResponse = data;
+  });
 
   await projections.upsertWorkflowProjection({
     workflowId,
@@ -132,6 +145,26 @@ export async function pairPromptWorkflow(
       reviewedBy: decision.reviewerEmail,
       result,
     };
+
+    if (decision.decision === 'approve' && result.draft.status === 'sent') {
+      await projections.upsertWorkflowProjection({
+        workflowId,
+        runId,
+        workflowType: 'PairPromptWorkflow',
+        status: 'running',
+        ownerId: input.ownerId,
+        sourceSystem: 'opencortex-runtime',
+        sourceSessionId: input.sessionId,
+        summary: `Pair prompt ${input.draftId} delivered; awaiting response capture`,
+        data: {
+          result: workflowResult,
+          traceId: input.traceContext?.traceId,
+        },
+        traceContext: input.traceContext,
+      });
+      await condition(() => capturedResponse !== undefined);
+      workflowResult.response = capturedResponse;
+    }
 
     await projections.upsertWorkflowProjection({
       workflowId,
