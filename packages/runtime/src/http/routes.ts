@@ -37,6 +37,7 @@ import {
 import type {
   MemoryEntryAuthor,
   MemoryEntryKind,
+  MemoryEntryReview,
   MemoryEntryScope,
   MemoryStore,
 } from '../memory/memoryStore.js';
@@ -80,6 +81,15 @@ const workflowListQuerySchema = z.object({
   sourceSessionId: z.string().min(1).optional(),
   limit: z.coerce.number().int().positive().max(200).optional(),
 });
+
+const memoryReviewSchema = z.enum([
+  'approved',
+  'pending',
+  'archived',
+  'rejected',
+  'noise',
+  'changes_requested',
+]) satisfies z.ZodType<MemoryEntryReview>;
 
 export type WorkbenchSessionWorkflowStarter = (
   config: AppConfig,
@@ -1218,6 +1228,41 @@ export function memoryRouter(
         res.json({ entries });
       } catch (error) {
         next(error);
+      }
+    },
+  );
+
+  router.post(
+    '/entries/:id/review',
+    requireInternalToken(config, ['memory:write']),
+    async (req, res, next) => {
+      try {
+        const store = requireMemoryStore(memory, res);
+        if (!store) {
+          return;
+        }
+        const body = z
+          .object({
+            review: memoryReviewSchema,
+            notes: z.string().min(1).optional(),
+          })
+          .parse(req.body);
+        const params = z.object({ id: z.string().min(1) }).parse(req.params);
+        const token = res.locals.internalToken as VerifiedInternalToken;
+        const entry = await store.reviewEntry({
+          entryId: params.id,
+          ownerId: token.ownerEmail,
+          identitySubject: token.subject,
+          review: body.review,
+          reviewerEmail: token.ownerEmail,
+          notes: body.notes,
+        });
+        if (!entry) {
+          return res.status(404).json({ error: 'memory_entry_not_found' });
+        }
+        return res.json({ entry });
+      } catch (error) {
+        return next(error);
       }
     },
   );

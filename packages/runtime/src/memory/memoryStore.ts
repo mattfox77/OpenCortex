@@ -7,6 +7,13 @@ const { Pool } = pg;
 export type MemoryEntryKind = 'thought' | 'finding' | 'decision' | 'document' | 'chunk';
 export type MemoryEntryScope = 'personal' | 'team' | 'global';
 export type MemoryEntryAuthor = 'user' | 'agent';
+export type MemoryEntryReview =
+  | 'approved'
+  | 'pending'
+  | 'archived'
+  | 'rejected'
+  | 'noise'
+  | 'changes_requested';
 
 export interface MemoryEntry {
   id: string;
@@ -22,7 +29,7 @@ export interface MemoryEntry {
   toolName?: string;
   ownerId: string;
   author: MemoryEntryAuthor;
-  review: 'approved' | 'pending' | 'archived';
+  review: MemoryEntryReview;
   tags: string[];
   identitySubject?: string;
   score?: number;
@@ -56,9 +63,19 @@ export interface SearchMemoryEntriesInput {
   includePending: boolean;
 }
 
+export interface ReviewMemoryEntryInput {
+  entryId: string;
+  ownerId: string;
+  identitySubject: string;
+  review: MemoryEntryReview;
+  reviewerEmail?: string;
+  notes?: string;
+}
+
 export interface MemoryStore {
   captureEntry(input: CaptureMemoryEntryInput): Promise<MemoryEntry>;
   searchEntries(input: SearchMemoryEntriesInput): Promise<MemoryEntry[]>;
+  reviewEntry(input: ReviewMemoryEntryInput): Promise<MemoryEntry | undefined>;
 }
 
 export function createMemoryStore(config: AppConfig): MemoryStore | undefined {
@@ -127,7 +144,7 @@ export class PgMemoryStore implements MemoryStore {
   async searchEntries(input: SearchMemoryEntriesInput): Promise<MemoryEntry[]> {
     const values: unknown[] = [input.ownerId, input.identitySubject, input.limit];
     const predicates = [
-      "e.review != 'archived'",
+      "e.review NOT IN ('archived', 'rejected', 'noise')",
       [
         "(e.scope = 'global'",
         "OR e.scope = 'team'",
@@ -175,6 +192,43 @@ export class PgMemoryStore implements MemoryStore {
     return result.rows.map(entryFromRow);
   }
 
+  async reviewEntry(input: ReviewMemoryEntryInput): Promise<MemoryEntry | undefined> {
+    const result = await this.pool.query<MemoryEntryRow>(
+      `
+        UPDATE entries
+        SET review = $4,
+            meta = COALESCE(meta, '{}'::jsonb) || $5::jsonb
+        WHERE id = $1
+          AND owner_id = $2
+          AND (
+            scope IN ('team', 'global')
+            OR identity_subject = $3
+            OR identity_subject IS NULL
+          )
+        RETURNING ${entryColumns}
+      `,
+      [
+        input.entryId,
+        input.ownerId,
+        input.identitySubject,
+        input.review,
+        JSON.stringify({
+          review: {
+            reviewedAt: new Date().toISOString(),
+            reviewerEmail: input.reviewerEmail ?? input.ownerId,
+            notes: input.notes,
+          },
+        }),
+      ],
+    );
+    const row = result.rows[0];
+    if (!row) {
+      return undefined;
+    }
+    await this.logReview(input, row);
+    return entryFromRow(row);
+  }
+
   private async logCapture(
     input: CaptureMemoryEntryInput,
     entryId: string,
@@ -196,6 +250,32 @@ export class PgMemoryStore implements MemoryStore {
       ],
     );
   }
+
+  private async logReview(
+    input: ReviewMemoryEntryInput,
+    row: MemoryEntryRow,
+  ): Promise<void> {
+    await this.pool.query(
+      `
+        INSERT INTO log (
+          kind, summary, project, owner_id, data, entry_id, identity_subject
+        )
+        VALUES ('review', $1, $2, $3, $4, $5, $6)
+      `,
+      [
+        `Reviewed memory entry ${row.id}: ${input.review}`,
+        row.project,
+        input.ownerId,
+        {
+          review: input.review,
+          reviewerEmail: input.reviewerEmail ?? input.ownerId,
+          notes: input.notes,
+        },
+        row.id,
+        input.identitySubject,
+      ],
+    );
+  }
 }
 
 interface MemoryEntryRow {
@@ -212,7 +292,7 @@ interface MemoryEntryRow {
   toolName: string | null;
   ownerId: string;
   author: MemoryEntryAuthor;
-  review: 'approved' | 'pending' | 'archived';
+  review: MemoryEntryReview;
   tags: string[] | null;
   identitySubject: string | null;
   score?: number | null;

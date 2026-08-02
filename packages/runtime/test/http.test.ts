@@ -16,6 +16,7 @@ import type {
   CaptureMemoryEntryInput,
   MemoryEntry,
   MemoryStore,
+  ReviewMemoryEntryInput,
   SearchMemoryEntriesInput,
 } from '../src/memory/memoryStore.js';
 import type {
@@ -254,6 +255,7 @@ function fakeOpenCode(
 class FakeMemoryStore implements MemoryStore {
   readonly captures: CaptureMemoryEntryInput[] = [];
   readonly searches: SearchMemoryEntriesInput[] = [];
+  readonly reviews: ReviewMemoryEntryInput[] = [];
   private readonly entries: MemoryEntry[] = [];
 
   async captureEntry(input: CaptureMemoryEntryInput): Promise<MemoryEntry> {
@@ -290,6 +292,23 @@ class FakeMemoryStore implements MemoryStore {
             (!entry.identitySubject && entry.ownerId === input.ownerId)))) &&
       (input.query ? entry.content.includes(input.query) : true),
     );
+  }
+
+  async reviewEntry(input: ReviewMemoryEntryInput): Promise<MemoryEntry | undefined> {
+    this.reviews.push(input);
+    const entry = this.entries.find(candidate =>
+      candidate.id === input.entryId &&
+      candidate.ownerId === input.ownerId &&
+      (candidate.scope === 'team' ||
+        candidate.scope === 'global' ||
+        candidate.identitySubject === input.identitySubject ||
+        !candidate.identitySubject),
+    );
+    if (!entry) {
+      return undefined;
+    }
+    entry.review = input.review;
+    return entry;
   }
 }
 
@@ -560,6 +579,57 @@ describe('http app', () => {
 
     expect(response.status).toBe(403);
     expect(memory.captures).toHaveLength(0);
+  });
+
+  it('reviews memory entries through internal-token identity', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const memory = new FakeMemoryStore();
+    const { listener, base } = startAppWithMemory(config, memory);
+    server = listener;
+    const minted = await mintInternalToken({
+      user: authUser('owner@acme.test'),
+      scopes: ['memory:read', 'memory:write'],
+      secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
+    });
+
+    const capture = await fetch(`${base}/diwan/api/memory/entries`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${minted.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        content: 'agent decision awaiting review',
+        author: 'agent',
+      }),
+    });
+    expect(capture.status).toBe(201);
+
+    const response = await fetch(`${base}/diwan/api/memory/entries/entry-1/review`, {
+      method: 'POST',
+      headers: {
+        Authorization: `Bearer ${minted.token}`,
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        review: 'approved',
+        notes: 'looks correct',
+      }),
+    });
+
+    expect(response.status).toBe(200);
+    const payload = await response.json() as { entry: MemoryEntry };
+    expect(payload.entry.review).toBe('approved');
+    expect(memory.reviews).toEqual([
+      expect.objectContaining({
+        entryId: 'entry-1',
+        ownerId: 'owner@acme.test',
+        identitySubject: 'dev:owner@acme.test',
+        review: 'approved',
+        reviewerEmail: 'owner@acme.test',
+        notes: 'looks correct',
+      }),
+    ]);
   });
 
   it('isolates personal memory by internal-token identity subject', async () => {

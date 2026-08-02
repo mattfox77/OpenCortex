@@ -116,6 +116,21 @@ export interface RuntimeWorkbenchProbeResult {
   session?: RuntimeWorkbenchSession;
 }
 
+export type MemoryEntryReview =
+  | 'approved'
+  | 'pending'
+  | 'archived'
+  | 'rejected'
+  | 'noise'
+  | 'changes_requested';
+
+export interface ReviewMemoryEntryResult {
+  entryId: string;
+  ownerId: string;
+  project?: string;
+  review: MemoryEntryReview;
+}
+
 // ================================================================
 // ACTIVITY: Execute a CLI command via OpenCode
 // ================================================================
@@ -978,6 +993,71 @@ export async function upsertWorkflowProjection(params: {
   if (upserted.error) {
     throw new Error(`Workflow projection upsert failed: ${upserted.error.message}`);
   }
+  });
+}
+
+// ================================================================
+// ACTIVITY: Apply a workflow-driven memory review decision
+// ================================================================
+export async function updateMemoryEntryReview(params: {
+  entryId: string;
+  ownerId: string;
+  review: MemoryEntryReview;
+  reviewerEmail?: string;
+  notes?: string;
+  workflowId?: string;
+  runId?: string;
+  traceContext?: TraceContext;
+}): Promise<ReviewMemoryEntryResult> {
+  return withTraceSpan('opencortex.memory.review_entry', params.traceContext, {
+    'memory.entry_id': params.entryId,
+    'memory.review': params.review,
+    'workflow.id': params.workflowId,
+    'workflow.run_id': params.runId,
+  }, async () => {
+    const updated = await supabase()
+      .from('entries')
+      .update({
+        review: params.review,
+      })
+      .eq('id', params.entryId)
+      .eq('owner_id', params.ownerId)
+      .select('id,owner_id,project,review')
+      .single();
+
+    if (updated.error) {
+      throw new Error(`Memory review update failed: ${updated.error.message}`);
+    }
+
+    const logged = await supabase()
+      .from('log')
+      .insert({
+        kind: 'review',
+        status: 'pass',
+        summary: `Reviewed memory entry ${params.entryId}: ${params.review}`,
+        project: updated.data.project ?? null,
+        owner_id: params.ownerId,
+        entry_id: params.entryId,
+        worker: process.env.WORKER_NAME || 'opencortex-orchestrator',
+        data: {
+          review: params.review,
+          reviewerEmail: params.reviewerEmail ?? params.ownerId,
+          notes: params.notes ?? null,
+          workflowId: params.workflowId ?? null,
+          runId: params.runId ?? null,
+        },
+      });
+
+    if (logged.error) {
+      throw new Error(`Memory review audit insert failed: ${logged.error.message}`);
+    }
+
+    return {
+      entryId: updated.data.id,
+      ownerId: updated.data.owner_id,
+      project: updated.data.project ?? undefined,
+      review: updated.data.review as MemoryEntryReview,
+    };
   });
 }
 
