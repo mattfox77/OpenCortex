@@ -393,6 +393,7 @@ describe('http app', () => {
     expect(html).toContain('<title>OpenCortex Runtime</title>');
     expect(html).toContain('<h1>AI Engineering Workspace</h1>');
     expect(html).toContain('<h2>Workbench</h2>');
+    expect(html).toContain('id="observability-panel"');
     expect(html).not.toContain('<h2>OpenCode</h2>');
   });
 

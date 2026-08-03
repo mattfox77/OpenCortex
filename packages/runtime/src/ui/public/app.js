@@ -206,6 +206,7 @@ let sessions = [];
 let pairPrompts = [];
 let jiraLinks = [];
 let workSearchResults = [];
+let observabilitySummary;
 let selectedChannelId = 'general';
 let chatEvents;
 let chatEventReconnectTimer;
@@ -220,6 +221,9 @@ const jiraKeyPattern = /\b([A-Z][A-Z0-9]+-\d+)\b/gi;
 
 function setAuthenticated(user) {
   currentUser = user;
+  if (!user) {
+    observabilitySummary = undefined;
+  }
   document.querySelector('#auth-screen').hidden = Boolean(user);
   document.querySelector('#workspace-grid').hidden =
     !user || currentView !== 'workspace';
@@ -234,6 +238,7 @@ function setAuthenticated(user) {
     ? user.name || user.email
     : 'Signed out';
   renderProfile();
+  renderObservabilityPanel();
 }
 
 function showWorkspace() {
@@ -620,6 +625,20 @@ async function refreshSessions() {
   sessions = data && Array.isArray(data.sessions) ? data.sessions : [];
 }
 
+async function refreshObservabilitySummary() {
+  try {
+    const data = await api('/observability/summary', {
+      redirectOnUnauthorized: false,
+    });
+    observabilitySummary = data?.summary;
+  } catch (error) {
+    observabilitySummary = {
+      error: error.message,
+    };
+  }
+  renderObservabilityPanel();
+}
+
 function selectInitialSessionChannel() {
   const sessionId = initialSessionIdFromPath();
   const session = sessionId
@@ -715,6 +734,7 @@ async function startChatEventFetchStream() {
 async function refreshCurrentChannelState() {
   await refreshSessions();
   await refreshChannels();
+  await refreshObservabilitySummary();
   await refreshMessages();
   await refreshPairPrompts();
   renderPairPromptPanel();
@@ -725,6 +745,7 @@ function startSessionNameRefresh() {
   sessionNameRefreshTimer = window.setInterval(async () => {
     await refreshSessions();
     await refreshChannels();
+    await refreshObservabilitySummary();
     renderChannels();
     renderSelectedChannelHeader();
     renderWorkTrackingPanel();
@@ -1196,6 +1217,120 @@ function renderWorkTrackingPanel() {
     }
     panel.append(results);
   }
+}
+
+function renderObservabilityPanel() {
+  const panel = document.querySelector('#observability-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+
+  const heading = document.createElement('div');
+  heading.className = 'observability-heading';
+  const title = document.createElement('h3');
+  title.textContent = 'Operations';
+  const updated = document.createElement('span');
+  updated.className = 'observability-updated';
+  updated.textContent = observabilitySummary?.generatedAt
+    ? `Updated ${formatRelativeTime(observabilitySummary.generatedAt)}`
+    : '';
+  heading.append(title, updated);
+  panel.append(heading);
+
+  if (!observabilitySummary) {
+    panel.append(observabilityEmpty('Loading operational state'));
+    return;
+  }
+  if (observabilitySummary.error) {
+    panel.append(observabilityEmpty(observabilitySummary.error));
+    return;
+  }
+
+  const stats = document.createElement('div');
+  stats.className = 'observability-stats';
+  stats.append(
+    observabilityStat('Sessions', observabilitySummary.sessions?.active ?? 0),
+    observabilityStat('Running', observabilitySummary.workflows?.running ?? 0),
+    observabilityStat('Failed', observabilitySummary.workflows?.failed ?? 0),
+    observabilityStat('Recent', observabilitySummary.workflows?.recent ?? 0),
+  );
+  panel.append(stats);
+
+  const oldest = observabilitySummary.workflows?.oldestRunning;
+  if (oldest) {
+    const stuck = document.createElement('button');
+    stuck.type = 'button';
+    stuck.className = 'observability-item';
+    stuck.textContent = [
+      `Oldest running ${durationLabel(oldest.ageSeconds)}`,
+      oldest.workflowType,
+      oldest.summary,
+    ]
+      .filter(Boolean)
+      .join(' - ');
+    stuck.addEventListener('click', () => showWorkflowDetail(oldest));
+    panel.append(stuck);
+  }
+
+  const failures = observabilitySummary.workflows?.failedItems ?? [];
+  if (failures.length > 0) {
+    const list = document.createElement('div');
+    list.className = 'observability-list';
+    for (const workflow of failures.slice(0, 3)) {
+      const item = document.createElement('button');
+      item.type = 'button';
+      item.className = 'observability-item failed';
+      item.textContent = [
+        workflow.workflowType,
+        workflow.project,
+        workflow.summary,
+        workflow.traceId ? `trace ${workflow.traceId}` : undefined,
+      ]
+        .filter(Boolean)
+        .join(' - ');
+      item.addEventListener('click', () => showWorkflowDetail(workflow));
+      list.append(item);
+    }
+    panel.append(list);
+  }
+}
+
+function observabilityStat(label, value) {
+  const stat = document.createElement('div');
+  stat.className = 'observability-stat';
+  const number = document.createElement('strong');
+  number.textContent = String(value);
+  const caption = document.createElement('span');
+  caption.textContent = label;
+  stat.append(number, caption);
+  return stat;
+}
+
+function observabilityEmpty(text) {
+  const empty = document.createElement('p');
+  empty.className = 'observability-empty';
+  empty.textContent = text;
+  return empty;
+}
+
+function durationLabel(seconds) {
+  if (!Number.isFinite(seconds)) return '';
+  if (seconds < 60) return `${Math.max(0, Math.floor(seconds))}s`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m`;
+  const hours = Math.floor(minutes / 60);
+  if (hours < 24) return `${hours}h`;
+  return `${Math.floor(hours / 24)}d`;
+}
+
+function showWorkflowDetail(workflow) {
+  const lines = [
+    workflow.workflowType,
+    workflow.workflowId,
+    workflow.status,
+    workflow.summary,
+    workflow.traceId ? `Trace: ${workflow.traceId}` : undefined,
+  ].filter(Boolean);
+  window.alert(lines.join('\n'));
 }
 
 function workChip(link) {

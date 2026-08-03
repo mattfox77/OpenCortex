@@ -717,6 +717,89 @@ button.secondary {
   color: rgb(var(--text-muted));
 }
 
+.observability-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  background: rgb(var(--surface-2));
+  padding: 10px;
+}
+
+.observability-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.observability-heading h3 {
+  margin: 0;
+  color: rgb(var(--brand-secondary));
+  font-size: 14px;
+}
+
+.observability-updated,
+.observability-empty {
+  margin: 0;
+  color: rgb(var(--text-muted));
+  font-size: 12px;
+}
+
+.observability-stats {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(0, 1fr));
+  gap: 8px;
+}
+
+.observability-stat {
+  display: grid;
+  gap: 2px;
+  min-width: 0;
+  border: 1px solid #d7dee8;
+  border-radius: 6px;
+  padding: 8px;
+  background: #f8fbff;
+}
+
+.observability-stat strong {
+  font-size: 18px;
+  line-height: 1;
+}
+
+.observability-stat span {
+  overflow: hidden;
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+  font-weight: 700;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.observability-list {
+  display: grid;
+  gap: 6px;
+}
+
+.observability-item {
+  justify-content: flex-start;
+  width: 100%;
+  min-height: 30px;
+  overflow: hidden;
+  border-color: #cfd6dd;
+  background: white;
+  color: rgb(var(--brand-secondary));
+  text-align: left;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.observability-item.failed {
+  border-color: #f0b8b8;
+  color: #8a2020;
+}
+
 .jira-dialog {
   width: min(840px, calc(100vw - 32px));
   max-height: min(760px, calc(100vh - 32px));
