@@ -872,7 +872,13 @@ describe('http app', () => {
   });
 
   it('summarizes observable workflow and session state without leaking other users', async () => {
-    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const config: AppConfig = {
+      ...testConfig(),
+      NODE_ENV: 'development',
+      OPENCORTEX_WORKSPACE_ROOT: mkdtempSync(
+        join(tmpdir(), 'opencortex-workspaces-test-'),
+      ),
+    };
     const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     sessions.set('owned', codeSession({
       id: 'owned',
@@ -948,6 +954,22 @@ describe('http app', () => {
         traceId: 'trace-1',
       },
     ]);
+    expect(body.summary.disk).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          name: 'runtime data',
+          path: config.OPENCORTEX_DATA_DIR,
+          available: true,
+        }),
+        expect.objectContaining({
+          name: 'workspaces',
+          path: config.OPENCORTEX_WORKSPACE_ROOT,
+          available: true,
+        }),
+      ]),
+    );
+    expect(body.summary.disk[0].totalBytes).toBeGreaterThan(0);
+    expect(body.summary.disk[0].usedPercent).toBeGreaterThanOrEqual(0);
     expect(JSON.stringify(body)).not.toContain('hidden-failed');
   });
 

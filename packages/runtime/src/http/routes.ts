@@ -1,5 +1,6 @@
 import express from 'express';
 import httpProxy from 'http-proxy';
+import { statfsSync } from 'node:fs';
 import { z } from 'zod';
 import type { AppConfig } from '../config/config.js';
 import { ChatStore, type ChatChannel } from '../chat/chatStore.js';
@@ -588,6 +589,7 @@ export function apiRouter(
           recentWorkflows: recent,
           runningWorkflows: running,
           failedWorkflows: failed,
+          disk: filesystemSummaries(config),
         }),
       });
     } catch (error) {
@@ -1560,6 +1562,7 @@ function buildObservabilitySummary(input: {
   recentWorkflows: WorkflowProjection[];
   runningWorkflows: WorkflowProjection[];
   failedWorkflows: WorkflowProjection[];
+  disk: FilesystemSummary[];
 }) {
   const now = Date.now();
   const statusCounts = countBy(input.recentWorkflows, workflow => workflow.status);
@@ -1592,7 +1595,52 @@ function buildObservabilitySummary(input: {
       runningItems: input.runningWorkflows.slice(0, 10).map(compactWorkflowProjection),
       failedItems: input.failedWorkflows.slice(0, 10).map(compactWorkflowProjection),
     },
+    disk: input.disk,
   };
+}
+
+interface FilesystemSummary {
+  name: string;
+  path: string;
+  available: boolean;
+  totalBytes?: number;
+  freeBytes?: number;
+  usedBytes?: number;
+  usedPercent?: number;
+  error?: string;
+}
+
+function filesystemSummaries(config: AppConfig): FilesystemSummary[] {
+  return [
+    filesystemSummary('runtime data', config.OPENCORTEX_DATA_DIR),
+    filesystemSummary('workspaces', config.OPENCORTEX_WORKSPACE_ROOT),
+  ];
+}
+
+function filesystemSummary(name: string, path: string): FilesystemSummary {
+  try {
+    const stat = statfsSync(path);
+    const totalBytes = stat.blocks * stat.bsize;
+    const freeBytes = stat.bavail * stat.bsize;
+    const usedBytes = Math.max(0, totalBytes - freeBytes);
+    return {
+      name,
+      path,
+      available: true,
+      totalBytes,
+      freeBytes,
+      usedBytes,
+      usedPercent:
+        totalBytes > 0 ? Math.round((usedBytes / totalBytes) * 1000) / 10 : 0,
+    };
+  } catch (error) {
+    return {
+      name,
+      path,
+      available: false,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 function compactWorkflowProjection(workflow: WorkflowProjection) {

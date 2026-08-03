@@ -1245,6 +1245,7 @@ function renderObservabilityPanel() {
     return;
   }
 
+  const disk = primaryDiskSummary(observabilitySummary.disk ?? []);
   const stats = document.createElement('div');
   stats.className = 'observability-stats';
   stats.append(
@@ -1252,8 +1253,20 @@ function renderObservabilityPanel() {
     observabilityStat('Running', observabilitySummary.workflows?.running ?? 0),
     observabilityStat('Failed', observabilitySummary.workflows?.failed ?? 0),
     observabilityStat('Recent', observabilitySummary.workflows?.recent ?? 0),
+    observabilityStat('Disk', disk?.available ? `${disk.usedPercent}%` : 'n/a'),
   );
   panel.append(stats);
+
+  if (disk) {
+    const diskRow = document.createElement('div');
+    diskRow.className = `observability-disk${disk.available ? '' : ' unavailable'}`;
+    diskRow.textContent = disk.available
+      ? `${disk.name}: ${formatBytes(disk.freeBytes)} free of ${formatBytes(
+          disk.totalBytes,
+        )} (${disk.path})`
+      : `${disk.name}: unavailable (${disk.path})`;
+    panel.append(diskRow);
+  }
 
   const oldest = observabilitySummary.workflows?.oldestRunning;
   if (oldest) {
@@ -1310,6 +1323,24 @@ function observabilityEmpty(text) {
   empty.className = 'observability-empty';
   empty.textContent = text;
   return empty;
+}
+
+function primaryDiskSummary(disks) {
+  return disks.find(disk => disk.available) ?? disks[0];
+}
+
+function formatBytes(value) {
+  if (!Number.isFinite(value)) return 'n/a';
+  const units = ['B', 'KB', 'MB', 'GB', 'TB'];
+  let size = value;
+  let index = 0;
+  while (size >= 1024 && index < units.length - 1) {
+    size /= 1024;
+    index += 1;
+  }
+  return `${size >= 10 || index === 0 ? Math.round(size) : size.toFixed(1)} ${
+    units[index]
+  }`;
 }
 
 function durationLabel(seconds) {
