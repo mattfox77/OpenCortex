@@ -19,6 +19,7 @@ PublishPort=127.0.0.1:7233:7233
 
 [Service]
 Restart=always
+ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c "</dev/tcp/127.0.0.1/7233" && exit 0; sleep 1; done; exit 1'
 
 [Install]
 WantedBy=default.target

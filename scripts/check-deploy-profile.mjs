@@ -21,12 +21,14 @@ const fileChecks = {
     "ContainerName=opencortex-objects",
     "Exec=server -dir=/data -s3 -s3.port=8333 -volume.max=0",
     "PublishPort=127.0.0.1:8333:8333",
+    "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/8333\" && exit 0; sleep 1; done; exit 1'",
   ],
   "opencortex-embeddings.container": [
     "ContainerName=opencortex-embeddings",
     "Image=docker.io/michaelf34/infinity:latest-cpu",
     "Exec=v2 --model-id nomic-ai/nomic-embed-text-v1.5 --port 7997",
     "PublishPort=127.0.0.1:7997:7997",
+    "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/7997\" && exit 0; sleep 1; done; exit 1'",
   ],
   "opencortex-jaeger.container": [
     "ContainerName=opencortex-jaeger",
@@ -34,6 +36,7 @@ const fileChecks = {
     "Environment=SPAN_STORAGE_TYPE=memory",
     "Environment=MEMORY_MAX_TRACES=50000",
     "PublishPort=127.0.0.1:16686:16686",
+    "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/16686\" && exit 0; sleep 1; done; exit 1'",
   ],
   "opencortex-otel.container": [
     "ContainerName=opencortex-otel",
@@ -41,12 +44,29 @@ const fileChecks = {
     "Volume=%h/.config/opencortex/otel-collector.yaml:/etc/otelcol/config.yaml:ro,Z",
     "PublishPort=127.0.0.1:4318:4318",
     "PublishPort=127.0.0.1:4317:4317",
+    "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/4318\" && timeout 2 bash -c \"</dev/tcp/127.0.0.1/4317\" && exit 0; sleep 1; done; exit 1'",
   ],
   "opencortex-temporal.container": [
     "ContainerName=opencortex-temporal",
     "Environment=DB=postgres12",
     "Environment=DBNAME=opencortex_temporal",
     "Environment=VISIBILITY_DBNAME=opencortex_temporal_visibility",
+    "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/7233\" && exit 0; sleep 1; done; exit 1'",
+  ],
+  "opencortex-memory-db.container": [
+    "ContainerName=opencortex-memory-db",
+    "PublishPort=127.0.0.1:5432:5432",
+    "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/5432\" && exit 0; sleep 1; done; exit 1'",
+  ],
+  "opencortex-temporal-ui.container": [
+    "ContainerName=opencortex-temporal-ui",
+    "PublishPort=127.0.0.1:8233:8080",
+    "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/8233\" && exit 0; sleep 1; done; exit 1'",
+  ],
+  "opencortex-dex.container": [
+    "ContainerName=opencortex-dex",
+    "PublishPort=127.0.0.1:5556:5556",
+    "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/5556\" && exit 0; sleep 1; done; exit 1'",
   ],
 };
 

@@ -68,7 +68,11 @@ and does not grow a persistent disk volume. The OTel collector config also uses
 the `memory_limiter` processor with a 256 MiB limit before batching. Runtime and
 worker metrics are scrape surfaces, not local time-series storage.
 
-Service readiness after startup or restart can be checked with:
+Each Quadlet container has a host-side `ExecStartPost` readiness gate for its
+published localhost port. If the port never becomes reachable during startup,
+systemd treats the unit start as failed and applies the unit restart policy.
+
+Full-stack readiness after startup or restart can also be checked with:
 
 ```bash
 npm run deploy:readiness

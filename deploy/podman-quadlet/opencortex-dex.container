@@ -15,6 +15,7 @@ Exec=serve /etc/dex/config.yaml
 
 [Service]
 Restart=on-failure
+ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c "</dev/tcp/127.0.0.1/5556" && exit 0; sleep 1; done; exit 1'
 
 [Install]
 WantedBy=default.target
