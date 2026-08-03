@@ -1,5 +1,7 @@
 import type express from 'express';
 import type { SessionStore } from '../code/sessionStore.js';
+import { renderDbMetrics } from '../observability/dbMetrics.js';
+import type { WorkflowProjectionMetrics } from '../workflows/workflowProjectionStore.js';
 
 const LATENCY_BUCKETS_SECONDS = [0.005, 0.01, 0.025, 0.05, 0.1, 0.25, 0.5, 1, 2.5, 5, 10];
 
@@ -38,7 +40,10 @@ export class RuntimeMetrics {
     this.requests.set(id, stats);
   }
 
-  render(sessions: SessionStore): string {
+  render(
+    sessions: SessionStore,
+    workflowMetrics?: WorkflowProjectionMetrics,
+  ): string {
     const lines = [
       '# HELP opencortex_runtime_up Runtime process availability.',
       '# TYPE opencortex_runtime_up gauge',
@@ -49,9 +54,34 @@ export class RuntimeMetrics {
       '# HELP opencortex_runtime_sessions_active Active code sessions known to the runtime.',
       '# TYPE opencortex_runtime_sessions_active gauge',
       `opencortex_runtime_sessions_active ${[...sessions.values()].length}`,
+      '# HELP opencortex_runtime_workflows Current workflow projection counts by status and type.',
+      '# TYPE opencortex_runtime_workflows gauge',
+    ];
+
+    if (workflowMetrics) {
+      for (const [status, count] of Object.entries(workflowMetrics.byStatus).sort()) {
+        lines.push(
+          `opencortex_runtime_workflows{status="${escapeLabel(status)}",workflow_type=""} ${count}`,
+        );
+      }
+      for (const [workflowType, count] of Object.entries(workflowMetrics.byType).sort()) {
+        lines.push(
+          `opencortex_runtime_workflows{status="",workflow_type="${escapeLabel(workflowType)}"} ${count}`,
+        );
+      }
+      if (workflowMetrics.oldestRunningAgeSeconds !== undefined) {
+        lines.push(
+          '# HELP opencortex_runtime_workflow_oldest_running_age_seconds Oldest running workflow age in seconds.',
+          '# TYPE opencortex_runtime_workflow_oldest_running_age_seconds gauge',
+          `opencortex_runtime_workflow_oldest_running_age_seconds ${workflowMetrics.oldestRunningAgeSeconds}`,
+        );
+      }
+    }
+
+    lines.push(
       '# HELP opencortex_runtime_http_requests_total HTTP requests handled by the runtime.',
       '# TYPE opencortex_runtime_http_requests_total counter',
-    ];
+    );
 
     for (const [id, stats] of [...this.requests.entries()].sort()) {
       const key = parseRequestKeyId(id);
@@ -80,6 +110,8 @@ export class RuntimeMetrics {
         `opencortex_runtime_http_request_duration_seconds_count{${requestLabels(key)}} ${stats.count}`,
       );
     }
+
+    lines.push(...renderDbMetrics());
 
     return `${lines.join('\n')}\n`;
   }

@@ -27,6 +27,7 @@
     "workbench:check": "npm --prefix packages/workbench run check",
     "config:inventory": "node scripts/config-inventory.mjs",
     "deploy:check": "node scripts/check-deploy-profile.mjs",
+    "deploy:readiness": "node scripts/check-service-readiness.mjs",
     "orchestrator:worker": "npm --prefix packages/orchestrator run worker",
     "orchestrator:task": "npm --prefix packages/orchestrator run task",
     "orchestrator:monitor": "npm --prefix packages/orchestrator run monitor",

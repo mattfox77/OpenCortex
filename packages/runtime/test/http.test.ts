@@ -373,6 +373,16 @@ class FakeWorkflowProjectionStore implements WorkflowProjectionStore {
       (input.isSuperAdmin || workflow.ownerId === input.ownerId),
     );
   }
+
+  async metrics() {
+    const byStatus: Record<string, number> = {};
+    const byType: Record<string, number> = {};
+    for (const workflow of this.workflows) {
+      byStatus[workflow.status] = (byStatus[workflow.status] ?? 0) + 1;
+      byType[workflow.workflowType] = (byType[workflow.workflowType] ?? 0) + 1;
+    }
+    return { byStatus, byType, oldestRunningAgeSeconds: 120 };
+  }
 }
 
 afterEach(() => {
@@ -435,7 +445,22 @@ describe('http app', () => {
     const config = testConfig();
     const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
     sessions.set('live', codeSession({ id: 'live' }));
-    const app = createApp(config, sessions);
+    const workflows = new FakeWorkflowProjectionStore([
+      workflowProjection({
+        workflowId: 'running-1',
+        status: 'running',
+        workflowType: 'WorkbenchSessionWorkflow',
+      }),
+    ]);
+    const app = createApp(
+      config,
+      sessions,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      workflows,
+    );
     server = app.listen(0);
     const address = server.address();
     if (!address || typeof address === 'string') {
@@ -451,6 +476,14 @@ describe('http app', () => {
     const body = await metrics.text();
     expect(body).toContain('opencortex_runtime_up 1');
     expect(body).toContain('opencortex_runtime_sessions_active 1');
+    expect(body).toContain(
+      'opencortex_runtime_workflows{status="running",workflow_type=""} 1',
+    );
+    expect(body).toContain(
+      'opencortex_runtime_workflows{status="",workflow_type="WorkbenchSessionWorkflow"} 1',
+    );
+    expect(body).toContain('opencortex_runtime_workflow_oldest_running_age_seconds 120');
+    expect(body).toContain('opencortex_runtime_db_query_duration_seconds');
     expect(body).toContain('opencortex_runtime_http_requests_total');
     expect(body).toContain('status_code="200"');
     expect(body).not.toContain('route="/metrics"');

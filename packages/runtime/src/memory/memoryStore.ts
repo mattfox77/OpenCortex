@@ -1,6 +1,7 @@
 import { createHash } from 'node:crypto';
 import pg from 'pg';
 import type { AppConfig } from '../config/config.js';
+import { timeDbQuery } from '../observability/dbMetrics.js';
 
 const { Pool } = pg;
 
@@ -94,7 +95,8 @@ export class PgMemoryStore implements MemoryStore {
 
   async captureEntry(input: CaptureMemoryEntryInput): Promise<MemoryEntry> {
     const contentHash = createHash('sha256').update(input.content).digest('hex');
-    const result = await this.pool.query<MemoryEntryRow>(
+    const result = await timeDbQuery('memory_entries', 'capture_insert', () =>
+      this.pool.query<MemoryEntryRow>(
       `
         INSERT INTO entries (
           content, title, kind, scope, owner_id, author, content_hash, project,
@@ -125,15 +127,18 @@ export class PgMemoryStore implements MemoryStore {
         input.meta,
         input.identitySubject,
       ],
+      ),
     );
     if (result.rows[0]) {
       await this.logCapture(input, result.rows[0].id);
       return entryFromRow(result.rows[0]);
     }
 
-    const existing = await this.pool.query<MemoryEntryRow>(
-      `SELECT ${entryColumns} FROM entries WHERE content_hash = $1 LIMIT 1`,
-      [contentHash],
+    const existing = await timeDbQuery('memory_entries', 'capture_deduplicate', () =>
+      this.pool.query<MemoryEntryRow>(
+        `SELECT ${entryColumns} FROM entries WHERE content_hash = $1 LIMIT 1`,
+        [contentHash],
+      ),
     );
     if (!existing.rows[0]) {
       throw new Error('memory entry insert did not return a row');
@@ -179,7 +184,8 @@ export class PgMemoryStore implements MemoryStore {
       order = 'score DESC, e.created_at DESC';
     }
 
-    const result = await this.pool.query<MemoryEntryRow>(
+    const result = await timeDbQuery('memory_entries', 'search', () =>
+      this.pool.query<MemoryEntryRow>(
       `
         SELECT ${entrySelectColumns('e')}, ${score}
         FROM entries e
@@ -188,12 +194,14 @@ export class PgMemoryStore implements MemoryStore {
         LIMIT $3
       `,
       values,
+      ),
     );
     return result.rows.map(entryFromRow);
   }
 
   async reviewEntry(input: ReviewMemoryEntryInput): Promise<MemoryEntry | undefined> {
-    const result = await this.pool.query<MemoryEntryRow>(
+    const result = await timeDbQuery('memory_entries', 'review', () =>
+      this.pool.query<MemoryEntryRow>(
       `
         UPDATE entries
         SET review = $4,
@@ -220,6 +228,7 @@ export class PgMemoryStore implements MemoryStore {
           },
         }),
       ],
+      ),
     );
     const row = result.rows[0];
     if (!row) {
@@ -233,7 +242,8 @@ export class PgMemoryStore implements MemoryStore {
     input: CaptureMemoryEntryInput,
     entryId: string,
   ): Promise<void> {
-    await this.pool.query(
+    await timeDbQuery('memory_entries', 'log_capture', () =>
+      this.pool.query(
       `
         INSERT INTO log (
           kind, summary, project, owner_id, data, entry_id, identity_subject
@@ -248,6 +258,7 @@ export class PgMemoryStore implements MemoryStore {
         entryId,
         input.identitySubject,
       ],
+      ),
     );
   }
 
@@ -255,7 +266,8 @@ export class PgMemoryStore implements MemoryStore {
     input: ReviewMemoryEntryInput,
     row: MemoryEntryRow,
   ): Promise<void> {
-    await this.pool.query(
+    await timeDbQuery('memory_entries', 'log_review', () =>
+      this.pool.query(
       `
         INSERT INTO log (
           kind, summary, project, owner_id, data, entry_id, identity_subject
@@ -274,6 +286,7 @@ export class PgMemoryStore implements MemoryStore {
         row.id,
         input.identitySubject,
       ],
+      ),
     );
   }
 }

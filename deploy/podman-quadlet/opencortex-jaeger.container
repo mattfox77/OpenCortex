@@ -7,6 +7,8 @@ Wants=opencortex-network-network.service
 ContainerName=opencortex-jaeger
 Image=docker.io/jaegertracing/all-in-one:1.76.0
 Network=opencortex.network
+Environment=SPAN_STORAGE_TYPE=memory
+Environment=MEMORY_MAX_TRACES=50000
 PublishPort=127.0.0.1:16686:16686
 
 [Service]

@@ -56,10 +56,29 @@ development. In-container callers use
 
 `opencortex-otel` accepts OTLP/gRPC and OTLP/HTTP on localhost ports `4317` and
 `4318`, then forwards traces to `opencortex-jaeger`. It also scrapes runtime
-Prometheus metrics from the host service at `host.containers.internal:8080`.
-Configure services with `OTEL_ENDPOINT=http://opencortex-otel:4318` inside the
-Quadlet network, or `OTEL_ENDPOINT=http://localhost:4318` for local host
-processes. Jaeger UI is available at `http://localhost:16686`.
+Prometheus metrics from the host service at `host.containers.internal:8080` and
+Temporal worker metrics from host port `9464`. Configure services with
+`OTEL_ENDPOINT=http://opencortex-otel:4318` inside the Quadlet network, or
+`OTEL_ENDPOINT=http://localhost:4318` for local host processes. Jaeger UI is
+available at `http://localhost:16686`.
+
+Telemetry retention is deliberately bounded in this profile. Jaeger uses
+in-memory storage with `MEMORY_MAX_TRACES=50000`, so trace retention is finite
+and does not grow a persistent disk volume. The OTel collector config also uses
+the `memory_limiter` processor with a 256 MiB limit before batching. Runtime and
+worker metrics are scrape surfaces, not local time-series storage.
+
+Service readiness after startup or restart can be checked with:
+
+```bash
+npm run deploy:readiness
+```
+
+The readiness script probes the runtime health endpoint, Dex discovery,
+Postgres, object storage, embeddings, Temporal, Temporal UI, Jaeger, and OTel
+ports. Override its URLs and ports with the `OPENCORTEX_*_HEALTH_URL`,
+`OPENCORTEX_*_HOST`, and `OPENCORTEX_*_PORT` environment variables when a
+profile uses non-default port mappings.
 
 TLS is intentionally not represented here. The staging host terminates HTTPS
 with `tailscale serve` outside the container stack.

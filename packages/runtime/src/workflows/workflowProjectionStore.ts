@@ -1,5 +1,6 @@
 import pg from 'pg';
 import type { AppConfig } from '../config/config.js';
+import { timeDbQuery } from '../observability/dbMetrics.js';
 
 const { Pool } = pg;
 
@@ -40,6 +41,13 @@ export interface WorkflowProjectionStore {
     workflowId: string,
     input: { ownerId: string; isSuperAdmin: boolean },
   ): Promise<WorkflowProjection | undefined>;
+  metrics?(): Promise<WorkflowProjectionMetrics>;
+}
+
+export interface WorkflowProjectionMetrics {
+  byStatus: Record<string, number>;
+  byType: Record<string, number>;
+  oldestRunningAgeSeconds?: number;
 }
 
 export function createWorkflowProjectionStore(
@@ -88,15 +96,17 @@ export class PgWorkflowProjectionStore implements WorkflowProjectionStore {
     values.push(input.limit);
 
     const where = predicates.length ? `WHERE ${predicates.join(' AND ')}` : '';
-    const result = await this.pool.query<WorkflowProjectionRow>(
-      `
-        SELECT ${workflowProjectionColumns}
-        FROM workflow_projection
-        ${where}
-        ORDER BY COALESCE(completed_at, updated_at, started_at) DESC
-        LIMIT $${values.length}
-      `,
-      values,
+    const result = await timeDbQuery('workflow_projection', 'list', () =>
+      this.pool.query<WorkflowProjectionRow>(
+        `
+          SELECT ${workflowProjectionColumns}
+          FROM workflow_projection
+          ${where}
+          ORDER BY COALESCE(completed_at, updated_at, started_at) DESC
+          LIMIT $${values.length}
+        `,
+        values,
+      ),
     );
     return result.rows.map(workflowProjectionFromRow);
   }
@@ -111,16 +121,67 @@ export class PgWorkflowProjectionStore implements WorkflowProjectionStore {
       values.push(input.ownerId);
       predicates.push(`owner_id = $${values.length}`);
     }
-    const result = await this.pool.query<WorkflowProjectionRow>(
-      `
-        SELECT ${workflowProjectionColumns}
-        FROM workflow_projection
-        WHERE ${predicates.join(' AND ')}
-        LIMIT 1
-      `,
-      values,
+    const result = await timeDbQuery('workflow_projection', 'get', () =>
+      this.pool.query<WorkflowProjectionRow>(
+        `
+          SELECT ${workflowProjectionColumns}
+          FROM workflow_projection
+          WHERE ${predicates.join(' AND ')}
+          LIMIT 1
+        `,
+        values,
+      ),
     );
     return result.rows[0] ? workflowProjectionFromRow(result.rows[0]) : undefined;
+  }
+
+  async metrics(): Promise<WorkflowProjectionMetrics> {
+    const [statusResult, typeResult, oldestRunningResult] = await Promise.all([
+      timeDbQuery('workflow_projection', 'metrics_by_status', () =>
+        this.pool.query<{ status: string; count: string }>(
+          `
+            SELECT status, COUNT(*)::text AS count
+            FROM workflow_projection
+            GROUP BY status
+          `,
+        ),
+      ),
+      timeDbQuery('workflow_projection', 'metrics_by_type', () =>
+        this.pool.query<{ workflowType: string; count: string }>(
+          `
+            SELECT workflow_type AS "workflowType", COUNT(*)::text AS count
+            FROM workflow_projection
+            GROUP BY workflow_type
+          `,
+        ),
+      ),
+      timeDbQuery('workflow_projection', 'metrics_oldest_running', () =>
+        this.pool.query<{ ageSeconds: string | null }>(
+          `
+            SELECT EXTRACT(EPOCH FROM now() - MIN(started_at))::text AS "ageSeconds"
+            FROM workflow_projection
+            WHERE status = 'running'
+              AND started_at IS NOT NULL
+          `,
+        ),
+      ),
+    ]);
+
+    const oldestRunningAgeSeconds = oldestRunningResult.rows[0]?.ageSeconds
+      ? Math.max(0, Math.floor(Number(oldestRunningResult.rows[0].ageSeconds)))
+      : undefined;
+
+    return {
+      byStatus: Object.fromEntries(
+        statusResult.rows.map(row => [row.status, Number(row.count)]),
+      ),
+      byType: Object.fromEntries(
+        typeResult.rows.map(row => [row.workflowType, Number(row.count)]),
+      ),
+      ...(oldestRunningAgeSeconds !== undefined
+        ? { oldestRunningAgeSeconds }
+        : {}),
+    };
   }
 }
 

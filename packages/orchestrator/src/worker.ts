@@ -5,6 +5,7 @@ import * as os from 'os';
 import * as dotenv from 'dotenv';
 import pg from 'pg';
 import packageJson from '../package.json';
+import { startWorkerMetricsServer, WorkerMetrics } from './metrics';
 
 dotenv.config();
 const { Pool } = pg;
@@ -25,9 +26,14 @@ const USE_WORKER_VERSIONING =
 
 async function run() {
   const memory = new Pool({ connectionString: requiredMemoryDatabaseUrl() });
+  const metrics = new WorkerMetrics(WORKER_NAME, TASK_QUEUES);
+  const metricsServer = startWorkerMetricsServer(
+    metrics,
+    Number(process.env.OPENCORTEX_WORKER_METRICS_PORT ?? '9464'),
+  );
 
   // Register this worker in Cortex Memory
-  await memory.query(
+  await metrics.timeDbQuery('register_worker', () => memory.query(
     `
       INSERT INTO workers (name, kind, queues, capabilities, machine, status, heartbeat)
       VALUES ($1, $2, $3, $4, $5, 'online', now())
@@ -55,7 +61,8 @@ async function run() {
         worker_versioning: USE_WORKER_VERSIONING,
       },
     ],
-  );
+  ));
+  metrics.markRegistered();
 
   console.log(`🧠 Open Cortex Worker "${WORKER_NAME}" registered`);
   console.log(`   Task Queues: ${TASK_QUEUES.join(', ')}`);
@@ -64,10 +71,18 @@ async function run() {
 
   // Heartbeat to Cortex Memory every 30 seconds
   const heartbeat = setInterval(async () => {
-    await memory.query(
-      'UPDATE workers SET heartbeat = now(), status = $1 WHERE name = $2',
-      ['online', WORKER_NAME],
-    );
+    try {
+      await metrics.timeDbQuery('heartbeat_worker', () =>
+        memory.query(
+          'UPDATE workers SET heartbeat = now(), status = $1 WHERE name = $2',
+          ['online', WORKER_NAME],
+        ),
+      );
+      metrics.markHeartbeat('ok');
+    } catch (error) {
+      metrics.markHeartbeat('error');
+      console.error('Worker heartbeat failed:', error);
+    }
   }, 30_000);
 
   // Connect to Temporal
@@ -110,8 +125,11 @@ async function run() {
   const shutdown = async () => {
     console.log('\n🛑 Shutting down...');
     clearInterval(heartbeat);
-    await memory.query('UPDATE workers SET status = $1 WHERE name = $2', ['offline', WORKER_NAME]);
+    await metrics.timeDbQuery('offline_worker', () =>
+      memory.query('UPDATE workers SET status = $1 WHERE name = $2', ['offline', WORKER_NAME]),
+    );
     for (const w of workers) w.shutdown();
+    metricsServer?.close();
     await memory.end();
   };
 

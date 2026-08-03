@@ -82,8 +82,10 @@ export function createApp(
   mounted.use('/api/health', (_req, res) =>
     res.json({ ok: true, service: 'opencortex-runtime' }),
   );
-  mounted.get('/api/metrics', (_req, res) =>
-    res.type('text/plain; version=0.0.4').send(metrics.render(codeSessions)),
+  mounted.get('/api/metrics', async (_req, res) =>
+    res
+      .type('text/plain; version=0.0.4')
+      .send(metrics.render(codeSessions, await workflowProjections?.metrics?.())),
   );
   mounted.use('/api', publicRouter(config));
   mounted.use('/api/memory', memoryRouter(config, memory, reviewWorkflowStarter));
@@ -135,8 +137,10 @@ export function createApp(
     app.get('/health', (_req, res) =>
       res.json({ ok: true, service: 'opencortex-runtime' }),
     );
-    app.get('/metrics', (_req, res) =>
-      res.type('text/plain; version=0.0.4').send(metrics.render(codeSessions)),
+    app.get('/metrics', async (_req, res) =>
+      res
+        .type('text/plain; version=0.0.4')
+        .send(metrics.render(codeSessions, await workflowProjections?.metrics?.())),
     );
   }
 

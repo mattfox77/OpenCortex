@@ -12,8 +12,16 @@ receivers:
           metrics_path: /metrics
           static_configs:
             - targets: [host.containers.internal:8080]
+        - job_name: opencortex-temporal-worker
+          metrics_path: /metrics
+          static_configs:
+            - targets: [host.containers.internal:9464]
 
 processors:
+  memory_limiter:
+    check_interval: 5s
+    limit_mib: 256
+    spike_limit_mib: 64
   batch: {}
 
 exporters:
@@ -28,9 +36,9 @@ service:
   pipelines:
     traces:
       receivers: [otlp]
-      processors: [batch]
+      processors: [memory_limiter, batch]
       exporters: [otlp/jaeger, debug]
     metrics:
       receivers: [prometheus]
-      processors: [batch]
+      processors: [memory_limiter, batch]
       exporters: [debug]

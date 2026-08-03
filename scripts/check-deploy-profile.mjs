@@ -31,6 +31,8 @@ const fileChecks = {
   "opencortex-jaeger.container": [
     "ContainerName=opencortex-jaeger",
     "Image=docker.io/jaegertracing/all-in-one:1.76.0",
+    "Environment=SPAN_STORAGE_TYPE=memory",
+    "Environment=MEMORY_MAX_TRACES=50000",
     "PublishPort=127.0.0.1:16686:16686",
   ],
   "opencortex-otel.container": [
@@ -49,6 +51,13 @@ const fileChecks = {
 };
 
 const configChecks = {
+  "config/otel-collector.yaml": [
+    "job_name: opencortex-runtime",
+    "job_name: opencortex-temporal-worker",
+    "targets: [host.containers.internal:9464]",
+    "memory_limiter:",
+    "limit_mib: 256",
+  ],
   "config/env.example": [
     "OPENCORTEX_OIDC_SCOPES=openid,email,profile,groups",
     "OPENCORTEX_REQUIRED_GROUPS=CortexUsers",
