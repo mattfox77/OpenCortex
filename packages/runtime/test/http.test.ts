@@ -870,6 +870,86 @@ describe('http app', () => {
     expect(hidden.status).toBe(404);
   });
 
+  it('summarizes observable workflow and session state without leaking other users', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const sessions = new SessionStore(config.OPENCORTEX_DATA_DIR);
+    sessions.set('owned', codeSession({
+      id: 'owned',
+      ownerEmail: 'owner@acme.test',
+      mode: 'sudo',
+    }));
+    sessions.set('other', codeSession({
+      id: 'other',
+      ownerEmail: 'other@acme.test',
+      linuxUser: 'other',
+      mode: 'dry-run',
+    }));
+    const workflowStore = new FakeWorkflowProjectionStore([
+      workflowProjection({
+        workflowId: 'running-1',
+        status: 'running',
+        workflowType: 'WorkbenchSessionWorkflow',
+        ownerId: 'owner@acme.test',
+        startedAt: '2026-08-01T00:00:00.000Z',
+        updatedAt: '2026-08-01T00:00:00.000Z',
+      }),
+      workflowProjection({
+        workflowId: 'failed-1',
+        status: 'failed',
+        workflowType: 'MemoryIngestWorkflow',
+        ownerId: 'owner@acme.test',
+        summary: 'Memory ingest failed',
+        data: { traceId: 'trace-1' },
+      }),
+      workflowProjection({
+        workflowId: 'hidden-failed',
+        status: 'failed',
+        ownerId: 'other@acme.test',
+      }),
+    ]);
+    const app = createApp(
+      config,
+      sessions,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      workflowStore,
+    );
+    server = app.listen(0);
+    const address = server.address();
+    if (!address || typeof address === 'string') {
+      throw new Error('Expected TCP listener');
+    }
+
+    const response = await fetch(
+      `http://127.0.0.1:${address.port}/diwan/api/observability/summary`,
+      { headers: { Authorization: 'Dev owner@acme.test' } },
+    );
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.summary.sessions).toMatchObject({
+      active: 1,
+      byMode: { sudo: 1 },
+    });
+    expect(body.summary.workflows).toMatchObject({
+      recent: 2,
+      running: 1,
+      failed: 1,
+      byStatus: { failed: 1, running: 1 },
+      byType: { MemoryIngestWorkflow: 1, WorkbenchSessionWorkflow: 1 },
+    });
+    expect(body.summary.workflows.failedItems).toMatchObject([
+      {
+        workflowId: 'failed-1',
+        summary: 'Memory ingest failed',
+        traceId: 'trace-1',
+      },
+    ]);
+    expect(JSON.stringify(body)).not.toContain('hidden-failed');
+  });
+
   it('starts WorkbenchSessionWorkflow and returns its projection row in workflow mode', async () => {
     const config: AppConfig = {
       ...testConfig(),

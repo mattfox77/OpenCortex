@@ -554,6 +554,47 @@ export function apiRouter(
     }
   });
 
+  router.get('/observability/summary', requireUser, async (req, res, next) => {
+    try {
+      const store = requireWorkflowProjectionStore(workflowProjections, res);
+      if (!store) {
+        return;
+      }
+      const user = req.user!;
+      const [recent, running, failed] = await Promise.all([
+        store.list({
+          ownerId: user.email,
+          isSuperAdmin: Boolean(user.isSuperAdmin),
+          limit: 50,
+        }),
+        store.list({
+          ownerId: user.email,
+          isSuperAdmin: Boolean(user.isSuperAdmin),
+          status: 'running',
+          limit: 20,
+        }),
+        store.list({
+          ownerId: user.email,
+          isSuperAdmin: Boolean(user.isSuperAdmin),
+          status: 'failed',
+          limit: 20,
+        }),
+      ]);
+      return res.json({
+        summary: buildObservabilitySummary({
+          sessions: [...sessions.values()].filter(session =>
+            chat.userCanAccessSession(session, user),
+          ),
+          recentWorkflows: recent,
+          runningWorkflows: running,
+          failedWorkflows: failed,
+        }),
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
   router.get('/code/sessions/:id/pair-prompts', requireUser, (req, res) => {
     const resolved = resolveSessionAccess(
       sessions,
@@ -1512,6 +1553,84 @@ function requireWorkflowProjectionStore(
     message: 'OPENCORTEX_MEMORY_DATABASE_URL is not configured.',
   });
   return undefined;
+}
+
+function buildObservabilitySummary(input: {
+  sessions: CodeSession[];
+  recentWorkflows: WorkflowProjection[];
+  runningWorkflows: WorkflowProjection[];
+  failedWorkflows: WorkflowProjection[];
+}) {
+  const now = Date.now();
+  const statusCounts = countBy(input.recentWorkflows, workflow => workflow.status);
+  const typeCounts = countBy(input.recentWorkflows, workflow => workflow.workflowType);
+  const oldestRunning = input.runningWorkflows
+    .map(workflow => ({
+      workflow,
+      ageSeconds: workflowAgeSeconds(workflow, now),
+    }))
+    .sort((left, right) => right.ageSeconds - left.ageSeconds)[0];
+
+  return {
+    generatedAt: new Date(now).toISOString(),
+    sessions: {
+      active: input.sessions.length,
+      byMode: countBy(input.sessions, session => session.mode),
+    },
+    workflows: {
+      recent: input.recentWorkflows.length,
+      running: input.runningWorkflows.length,
+      failed: input.failedWorkflows.length,
+      byStatus: statusCounts,
+      byType: typeCounts,
+      oldestRunning: oldestRunning
+        ? {
+            ...compactWorkflowProjection(oldestRunning.workflow),
+            ageSeconds: oldestRunning.ageSeconds,
+          }
+        : undefined,
+      runningItems: input.runningWorkflows.slice(0, 10).map(compactWorkflowProjection),
+      failedItems: input.failedWorkflows.slice(0, 10).map(compactWorkflowProjection),
+    },
+  };
+}
+
+function compactWorkflowProjection(workflow: WorkflowProjection) {
+  return {
+    workflowId: workflow.workflowId,
+    runId: workflow.runId,
+    workflowType: workflow.workflowType,
+    status: workflow.status,
+    ownerId: workflow.ownerId,
+    project: workflow.project,
+    summary: workflow.summary,
+    traceId: traceIdFromWorkflow(workflow),
+    startedAt: workflow.startedAt,
+    completedAt: workflow.completedAt,
+    updatedAt: workflow.updatedAt,
+  };
+}
+
+function traceIdFromWorkflow(workflow: WorkflowProjection): string | undefined {
+  return typeof workflow.data.traceId === 'string'
+    ? workflow.data.traceId
+    : undefined;
+}
+
+function workflowAgeSeconds(workflow: WorkflowProjection, now: number): number {
+  const start = Date.parse(workflow.startedAt ?? workflow.updatedAt);
+  if (!Number.isFinite(start)) {
+    return 0;
+  }
+  return Math.max(0, Math.floor((now - start) / 1000));
+}
+
+function countBy<T>(items: T[], key: (item: T) => string): Record<string, number> {
+  return items.reduce<Record<string, number>>((counts, item) => {
+    const value = key(item);
+    counts[value] = (counts[value] ?? 0) + 1;
+    return counts;
+  }, {});
 }
 
 async function workbenchSessionStartProjection(
