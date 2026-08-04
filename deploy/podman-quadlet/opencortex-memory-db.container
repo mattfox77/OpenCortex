@@ -6,7 +6,7 @@ Wants=network-online.target
 [Container]
 ContainerName=opencortex-memory-db
 Image=docker.io/pgvector/pgvector:pg16
-Network=opencortex.network
+Network=opencortex-network.network
 Volume=opencortex-memory-db.volume:/var/lib/postgresql/data:Z
 Environment=POSTGRES_DB=opencortex_memory
 Environment=POSTGRES_USER=opencortex

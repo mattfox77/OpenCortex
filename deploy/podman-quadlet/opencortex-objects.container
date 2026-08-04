@@ -6,7 +6,7 @@ Wants=network-online.target
 [Container]
 ContainerName=opencortex-objects
 Image=docker.io/chrislusf/seaweedfs:latest
-Network=opencortex.network
+Network=opencortex-network.network
 Volume=opencortex-objects.volume:/data:Z
 Exec=server -dir=/data -s3 -s3.port=8333 -volume.max=0
 PublishPort=127.0.0.1:8333:8333

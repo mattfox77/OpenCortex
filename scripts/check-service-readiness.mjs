@@ -12,7 +12,7 @@ const checks = [
   tcpCheck("temporal", process.env.OPENCORTEX_TEMPORAL_HOST ?? "127.0.0.1", Number(process.env.OPENCORTEX_TEMPORAL_PORT ?? "7233")),
   httpCheck("temporal-ui", process.env.OPENCORTEX_TEMPORAL_UI_HEALTH_URL ?? "http://127.0.0.1:8233/"),
   httpCheck("jaeger", process.env.OPENCORTEX_JAEGER_HEALTH_URL ?? "http://127.0.0.1:16686/"),
-  httpCheck("otel-http", process.env.OPENCORTEX_OTEL_HEALTH_URL ?? "http://127.0.0.1:4318/"),
+  httpCheck("otel-http", process.env.OPENCORTEX_OTEL_HEALTH_URL ?? "http://127.0.0.1:4318/", [404, 405]),
   tcpCheck("otel-grpc", process.env.OPENCORTEX_OTEL_GRPC_HOST ?? "127.0.0.1", Number(process.env.OPENCORTEX_OTEL_GRPC_PORT ?? "4317")),
 ];
 
@@ -28,7 +28,7 @@ if (failures.length > 0) {
   process.exit(1);
 }
 
-function httpCheck(name, url) {
+function httpCheck(name, url, allowedStatuses = []) {
   return async () => {
     const controller = new AbortController();
     const timeout = setTimeout(() => controller.abort(), timeoutMs);
@@ -37,7 +37,7 @@ function httpCheck(name, url) {
       return {
         name,
         target: url,
-        ok: response.status < 500,
+        ok: (response.status >= 200 && response.status < 400) || allowedStatuses.includes(response.status),
         message: `status=${response.status}`,
       };
     } catch (error) {

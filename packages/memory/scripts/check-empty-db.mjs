@@ -51,7 +51,7 @@ try {
   ]);
   verifySearchPath();
   verifyServiceKeyProvision();
-  verifyLegacyHumanKeyWarnings();
+  verifyLegacyKeyPolicy();
 } finally {
   run(runtime, ["rm", "-f", container], { allowFailure: true });
 }
@@ -151,10 +151,7 @@ function verifySearchPath() {
 function verifyServiceKeyProvision() {
   const sql = `
     BEGIN;
-    INSERT INTO keys (hash, owner_id, name, role)
-    VALUES (encode(digest('fresh-admin-key', 'sha256'), 'hex'), 'fresh-admin', 'Fresh Admin', 'admin');
     SET LOCAL ROLE opencortex_memory_api;
-    SELECT set_config('request.headers', '{"apikey":"fresh-admin-key"}', true);
 
     DO $$
     BEGIN
@@ -199,7 +196,7 @@ function verifyServiceKeyProvision() {
   console.log("fresh-install provision allows service-account keys only");
 }
 
-function verifyLegacyHumanKeyWarnings() {
+function verifyLegacyKeyPolicy() {
   const sql = `
     BEGIN;
     INSERT INTO keys (hash, owner_id, name, role)
@@ -207,8 +204,21 @@ function verifyLegacyHumanKeyWarnings() {
       (encode(digest('fresh-member-key', 'sha256'), 'hex'), 'fresh-member', 'Fresh Member', 'member'),
       (encode(digest('fresh-agent-key', 'sha256'), 'hex'), 'fresh-agent', 'Fresh Agent', 'agent');
     SET LOCAL ROLE opencortex_memory_api;
-    SELECT set_config('request.headers', '{"apikey":"fresh-member-key"}', true);
-    SELECT request_owner_id();
+
+    DO $$
+    BEGIN
+      BEGIN
+        PERFORM set_config('request.headers', '{"apikey":"fresh-member-key"}', true);
+        PERFORM request_owner_id();
+        RAISE EXCEPTION 'legacy human key unexpectedly resolved';
+      EXCEPTION WHEN OTHERS THEN
+        IF SQLERRM NOT LIKE 'legacy human memory keys are disabled%' THEN
+          RAISE;
+        END IF;
+      END;
+    END;
+    $$;
+
     SELECT set_config('request.headers', '{"apikey":"fresh-agent-key"}', true);
     SELECT request_owner_id();
     ROLLBACK;
@@ -235,12 +245,10 @@ function verifyLegacyHumanKeyWarnings() {
     process.stderr.write(result.stderr);
     process.exit(result.status ?? 1);
   }
-  const warnings = result.stderr.match(/legacy human memory key role/g) ?? [];
-  if (warnings.length !== 1) {
-    process.stderr.write(result.stderr);
-    throw new Error(`expected one legacy human key warning, got ${warnings.length}`);
+  if (!result.stdout.includes("fresh-agent")) {
+    throw new Error("service-account key did not resolve after legacy human key rejection");
   }
-  console.log("fresh-install legacy human key usage emits a deprecation warning");
+  console.log("fresh-install rejects legacy human keys and resolves service-account keys");
 }
 
 function run(command, args, options = {}) {

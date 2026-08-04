@@ -6,7 +6,7 @@ Requires=opencortex-jaeger.service
 [Container]
 ContainerName=opencortex-otel
 Image=docker.io/otel/opentelemetry-collector:0.157.0
-Network=opencortex.network
+Network=opencortex-network.network
 Volume=%h/.config/opencortex/otel-collector.yaml:/etc/otelcol/config.yaml:ro,Z
 PublishPort=127.0.0.1:4318:4318
 PublishPort=127.0.0.1:4317:4317

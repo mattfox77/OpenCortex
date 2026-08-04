@@ -6,12 +6,12 @@ Wants=opencortex-network-network.service
 [Container]
 Image=ghcr.io/dexidp/dex:latest
 ContainerName=opencortex-dex
-Network=opencortex.network
+Network=opencortex-network.network
 PublishPort=127.0.0.1:5556:5556
 Volume=%h/.config/opencortex/dex.yaml:/etc/dex/config.yaml:ro,Z
 Volume=opencortex-dex.volume:/var/dex:Z
 Secret=opencortex_dex_client_secret,type=env,target=OPENCORTEX_DEX_CLIENT_SECRET
-Exec=serve /etc/dex/config.yaml
+Exec=dex serve /etc/dex/config.yaml
 
 [Service]
 Restart=on-failure

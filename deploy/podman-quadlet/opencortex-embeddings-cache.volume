@@ -1,1 +1,2 @@
-volume
+[Volume]
+VolumeName=opencortex-embeddings-cache

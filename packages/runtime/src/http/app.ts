@@ -82,7 +82,15 @@ export function createApp(
   mounted.use('/api/health', (_req, res) =>
     res.json({ ok: true, service: 'opencortex-runtime' }),
   );
+  mounted.get('/health', (_req, res) =>
+    res.json({ ok: true, service: 'opencortex-runtime' }),
+  );
   mounted.get('/api/metrics', async (_req, res) =>
+    res
+      .type('text/plain; version=0.0.4')
+      .send(metrics.render(codeSessions, await workflowProjections?.metrics?.())),
+  );
+  mounted.get('/metrics', async (_req, res) =>
     res
       .type('text/plain; version=0.0.4')
       .send(metrics.render(codeSessions, await workflowProjections?.metrics?.())),

@@ -6,6 +6,10 @@ const quadletDir = join("deploy", "podman-quadlet");
 
 const requiredFiles = [
   "opencortex-network.network",
+  "opencortex-memory-db.volume",
+  "opencortex-objects.volume",
+  "opencortex-embeddings-cache.volume",
+  "opencortex-dex.volume",
   "opencortex-memory-db.container",
   "opencortex-objects.container",
   "opencortex-embeddings.container",
@@ -19,6 +23,7 @@ const requiredFiles = [
 const fileChecks = {
   "opencortex-objects.container": [
     "ContainerName=opencortex-objects",
+    "Network=opencortex-network.network",
     "Exec=server -dir=/data -s3 -s3.port=8333 -volume.max=0",
     "PublishPort=127.0.0.1:8333:8333",
     "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/8333\" && exit 0; sleep 1; done; exit 1'",
@@ -26,13 +31,15 @@ const fileChecks = {
   "opencortex-embeddings.container": [
     "ContainerName=opencortex-embeddings",
     "Image=docker.io/michaelf34/infinity:latest-cpu",
-    "Exec=v2 --model-id nomic-ai/nomic-embed-text-v1.5 --port 7997",
+    "Network=opencortex-network.network",
+    "Exec=v2 --model-id nomic-ai/nomic-embed-text-v1.5 --port 7997 --device cpu --batch-size 1 --no-compile --no-model-warmup",
     "PublishPort=127.0.0.1:7997:7997",
     "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/7997\" && exit 0; sleep 1; done; exit 1'",
   ],
   "opencortex-jaeger.container": [
     "ContainerName=opencortex-jaeger",
     "Image=docker.io/jaegertracing/all-in-one:1.76.0",
+    "Network=opencortex-network.network",
     "Environment=SPAN_STORAGE_TYPE=memory",
     "Environment=MEMORY_MAX_TRACES=50000",
     "PublishPort=127.0.0.1:16686:16686",
@@ -41,6 +48,7 @@ const fileChecks = {
   "opencortex-otel.container": [
     "ContainerName=opencortex-otel",
     "Image=docker.io/otel/opentelemetry-collector:0.157.0",
+    "Network=opencortex-network.network",
     "Volume=%h/.config/opencortex/otel-collector.yaml:/etc/otelcol/config.yaml:ro,Z",
     "PublishPort=127.0.0.1:4318:4318",
     "PublishPort=127.0.0.1:4317:4317",
@@ -48,25 +56,35 @@ const fileChecks = {
   ],
   "opencortex-temporal.container": [
     "ContainerName=opencortex-temporal",
+    "Network=opencortex-network.network",
     "Environment=DB=postgres12",
     "Environment=DBNAME=opencortex_temporal",
     "Environment=VISIBILITY_DBNAME=opencortex_temporal_visibility",
+    "Environment=DYNAMIC_CONFIG_FILE_PATH=config/dynamicconfig/docker.yaml",
     "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/7233\" && exit 0; sleep 1; done; exit 1'",
   ],
   "opencortex-memory-db.container": [
     "ContainerName=opencortex-memory-db",
+    "Network=opencortex-network.network",
     "PublishPort=127.0.0.1:5432:5432",
     "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/5432\" && exit 0; sleep 1; done; exit 1'",
   ],
   "opencortex-temporal-ui.container": [
     "ContainerName=opencortex-temporal-ui",
+    "Network=opencortex-network.network",
     "PublishPort=127.0.0.1:8233:8080",
     "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/8233\" && exit 0; sleep 1; done; exit 1'",
   ],
   "opencortex-dex.container": [
     "ContainerName=opencortex-dex",
+    "Network=opencortex-network.network",
+    "Exec=dex serve /etc/dex/config.yaml",
     "PublishPort=127.0.0.1:5556:5556",
     "ExecStartPost=/usr/bin/bash -lc 'for i in {1..60}; do timeout 2 bash -c \"</dev/tcp/127.0.0.1/5556\" && exit 0; sleep 1; done; exit 1'",
+  ],
+  "opencortex-embeddings-cache.volume": [
+    "[Volume]",
+    "VolumeName=opencortex-embeddings-cache",
   ],
 };
 
