@@ -2420,6 +2420,7 @@ export function codeSessionProxy(
         (req as express.Request & { opencortexSessionBase?: string })
           .opencortexSessionBase ?? '/';
       let body = Buffer.concat(chunks).toString('utf8');
+      body = rewriteSessionScopedWorkbenchUrls(body, sessionBase);
       if (String(contentType).includes('text/html')) {
         // Inject a <base href> so the OpenCode SPA resolves its relative asset
         // chunks (./assets/*.js) and derives its API/SSE server base (via
@@ -2437,6 +2438,7 @@ export function codeSessionProxy(
 
       const headers = { ...proxyRes.headers };
       delete headers['content-length'];
+      delete headers['content-encoding'];
       delete headers.etag;
       res.writeHead(proxyRes.statusCode ?? 200, headers);
       res.end(body);
@@ -2529,6 +2531,7 @@ export function codeSessionProxy(
     (
       req as express.Request & { opencortexSessionAddon?: SessionAddon }
     ).opencortexSessionAddon = sessionAddon(requestSession, chat);
+    req.headers['accept-encoding'] = 'identity';
     return proxy.web(req, res, {
       target: `http://127.0.0.1:${requestSession.port}`,
       changeOrigin: false,
@@ -2618,6 +2621,24 @@ function isRebrandableBrowserAsset(contentType: string): boolean {
 
 function rebrandEmbeddedCodeUi(body: string): string {
   return body.replaceAll('OpenCode', 'OpenCortex Workbench');
+}
+
+function rewriteSessionScopedWorkbenchUrls(
+  body: string,
+  sessionBase: string,
+): string {
+  return body
+    .replace(
+      /\b(src|href)=("|')\/assets\//gi,
+      (_match, attribute: string, quote: string) =>
+        `${attribute}=${quote}${sessionBase}assets/`,
+    )
+    .replace(/(["'`])\/assets\//g, `$1${sessionBase}assets/`)
+    .replace(/(["'`])assets\//g, `$1${sessionBase}assets/`)
+    .replaceAll(
+      'location.hostname.includes("opencode.ai")?"http://localhost:4096":location.origin',
+      'location.hostname.includes("opencode.ai")?"http://localhost:4096":document.baseURI.replace(/\\/$/,"")',
+    );
 }
 
 interface SessionAddon {

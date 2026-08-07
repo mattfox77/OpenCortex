@@ -2295,12 +2295,21 @@ describe('http app', () => {
           'content-type': 'application/javascript',
           etag: 'test-etag',
         });
-        res.end('document.title = "OpenCode";');
+        res.end(
+          'document.title = "OpenCode"; const apiBase = location.hostname.includes("opencode.ai")?"http://localhost:4096":location.origin; const chunks = ["assets/lazy.js", "/assets/root.js"];',
+        );
+        return;
+      }
+      if (req.url === '/assets/app.css') {
+        res.writeHead(200, {
+          'content-type': 'text/css',
+        });
+        res.end('body { color: black; }');
         return;
       }
       res.writeHead(200, { 'content-type': 'text/html' });
       res.end(
-        '<html><head><title>OpenCode</title></head><body>OpenCode</body></html>',
+        '<html><head><title>OpenCode</title><script type="module" src="/assets/app.js"></script><link rel="stylesheet" href="/assets/app.css"></head><body>OpenCode</body></html>',
       );
     });
     const session = codeSession({ id: 'live', port: backendPort });
@@ -2334,6 +2343,8 @@ describe('http app', () => {
     expect(html.headers.get('etag')).toBeNull();
     const htmlBody = await html.text();
     expect(htmlBody).toContain('OpenCortex Workbench');
+    expect(htmlBody).toContain('src="/diwan/code/session/live/assets/app.js"');
+    expect(htmlBody).toContain('href="/diwan/code/session/live/assets/app.css"');
     expect(htmlBody).toContain('data-opencortex-session-addon');
     expect(htmlBody).toContain('data-channel-id="');
     expect(htmlBody).toContain('data-workbench-url="/diwan/code/sessions/live"');
@@ -2347,7 +2358,9 @@ describe('http app', () => {
     });
     expect(js.status).toBe(200);
     expect(js.headers.get('etag')).toBeNull();
-    await expect(js.text()).resolves.toBe('document.title = "OpenCortex Workbench";');
+    await expect(js.text()).resolves.toBe(
+      'document.title = "OpenCortex Workbench"; const apiBase = location.hostname.includes("opencode.ai")?"http://localhost:4096":document.baseURI.replace(/\\/$/,""); const chunks = ["/diwan/code/session/live/assets/lazy.js", "/diwan/code/session/live/assets/root.js"];',
+    );
   });
 
   it('runs pair prompt review lifecycle for shared session members', async () => {
