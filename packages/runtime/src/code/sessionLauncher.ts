@@ -26,6 +26,7 @@ export interface CodeSession {
   id: string;
   openCodeSessionId?: string;
   name?: string;
+  manualName?: string;
   activeThreadId?: string;
   threads?: CodeThread[];
   createdAt: string;
@@ -42,6 +43,7 @@ export interface CodeThread {
   id: string;
   openCodeSessionId: string;
   name?: string;
+  manualName?: string;
   workspaceDir?: string;
   createdAt: string;
   lastSelectedAt: string;

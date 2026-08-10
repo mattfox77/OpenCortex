@@ -1082,6 +1082,52 @@ document
   });
 
 document
+  .querySelector('#rename-selected-session')
+  .addEventListener('click', async event => {
+    const button = event.currentTarget;
+    const session = selectedSession();
+    if (!session) return;
+    const currentName =
+      session.channel?.name ?? session.manualName ?? session.name ?? '';
+    const name = window.prompt('Session name', currentName);
+    if (name === null) return;
+    const trimmed = name.trim();
+    if (!trimmed) {
+      window.alert('Session name is required.');
+      return;
+    }
+    button.disabled = true;
+    try {
+      const data = await api(`/code/sessions/${session.id}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ name: trimmed }),
+      });
+      if (!data) return;
+      const updatedChannel = data.channel ?? session.channel;
+      sessions = [
+        {
+          ...data.session,
+          role: session.role,
+          channel: updatedChannel,
+        },
+        ...sessions.filter(item => item.id !== session.id),
+      ];
+      if (updatedChannel) {
+        channels = [
+          updatedChannel,
+          ...channels.filter(channel => channel.id !== updatedChannel.id),
+        ];
+        selectedChannelId = updatedChannel.id;
+      }
+      renderChannels();
+      renderSelectedChannelHeader();
+      renderWorkTrackingPanel();
+    } finally {
+      button.disabled = false;
+    }
+  });
+
+document
   .querySelector('#work-search-form')
   .addEventListener('submit', async event => {
     event.preventDefault();
@@ -1592,15 +1638,18 @@ function renderSelectedChannelHeader() {
   const meta = document.querySelector('#channel-meta');
   const share = document.querySelector('#share-channel');
   const open = document.querySelector('#open-selected-code');
+  const rename = document.querySelector('#rename-selected-session');
 
   if (!channel) {
     title.textContent = 'TeamChat';
     meta.textContent = '';
     share.hidden = true;
     open.hidden = true;
+    rename.hidden = true;
     return;
   }
 
+  const session = selectedSession();
   title.textContent = channelTitle(channel);
   const owner = channel.members?.find(member => member.role === 'owner');
   const visibility =
@@ -1617,7 +1666,12 @@ function renderSelectedChannelHeader() {
     !channel.members?.some(
       member => member.email === currentUser?.email && member.role === 'owner',
     );
-  open.hidden = !selectedSession();
+  open.hidden = !session;
+  rename.hidden =
+    !session ||
+    !channel.members?.some(
+      member => member.email === currentUser?.email && member.role === 'owner',
+    );
 }
 
 async function renderSelectedChannel() {

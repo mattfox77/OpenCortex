@@ -683,10 +683,14 @@ function sessionThreadKey(
 }
 
 function sessionChannelName(
-  session: Pick<CodeSession, 'name'>,
-  thread?: Pick<CodeThread, 'name'>,
+  session: Pick<CodeSession, 'manualName' | 'name'>,
+  thread?: Pick<CodeThread, 'manualName' | 'name'>,
 ): string {
-  const name = thread?.name?.trim() || session.name?.trim();
+  const name =
+    thread?.manualName?.trim() ||
+    session.manualName?.trim() ||
+    thread?.name?.trim() ||
+    session.name?.trim();
   return name || 'New session';
 }
 

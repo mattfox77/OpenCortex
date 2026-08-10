@@ -91,6 +91,10 @@ const workflowListQuerySchema = z.object({
   limit: z.coerce.number().int().positive().max(200).optional(),
 });
 
+const codeSessionRenameSchema = z.object({
+  name: z.string().trim().min(1).max(120),
+});
+
 const memoryReviewSchema = z.enum([
   'approved',
   'pending',
@@ -457,6 +461,54 @@ export function apiRouter(
         channel: session.channel,
       })),
     });
+  });
+
+  router.patch('/code/sessions/:id', requireUser, async (req, res, next) => {
+    try {
+      const session = sessions.get(String(req.params.id));
+      if (
+        !session ||
+        (session.ownerEmail !== req.user!.email && !req.user!.isSuperAdmin)
+      ) {
+        return res.status(404).json({ error: 'code_session_not_found' });
+      }
+
+      const body = codeSessionRenameSchema.parse(req.body);
+      const activeThread = activeCodeThread(session);
+      const updated: CodeSession = {
+        ...session,
+        name: body.name,
+        manualName: body.name,
+        ...(activeThread
+          ? {
+              threads: (session.threads ?? []).map(thread =>
+                thread.id === activeThread.id
+                  ? { ...thread, name: body.name, manualName: body.name }
+                  : thread,
+              ),
+            }
+          : {}),
+      };
+      sessions.set(updated.id, updated);
+      chat.updateSessionChannelName(updated);
+      if (activeThread) {
+        const renamedThread = updated.threads?.find(
+          thread => thread.id === activeThread.id,
+        );
+        if (renamedThread) {
+          chat.updateSessionThreadChannelName(updated, renamedThread);
+        }
+      }
+      const channel = chat.getChannelForSession(updated);
+      events.publish({
+        type: 'channel.updated',
+        channelId: channel?.id ?? `session-${updated.id}`,
+        payload: { channel, session: updated },
+      });
+      return res.json({ session: updated, channel });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   router.delete('/code/sessions/:id', requireUser, async (req, res, next) => {
@@ -2286,6 +2338,7 @@ async function syncOpenCodeSessionInventory(
         : existing?.name
           ? { name: existing.name }
           : {}),
+      ...(existing?.manualName ? { manualName: existing.manualName } : {}),
       ...(summary.workspaceDir
         ? { workspaceDir: summary.workspaceDir }
         : existing?.workspaceDir

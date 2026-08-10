@@ -1251,6 +1251,74 @@ describe('http app', () => {
     ]);
   });
 
+  it('renames an owned code session and its TeamChat channel', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+
+    const auth = { Authorization: 'Dev owner@acme.test' };
+    const created = await fetch(`${base}/diwan/api/code/sessions`, {
+      method: 'POST',
+      headers: auth,
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json();
+
+    const renamed = await fetch(
+      `${base}/diwan/api/code/sessions/${createdBody.session.id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          ...auth,
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: 'Payments follow-up' }),
+      },
+    );
+
+    expect(renamed.status).toBe(200);
+    const renamedBody = await renamed.json();
+    expect(renamedBody.session.name).toBe('Payments follow-up');
+    expect(renamedBody.session.manualName).toBe('Payments follow-up');
+    expect(renamedBody.channel.name).toBe('Payments follow-up');
+
+    const listed = await fetch(`${base}/diwan/api/code/sessions`, {
+      headers: auth,
+    });
+    expect(listed.status).toBe(200);
+    const listedBody = await listed.json();
+    expect(listedBody.sessions[0].name).toBe('Payments follow-up');
+    expect(listedBody.sessions[0].manualName).toBe('Payments follow-up');
+    expect(listedBody.sessions[0].channel.name).toBe('Payments follow-up');
+  });
+
+  it('does not let non-owners rename a code session', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+
+    const created = await fetch(`${base}/diwan/api/code/sessions`, {
+      method: 'POST',
+      headers: { Authorization: 'Dev owner@acme.test' },
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json();
+
+    const renamed = await fetch(
+      `${base}/diwan/api/code/sessions/${createdBody.session.id}`,
+      {
+        method: 'PATCH',
+        headers: {
+          Authorization: 'Dev other@acme.test',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({ name: 'Other name' }),
+      },
+    );
+
+    expect(renamed.status).toBe(404);
+  });
+
   it('lists a persisted live session with its channel after an app restart', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const livePort = await listenOnEphemeralPort();
