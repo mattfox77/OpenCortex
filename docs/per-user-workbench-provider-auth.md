@@ -123,17 +123,36 @@ launch precondition rather than something discovered after the workbench opens
 empty — check at launch, and surface a "connect your provider" path instead of
 starting a session that cannot do anything.
 
-### Open question: whose subscription funds a shared session
+### Decided: owners host and pay; guests advise, never prompt
 
-A shared session runs as the **owner's** Linux user, in the owner's home, reading
-the owner's `auth.json`. So a guest doing review or pair programming is spending
-the owner's subscription, not their own — their own credential is not consulted
-and could not be, since there is one process with one `HOME`.
+Settled 2026-08-20. Three rules, and the third is what makes the other two work:
 
-That is in direct tension with "each user has their own subscription", and it is
-unresolved. It does not have an obvious fix: per-guest credentials would mean
-per-guest processes, which would mean guests are no longer in the *same* session,
-which is the entire point of sharing. Worth deciding deliberately — the likely
-answer is that this is acceptable and simply needs to be explicit (the owner
-hosts, and pays for, the sessions they invite people into), but it should be a
-decision rather than a surprise on someone's usage bill.
+1. **A session belongs to its owner, including when others are invited into it.**
+   Inviting someone does not make the session joint property.
+2. **The owner hosts and pays for the sessions they invite people into.**
+3. **Invited users advise; they do not prompt. Nobody consumes anyone else's
+   subscription — in either direction.**
+
+Rule 3 is the constraint that resolves what earlier drafts of this note called an
+unresolved tension. A shared session runs as the owner's Linux user reading the
+owner's `auth.json`, so *any* model work a guest triggers necessarily spends the
+owner's subscription — there is one process with one `HOME` and no way to bill it
+elsewhere. Rather than trying to attribute spend per participant, guests simply
+do not drive the model. They review, comment, and advise; if the owner acts on
+that advice, the owner prompts, on their own subscription, by their own choice.
+
+**This has a direct consequence for the existing pair-prompt feature, and it is
+not yet reconciled.** `pairPromptWorkflow` /
+`sendWorkbenchPairPromptWorkflow` / `capturePairPromptResponseWorkflow` implement
+a guest-drafts-a-prompt, owner-approves-or-rejects flow, and an approved draft
+executes inside the owner's session on the owner's subscription. Whether that
+satisfies rule 3 turns on a question nobody has answered yet: does owner approval
+make the resulting spend the *owner's* action (allowed — the owner consented to
+each one), or is a guest composing prompts still "prompting" regardless of who
+clicks approve (not allowed — guests should be limited to advisory comments that
+the owner may retype or ignore)?
+
+Both readings are defensible and they imply different products. Decide this
+before building the credential-precondition work above, because it determines
+whether the pair-prompt path needs constraining, reframing as advisory-only, or
+leaving exactly as it is.
