@@ -45,6 +45,12 @@ const schema = z.object({
   OPENCORTEX_MEMORY_DATABASE_URL: optionalUrl.default(''),
   OPENCORTEX_ACTIVITY_LEDGER_ENABLED: booleanString,
   OPENCORTEX_LINUX_USER_PREFIX: z.string().default(''),
+  // Explicit email -> existing Linux account mappings, e.g.
+  //   "matt.fox@example.com=mfox,other@example.com=other"
+  // Derivation from the email local-part cannot produce an account that already
+  // exists under a different name, and provisioning a second one would strand
+  // the work already on the host.
+  OPENCORTEX_LINUX_USER_OVERRIDES: csv(''),
   OPENCORTEX_WORKSPACE_ROOT: z.string().default('/srv/opencortex/workspaces'),
   OPENCORTEX_EXEC_MODE: z.enum(['dry-run', 'sudo']).default('dry-run'),
   OPENCORTEX_WORKBENCH_PORT_BASE: z.coerce.number().int().positive().default(4100),

@@ -107,6 +107,7 @@ export class ChatStore {
       | 'OPENCORTEX_DATA_DIR'
       | 'OPENCORTEX_ALLOWED_EMAIL_DOMAINS'
       | 'OPENCORTEX_LINUX_USER_PREFIX'
+      | 'OPENCORTEX_LINUX_USER_OVERRIDES'
     >,
   ) {
     this.legacyFilePath = join(config.OPENCORTEX_DATA_DIR, 'chat.jsonl');

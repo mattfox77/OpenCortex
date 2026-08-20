@@ -24,8 +24,31 @@ const reserved = new Set([
 
 export function emailToLinuxUser(
   email: string,
-  config: Pick<AppConfig, 'OPENCORTEX_LINUX_USER_PREFIX'>,
+  config: Pick<
+    AppConfig,
+    'OPENCORTEX_LINUX_USER_PREFIX' | 'OPENCORTEX_LINUX_USER_OVERRIDES'
+  >,
 ): string {
+  // An explicit mapping wins over derivation, so a federated identity can be
+  // attached to an account that already exists on the host. Without this,
+  // matt.fox@... derives "matt-fox" and provisioning would create a second,
+  // empty account alongside the real one.
+  const overrides = config.OPENCORTEX_LINUX_USER_OVERRIDES ?? [];
+  const normalizedEmail = email.trim().toLowerCase();
+  for (const entry of overrides) {
+    const [rawEmail, rawUser] = entry.split('=');
+    if (!rawEmail || !rawUser) {
+      continue;
+    }
+    if (rawEmail.trim().toLowerCase() === normalizedEmail) {
+      const user = rawUser.trim().toLowerCase();
+      if (reserved.has(user)) {
+        throw new Error(`Linux user override is a reserved account: ${user}`);
+      }
+      return user;
+    }
+  }
+
   const localPart = email.split('@')[0] ?? '';
   const safeLocal = localPart
     .toLowerCase()
