@@ -69,3 +69,38 @@ was not investigated further.
 Linux account. It is why the operator's own workbench finds a credential at all:
 `matt.fox@techsupportcomputerservices.com` resolves to `mfox` rather than
 provisioning a fresh `matt-fox` with an empty home.
+
+## Sessions outlive the identity they launched under
+
+Two behaviors together make identity and credential changes look like they had
+no effect. Both were hit on 2026-08-20; neither is a bug, and both cost time to
+work out from the outside.
+
+**1. A session bakes its environment in at launch.** `opencodeRuntimeEnvironment()`
+computes `HOME` and the XDG dirs from `request.user.linuxUser` when the session
+starts, and those become the process environment. Nothing re-reads them. A
+running session therefore keeps reading credentials from the home it was
+launched with, however the mapping changes afterwards. Observed directly: a
+12-day-old workbench process still running as `ada` — launched before
+`OPENCORTEX_LINUX_USER_OVERRIDES` existed, and still alive after the `ada`
+bootstrap account had been disabled in Dex — alongside a new process correctly
+running as `mfox`.
+
+**2. One workbench session per user, keyed on email.**
+`reusableWorkspaceSession()` looks up `sessions.findByOwnerEmail(user.email)` and
+returns the existing session when `isSessionRestorable()` passes, so
+`POST /code/sessions` answers `200 existing: true` rather than launching. There
+is no second-session concept, which is why no "new session" control exists to
+find. The key is the email, which does not change when the Linux mapping does —
+so a stale session stays matched to its owner and keeps being handed back.
+
+The consequence: **changing an identity mapping or writing a credential only
+affects newly launched sessions**, and a user with an existing session will never
+get one until that session is deleted (`DELETE /code/sessions/:id`) so the next
+POST has nothing to reuse. Order matters — authenticate first, then delete, then
+reopen; a session launched before `auth.json` exists starts from the empty state.
+
+Worth designing away rather than documenting forever. Options not yet evaluated:
+detect that a live session's `linuxUser` no longer matches what the current
+mapping resolves to and treat it as non-restorable; or make credential state a
+launch precondition so a session cannot start into a dead state at all.
