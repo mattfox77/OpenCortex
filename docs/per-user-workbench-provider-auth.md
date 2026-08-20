@@ -100,7 +100,40 @@ get one until that session is deleted (`DELETE /code/sessions/:id`) so the next
 POST has nothing to reuse. Order matters — authenticate first, then delete, then
 reopen; a session launched before `auth.json` exists starts from the empty state.
 
-Worth designing away rather than documenting forever. Options not yet evaluated:
-detect that a live session's `linuxUser` no longer matches what the current
-mapping resolves to and treat it as non-restorable; or make credential state a
-launch precondition so a session cannot start into a dead state at all.
+### One session per user is the feature, not the bug
+
+**Do not "fix" session reuse.** One long-lived session per user is what makes a
+session a stable, shareable place: sessions are shared between users for review
+and pair programming. The sharing surface is the session's chat channel, which
+carries a `members` list with roles (`memberFromUser(owner, 'owner', ...)`), and
+pair prompts are a first-class Temporal workflow with an approve/reject review
+step (`pairPromptWorkflow`, `sendWorkbenchPairPromptWorkflow`,
+`capturePairPromptResponseWorkflow`). A guest joins the owner's session; they do
+not get a second one.
+
+An earlier draft of this note suggested treating a session whose `linuxUser` no
+longer matches the current mapping as non-restorable. **That is wrong** — it
+would tear down a live session out from under collaborators mid-review, for a
+condition (an identity remap) that has nothing to do with whether the session is
+healthy. Recorded here because it looks reasonable until you know sharing exists.
+
+The legitimate goal is narrower and does not conflict with sharing: **a session
+should never launch into a dead state.** Make provider credential state a
+launch precondition rather than something discovered after the workbench opens
+empty — check at launch, and surface a "connect your provider" path instead of
+starting a session that cannot do anything.
+
+### Open question: whose subscription funds a shared session
+
+A shared session runs as the **owner's** Linux user, in the owner's home, reading
+the owner's `auth.json`. So a guest doing review or pair programming is spending
+the owner's subscription, not their own — their own credential is not consulted
+and could not be, since there is one process with one `HOME`.
+
+That is in direct tension with "each user has their own subscription", and it is
+unresolved. It does not have an obvious fix: per-guest credentials would mean
+per-guest processes, which would mean guests are no longer in the *same* session,
+which is the entire point of sharing. Worth deciding deliberately — the likely
+answer is that this is acceptable and simply needs to be explicit (the owner
+hosts, and pays for, the sessions they invite people into), but it should be a
+decision rather than a surprise on someone's usage bill.
