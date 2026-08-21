@@ -141,6 +141,52 @@ provider is exposed to a second user.
   in particular has no notion of an advisory participant — anyone who can see the
   terminal can type into it. Enforcing "guests advise, never prompt" may be
   materially harder on `claude-code` than on the others.
-- **Whether `claude auth login` relays headlessly.** The codex device-auth relay
-  depends on the CLI printing a pasteable URL and code when no browser is present.
-  Not yet tested for `claude`; test before designing around it.
+- **Sharing across providers**, continued: see the terminal problem above.
+
+## RESOLVED (2026-08-21): `claude auth login` does relay headlessly
+
+Tested. The CLI attempts a browser, then prints the URL and waits:
+
+```
+Opening browser to sign in...
+If the browser didn't open, visit: https://claude.com/cai/oauth/authorize?code=true&client_id=9d1c250a-...
+Paste code here if prompted >
+```
+
+Two things fall out of this.
+
+**It corroborates the opencode correction.** That `client_id`,
+`9d1c250a-e61b-44d9-88ed-5944d1962f5e`, is the Claude Code OAuth client — the
+exact value searched for in the opencode binary, with zero hits. Present in
+`claude`, absent from opencode.
+
+**The callback is hosted by Anthropic.** `redirect_uri` is
+`platform.claude.com/oauth/code/callback`, so there is no localhost listener to
+run and no port to allocate for the auth flow itself. Good for a web relay.
+
+Scopes requested: `org:create_api_key`, `user:profile`, `user:inference`,
+`user:sessions:claude_code`, `user:mcp_servers`, `user:file_upload`.
+
+### The relay is bidirectional, unlike codex
+
+This is the part that does **not** port from the intelligent-processor
+implementation. The code travels the opposite direction:
+
+| | codex | claude |
+|---|---|---|
+| CLI emits | device URL **and** code | authorize URL |
+| User does | enters the CLI's code in the browser | authorizes; Anthropic shows a code |
+| Code flows | UI → browser | **browser → CLI stdin** |
+| Relay needs | read stdout | **read stdout and write stdin** |
+
+The existing codex relay spawns under `script -q -f -c` with `stdout=DEVNULL,
+stderr=DEVNULL` and tails a log file — it never writes to the child. For `claude`
+something has to type the pasted code back into a waiting prompt, so the relay
+needs a real bidirectional PTY (`node-pty`, or a FIFO wired to stdin). Budget for
+that rather than assuming the codex code is reusable as-is.
+
+Worth noting the terminal provider may make this moot for `claude-code`
+specifically: if the session is already a browser terminal via `zellij web`, the
+user can run `claude auth login` in it and paste the code themselves, with no
+relay to build at all. The relay matters for provisioning a credential *before*
+a session exists, or for a non-terminal Claude UI later.
