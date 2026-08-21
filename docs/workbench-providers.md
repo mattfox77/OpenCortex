@@ -17,6 +17,46 @@ subscription** — it ships no Anthropic OAuth implementation (evidence in
 billing is its only option. Reaching a Claude subscription means running Claude
 Code, and running Claude Code means a second provider.
 
+## Terminology: a **workbench**, not a session
+
+**"Session" belongs to the providers.** Every one of them already uses it for its
+own internal conversation state — `openCodeSessionId`, Claude Code's
+`user:sessions:claude_code` scope, codex sessions — and today OpenCortex competes
+for the same word:
+
+```ts
+export interface CodeSession {     // ours
+  id: string;
+  openCodeSessionId?: string;      // theirs, nested inside ours
+  threads?: CodeThread[];          // and a third session-ish noun
+}
+```
+
+**A running provider instance for a user is a `workbench`.** It is already the
+domain word — `packages/workbench`, `WorkbenchProvider`, `WorkbenchLaunchPlan`,
+`OPENCORTEX_WORKBENCH_BIN` — and `Provider` → `Workbench` is the ordinary
+factory-to-instance pair. It reads correctly as a countable noun, which is what
+the dashboard needs: *open a new workbench*, *your Claude Code workbench*, *group
+workbenches by project*.
+
+| Term | Means |
+|---|---|
+| **provider** | The kind of workbench: `opencode`, `claude-code`, `codex` |
+| **workbench** | One running provider instance for one owner, with members, a port, a URL, and a project/topic label |
+| **session** | Whatever the provider calls its own internal conversation. Not ours. |
+| **thread** | A conversation within a workbench, where the provider exposes one |
+| workspace / `workspaceDir` | Unchanged — the repos directory on disk |
+
+The rename is mechanical: `CodeSession` → `Workbench`, `sessionStore` →
+`workbenchStore`, `/code/sessions` → `/workbenches`, `reusableWorkspaceSession`
+→ a workbench lookup. Around 130 references. **Do it before the two new providers
+exist**, not after — the id scheme is changing anyway (see below), so the two
+changes touch the same code, and every week of delay triples the surface.
+
+Where a provider's own session id is stored on a workbench, name it for the
+provider (`openCodeSessionId`, `claudeCodeSessionId`) so the distinction stays
+visible at the call site.
+
 ## The interface is already right
 
 `packages/workbench` needs no architectural change. `WorkbenchProvider` is
