@@ -127,21 +127,75 @@ way opencode already does. Per-session ports plus loopback binding is also what
 keeps one user out of another user's session — worth settling before either
 provider is exposed to a second user.
 
-## Open questions
+## Decided (2026-08-21): the dashboard manages many sessions across providers
 
-- **Provider switching.** If a user's existing session is `opencode` and they ask
-  for `claude-code`, does that reuse (wrong provider), replace (destroys a shared
-  session others may be in), or is provider chosen once at session creation and
-  fixed for its life? The third is simplest and fits "a session is a stable,
-  shareable place", but it means switching requires deleting the session — which
-  today is also the only way to pick up a new credential.
-- **Sharing across providers.** The owner-pays / guests-advise decision is
-  provider-independent in principle, but each provider surfaces prompting
-  differently (opencode's own UI, a raw terminal, codexapp's UI). A raw terminal
-  in particular has no notion of an advisory participant — anyone who can see the
-  terminal can type into it. Enforcing "guests advise, never prompt" may be
-  materially harder on `claude-code` than on the others.
-- **Sharing across providers**, continued: see the terminal problem above.
+Three decisions that together replace the open questions this section used to
+hold.
+
+**1. A user has many sessions, not one.** OpenCortex should let a user manage and
+access sessions for *all* providers from the dashboard — so "switch a session's
+provider" is the wrong frame. Provider is chosen when a session is created and
+fixed for its life; wanting a different provider means creating another session,
+and both stay in the inventory.
+
+**2. Sessions are grouped by project and/or topic.** The dashboard's job is
+inventory and organisation — list, group, launch — rather than being the place
+the work happens.
+
+**3. The embedded live workbench goes away.** Sessions open in their own tab or
+window. Dropping the iframe is what makes the dashboard good at managing and
+grouping many sessions instead of hosting one.
+
+Note this does not disturb the sharing model. A session is still a stable,
+shareable place with an owner and channel members; there are simply several of
+them per user now. What dissolves is only the *one-per-user* part.
+
+### The blocker: session IDs are derived from the Linux user
+
+```ts
+// sessionLauncher.ts:215
+return `workspace-${user.linuxUser}`;
+```
+
+**A user cannot have two sessions today** — the ID is a pure function of the
+Linux user, so a second session would collide with the first. This is the reason
+the existing behaviour is one-per-user, more than any deliberate rule; it is
+mechanical, not policy.
+
+Interestingly `SessionStore.findByOwnerEmail()` already sorts by `createdAt`
+descending and returns `[0]`, i.e. it is written as though several sessions per
+owner were possible. The ID collision is what prevents it. So the store is closer
+to ready than the launcher.
+
+What changes:
+
+- **Session ID** gains a discriminator — provider plus a project/topic slug, or a
+  generated id with those as fields. `workspace-${linuxUser}` cannot survive.
+- **`findByOwnerEmail`** becomes a filtered list query (owner + provider +
+  project), not a single-result lookup.
+- **`reusableWorkspaceSession()`** matches within a provider/project rather than
+  "the user's session". Reuse still matters — it is what stops every dashboard
+  visit spawning processes — but the key widens.
+- **The session record** carries `providerId` and a project/topic label, so a
+  relaunch restores the right provider and the dashboard can group without
+  guessing.
+- **`urlPath`** stays, but as a `window.open` target rather than an iframe `src`.
+  This removes the iframe/CSP constraints on every provider, which is a
+  simplification for the terminal and codexapp surfaces in particular.
+
+One consequence worth noting for the credential work in the sibling note:
+deleting a session to pick up a new credential gets much cheaper when a user has
+several and can spin another for that provider, rather than destroying the one
+session they have.
+
+### Not a concern: guests on a terminal
+
+An earlier draft flagged that "guests advise, never prompt" is hard to enforce on
+a raw terminal, since anyone who can see it can type into it. **Decided: moot.**
+Users understand the risk of inviting someone into a terminal session. This is a
+trust decision by the owner at invite time, not something the platform needs to
+gate — and treating it as a blocker would rule out the terminal provider for no
+real gain.
 
 ## RESOLVED (2026-08-21): `claude auth login` does relay headlessly
 
