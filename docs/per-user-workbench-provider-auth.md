@@ -15,19 +15,47 @@ Provider credentials belong entirely to opencode, which stores them in
 `$XDG_DATA_HOME/opencode/auth.json` — i.e. `/home/<linuxUser>/.local/share/opencode/auth.json`
 given the environment `opencodeRuntimeEnvironment()` builds.
 
-opencode 1.3.17 already supports Anthropic subscription auth, symmetrically with
-the OpenAI equivalent people compare it to:
+### CORRECTION (2026-08-21): opencode does not support Anthropic subscription auth
+
+An earlier version of this note claimed it did, on the strength of these i18n
+strings in the 1.3.17 binary:
 
     dialog.provider.anthropic.note          "Connect with Claude Pro/Max or API key"
-    dialog.provider.openai.note             "Connect with ChatGPT Pro/Plus or API key"
     provider.connect.title.anthropicProMax  "Sign in with Claude Pro/Max"
 
-So "the workbench only offers an API key" is not a missing capability. A user with
-no `auth.json` is simply unauthenticated, and the Pro/Max flow is an OAuth
-browser round-trip that wants a real terminal rather than the embedded web
-workbench. Running `opencode auth login` once as the workbench's Linux user and
-choosing Anthropic → Claude Pro/Max writes the file, and the workbench picks it
-up with no service restart and no code change.
+**Those are stale translation entries for a flow that is not implemented.** The
+strings exist; the OAuth machinery behind them does not. Grepping the binary for
+each provider's actual endpoints settles it:
+
+| | OpenAI | Anthropic |
+|---|---|---|
+| OAuth host | `auth.openai.com` | none |
+| OAuth client id | `app_EMoamEEZ73f0CkXaXp7hrann` | none |
+| Subscription endpoint | `chatgpt.com/backend-api/codex/responses` | none |
+| API endpoint | — | `api.anthropic.com/v1` only |
+
+ChatGPT Pro/Plus is fully wired. Anthropic has the plain API-key path and nothing
+else. Also ruled out: both `claude`-adjacent binaries on the host are the same
+1.3.17 build, models.dev provider metadata carries no OAuth fields (only `env`
+and `npm`), and there is no plugin cache or lazily-loaded OAuth module.
+
+The likely reason is not an oversight. Anthropic restricts subscription OAuth to
+its own first-party clients, so a third-party client offering "Sign in with
+Claude Pro/Max" would have to impersonate one. **Claude Code is the sanctioned
+path**, which is why the multi-provider workbench design
+(`docs/workbench-providers.md`) reaches subscription auth by driving the `claude`
+CLI rather than by teaching opencode to log in.
+
+The methodological lesson, since it cost a day: **UI strings are not evidence of
+a feature.** The tell was present in the very first search — zero hits for the
+Claude OAuth client id and `claude.ai/oauth`, against 18 hits for
+`anthropicProMax`. Labels without endpoints meant labels without a flow, and that
+mismatch was the answer rather than a curiosity.
+
+Practical consequence: for opencode specifically, an Anthropic API key is the
+only option, and it is usage-billed rather than subscription-backed. Users
+wanting to spend their Claude subscription need the Claude Code workbench
+provider instead.
 
 ## The actual gap
 
