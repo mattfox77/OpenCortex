@@ -8,7 +8,7 @@ user picks per session:
 | Provider | Surface | Subscription auth |
 |---|---|---|
 | `opencode` | opencode web (existing) | **API key only** — see below |
-| `claude-code` | `claude` CLI in a browser terminal | Claude Pro/Max ✔ |
+| `claude-code` | local `claude` CLI with Remote Control in claude.ai/code | Claude Pro/Max ✔ |
 | `codex` | codexapp / codex-mobile web UI | ChatGPT Pro/Plus ✔ |
 
 The motivation is not variety for its own sake. **opencode cannot spend a Claude
@@ -84,7 +84,7 @@ the same provider, and `reusableWorkspaceSession()` will need to decide what
 "reusable" means when a user's existing session is a *different* provider than
 the one they just asked for. That decision is open — see below.
 
-## claude-code: drive the CLI, never extract the token
+## claude-code: manage local Claude Code sessions through Remote Control
 
 **The rule that keeps this sanctioned: shell out to `claude`, and never read its
 credential.** Third-party editors integrate with Claude by driving Anthropic's own
@@ -106,18 +106,66 @@ $ claude auth status
 - `claude setup-token` — "long-lived authentication token (requires Claude
   subscription)", the official headless artifact.
 
-**Surface: a browser terminal via zellij, not a bespoke UI.** `zellij web` serves
-terminal sessions over HTTP and is already running on this host
-(`zellij 0.43.1`, `zellij web --start`), so per-session it is the same shape as
-opencode: allocate a port, run as the session's Linux user, iframe it. Everything
-Claude Code does — streaming, tool approval prompts, slash commands — works
-unchanged because it is the real CLI in a real terminal, with no UI to
-reimplement.
+**Surface: Claude's own web/mobile UI, not an OpenCortex terminal UI.** Claude
+Code Remote Control connects a local Claude Code process to `claude.ai/code` and
+the Claude app while execution, filesystem access, MCP servers, tools, and
+project configuration stay on the local machine. OpenCortex should therefore be
+the launcher, context assembler, and lifecycle manager; Claude owns the
+conversation UI, tool approval UX, and subscription login.
 
-A purpose-built web UI over Claude Code is the nicer product and much more work;
-the Claude Agent SDK (`@anthropic-ai/claude-agent-sdk`, Claude Code as a library)
-is the honest path to it. Ship the terminal first; treat a custom UI as a later
-upgrade rather than a prerequisite.
+Each new OpenCortex workbench request becomes a new Claude Code session:
+
+1. Resolve the user identity to the target Linux account and home directory.
+2. Resolve the starting directory from the request: selected repo first, then
+   project workspace, then `/home/<linuxUser>/repos`.
+3. Build a deterministic display name from project, Jira issue, topic, or linked
+   workbench reference.
+4. Generate a UUID for `claudeCodeSessionId` and store it on the OpenCortex
+   workbench record.
+5. Assemble the initial prompt from OpenCortex context:
+   - user objective entered at creation time;
+   - project/repo path and branch expectations;
+   - Jira issue keys, titles, status, and links already attached to the
+     OpenCortex workbench;
+   - referenced OpenCortex workbenches and their summaries;
+   - relevant memory entries for the same project/repo/topic;
+   - operating constraints, including "do not commit or push unless asked" and
+     any requested permission mode.
+6. Launch the real Claude Code CLI in a PTY-backed process supervisor with Remote
+   Control enabled:
+
+   ```bash
+   claude --remote-control "<display name>" \
+     --session-id "<uuid>" \
+     --name "<display name>" \
+     "<initial prompt>"
+   ```
+
+The PTY matters. Claude Code is an interactive client, and Remote Control is
+tied to a live local session. A detached process with stdin ignored is the wrong
+primitive; the provider needs a terminal/session supervisor even if OpenCortex
+does not expose that terminal as the primary UI. `tmux`, `zellij`, or a small
+node-pty based supervisor are all reasonable implementation choices. The
+supervisor's job is process lifetime, stdout capture, exit status, and optional
+operator attach for debugging.
+
+Store two URLs:
+
+- `providerUrl`: the best link OpenCortex can show the user. Prefer the
+  per-session Remote Control URL if Claude prints or exposes it.
+- `providerFallbackUrl`: `https://claude.ai/code`.
+
+Official Claude Code docs say the Remote Control status panel exposes a session
+URL that opens directly in `claude.ai/code`, and current Claude Code (`2.1.251`
+on this host) supports `--remote-control`, `--session-id`, `--name`,
+`--settings`, `--mcp-config`, `--add-dir`, `--permission-mode`, `--resume`, and
+background/session commands. Do not assume the claude.ai URL is derivable from
+the UUID unless the CLI emits a stable link; capture it from the CLI output or
+status surface when available, otherwise show the fallback.
+
+This makes the Claude provider different from opencode and codex: OpenCortex
+does not proxy or iframe its UI. It opens a Claude-hosted control surface for a
+local process that OpenCortex launched and can monitor.
 
 ## codex: wrap the already-running codexapp
 
