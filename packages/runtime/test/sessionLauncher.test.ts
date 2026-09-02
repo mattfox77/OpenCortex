@@ -4,6 +4,7 @@ import net from 'node:net';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { describe, expect, it } from 'vitest';
+import { CodexWorkbenchProvider } from '@opencortex/workbench';
 import {
   codeWorkspaceId,
   localProvisionCommand,
@@ -58,6 +59,36 @@ describe('SessionLauncher', () => {
       ['XDG_CACHE_HOME', '/home/mfox/.cache'],
       ['OPENCODE_CONFIG', '/home/mfox/.config/opencode/opencode.json'],
     ]);
+  });
+
+  it('builds a Codex workbench launch plan around codexapp', () => {
+    const provider = new CodexWorkbenchProvider();
+    const plan = provider.planLaunch({
+      user: { email: 'mfox@example.com', linuxUser: 'mfox' },
+      sessionId: 'workspace-mfox-codex',
+      port: 5901,
+      basePath: '/diwan',
+      dataDir: '/var/lib/opencortex',
+      binaryPath:
+        '/home/mfox/.local/share/codex-webui/node_modules/codexapp/dist-cli/index.js',
+      mode: 'sudo',
+    });
+
+    expect(plan.providerId).toBe('codex');
+    expect(plan.workspaceDir).toBe('/home/mfox/repos');
+    expect(plan.urlPath).toBe('/diwan/code/session/workspace-mfox-codex/');
+    expect(plan.command).toEqual([
+      '/home/mfox/.local/share/codex-webui/node_modules/codexapp/dist-cli/index.js',
+      '--no-tunnel',
+      '--no-open',
+      '--no-login',
+      '--port',
+      '5901',
+      '--open-project',
+      '/home/mfox/repos',
+    ]);
+    expect(plan.environment.CODEX_HOME).toBe('/home/mfox/.codex');
+    expect(plan.runtimeDirs).toContain('/home/mfox/.codex/skills');
   });
 
   it('maps authenticated users to the provisioning workflow input', () => {

@@ -14,6 +14,7 @@ import { nanoid } from 'nanoid';
 import {
   OpenCodeWorkbenchProvider,
   opencodeRuntimeEnvironment as workbenchOpencodeRuntimeEnvironment,
+  type WorkbenchProviderId,
   type WorkbenchLaunchPlan,
 } from '@opencortex/workbench';
 import type { AuthenticatedUser } from '../auth/types.js';
@@ -24,6 +25,8 @@ const execFileAsync = promisify(execFile);
 
 export interface CodeSession {
   id: string;
+  providerId?: WorkbenchProviderId;
+  providerVersion?: string;
   openCodeSessionId?: string;
   name?: string;
   manualName?: string;
@@ -138,6 +141,8 @@ export class SessionLauncher {
     return sessionWithActiveThread({
       id,
       ...(openCodeSessionId ? { openCodeSessionId } : {}),
+      providerId: launchPlan.providerId,
+      providerVersion: launchPlan.providerVersion,
       createdAt: new Date().toISOString(),
       ownerEmail: user.email,
       linuxUser: user.linuxUser,

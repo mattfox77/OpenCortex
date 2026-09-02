@@ -57,13 +57,120 @@ Where a provider's own session id is stored on a workbench, name it for the
 provider (`openCodeSessionId`, `claudeCodeSessionId`) so the distinction stays
 visible at the call site.
 
-## The interface is already right
+## Work tracking: absorb Jira into provider-agnostic tasks
 
-`packages/workbench` needs no architectural change. `WorkbenchProvider` is
-already `id` + `version` + `planLaunch(request) → WorkbenchLaunchPlan`, and the
-plan is provider-agnostic: `command[]`, `environment`, `runtimeDirs`, `urlPath`.
-`SessionLauncher` consumes only those fields — port allocation, the sudo-to-
-linuxUser wrapper, and the iframe path are all generic already.
+The Jira feature was solving the same problem Kepler exposes more clearly:
+sessions need to be organized around the work they are advancing, not around the
+chat surface that happened to mention an issue key. Keep the capability, but
+move the vocabulary up a level.
+
+Current Jira-specific behavior becomes the first adapter for a generic work
+tracking model:
+
+| Current Jira concept | Generic OpenCortex concept |
+|---|---|
+| `JiraSessionLink` | `WorkReference` |
+| Jira issue key | external work item key |
+| Jira issue/team cache | provider-specific work item cache |
+| `/work-tracking/jira-items` | `/work-tracking/items?provider=jira` |
+| chat/manual/Jira enrichment source | evidence source on a work reference |
+| `jiraLinks.updated` | `workReferences.updated` |
+
+The generic record should carry `provider`, `kind`, `externalId`, `key`, `url`,
+`title`, `status`, `team`, `project`, `labels`, `source`, `confidence`, and an
+`evidenceRef`. Jira remains important, but it should be one value of
+`provider`, not the name of the model. Other adapters can then add Linear,
+GitHub Issues, GitLab Issues, Azure DevOps, Trello, pull requests, documents, or
+plain manually-created work items without reworking the session manager.
+
+This also changes the top-level product object:
+
+| Term | Means |
+|---|---|
+| **task / work item** | One unit of desired outcome, independent of provider and possibly spanning several repos |
+| **work reference** | A link from a task/workbench to Jira, Linear, GitHub, PR, document, or another external planning artifact |
+| **workbench** | One running provider instance assigned to a task or work item |
+| **provider session** | The provider's internal conversation/process id, such as `openCodeSessionId`, `claudeCodeSessionId`, or a Codex session id |
+
+OpenCortex should create tasks from the same places Kepler does:
+
+1. From scratch: a user writes an objective and optionally attaches repos,
+   documents, or prior sessions.
+2. From an issue: Jira first, then Linear/GitHub/GitLab/Azure/Trello adapters.
+3. From a pull request: import PR metadata, review comments, CI status, and
+   changed files so an agent can review or address feedback.
+
+The existing Jira UI and APIs should migrate rather than disappear. The concrete
+implementation path is to introduce generic names beside the current Jira
+surface, dual-write or adapt reads for one release, then retire Jira-specific
+route names once the dashboard speaks `WorkReference`. The context-pack builder
+for Claude/Codex/OpenCode should consume the generic shape, so "include Jira
+context" becomes "include attached work references" and the provider-specific
+formatting lives in the adapter.
+
+## Decision: adopt ACP as the provider control plane
+
+Adopt the Agent Client Protocol (ACP) for OpenCortex's agent/workbench control
+surface. MCP remains the protocol agents use to reach tools and services; ACP is
+the protocol OpenCortex uses, as the orchestrating client, to start tasks, send
+prompts, observe progress, display diffs, and coordinate provider sessions.
+
+This should become the default integration boundary for providers that support
+it. Kepler's public design validates the same split: the ADE is the client, and
+harnesses such as Claude Code, Codex, OpenCode, Gemini, Cursor, Copilot, and
+Augment are agents behind a common protocol. The point is not protocol fashion;
+it is avoiding a bespoke adapter for every agent UI and CLI behavior.
+
+OpenCortex should model providers in two layers:
+
+| Layer | Responsibility |
+|---|---|
+| `WorkbenchProvider` | local process/runtime launch, identity, environment, worktree, URLs, lifecycle |
+| `AgentClient` / ACP adapter | prompt delivery, streaming status, permission requests, diffs, tool events, session state |
+
+For near-term providers:
+
+| Provider | ACP stance |
+|---|---|
+| `claude-code` | Prefer ACP when running as an orchestrated agent; also support Claude Remote Control when the desired user surface is `claude.ai/code`. |
+| `codex` | Prefer ACP/Codex CLI integration for task execution; keep codexapp only as a transitional web UI surface. |
+| `opencode` | Add an ACP adapter if/when the selected opencode runtime supports it; until then keep the existing HTTP/web provider behavior behind the same OpenCortex task model. |
+
+The user-facing dashboard should not care which provider path is underneath. It
+should show tasks, work references, worktrees, provider sessions, current status,
+pending human actions, diffs, commits, PRs, and costs. ACP supplies the common
+event vocabulary for the parts that belong to the agent interaction; OpenCortex
+adds the higher-level task, identity, memory, project-management, and deployment
+context around it.
+
+Implementation order:
+
+1. Define OpenCortex's internal `AgentClient` interface around ACP concepts:
+   initialize session, send prompt/context pack, stream events, request/record
+   approvals, expose diffs, and terminate/resume.
+2. Add ACP event persistence to the activity ledger so prompt, model/tool,
+   permission, diff, commit, PR, and failure events are attributable to a task
+   and workbench.
+3. Add provider adapters in priority order: Claude Code, Codex, then OpenCode.
+4. Keep provider-specific escape hatches where they are valuable, especially
+   Claude Remote Control deep links and Codex web/mobile links.
+
+Do not block the task/work-reference migration on ACP completeness. The generic
+task model is useful immediately, and ACP can fill in richer provider telemetry
+as each adapter comes online.
+
+## The launch interface is already close
+
+`packages/workbench` needs no architectural rewrite for process launch.
+`WorkbenchProvider` is already `id` + `version` +
+`planLaunch(request) → WorkbenchLaunchPlan`, and the plan is provider-agnostic:
+`command[]`, `environment`, `runtimeDirs`, `urlPath`. `SessionLauncher` consumes
+only those fields — port allocation, the sudo-to-linuxUser wrapper, and the
+iframe path are all generic already.
+
+That interface is the lower layer. It starts and supervises local runtime
+surfaces. It should not grow into the agent conversation protocol; ACP belongs in
+the sibling `AgentClient` layer described above.
 
 Exactly one line pins it to a single provider:
 
@@ -125,8 +232,8 @@ Each new OpenCortex workbench request becomes a new Claude Code session:
 5. Assemble the initial prompt from OpenCortex context:
    - user objective entered at creation time;
    - project/repo path and branch expectations;
-   - Jira issue keys, titles, status, and links already attached to the
-     OpenCortex workbench;
+   - attached work references, including Jira issue keys, titles, status, and
+     links when the reference came from Jira;
    - referenced OpenCortex workbenches and their summaries;
    - relevant memory entries for the same project/repo/topic;
    - operating constraints, including "do not commit or push unless asked" and

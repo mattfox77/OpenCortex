@@ -49,11 +49,22 @@ describe('SessionStore', () => {
   it('persists sessions across instances backed by the same dir', () => {
     const dir = mkdtempSync(join(tmpdir(), 'diwan-store-'));
     const a = new SessionStore(dir);
-    a.set('sess-1', makeSession({ id: 'sess-1' }));
+    a.set(
+      'sess-1',
+      makeSession({
+        id: 'sess-1',
+        providerId: 'codex',
+        providerVersion: 'codexapp',
+      }),
+    );
 
     const b = new SessionStore(dir);
     // A fresh instance (simulating a process restart) reads the same file.
     expect([...b.values()].map(s => s.id)).toContain('sess-1');
+    expect(b.get('sess-1')).toMatchObject({
+      providerId: 'codex',
+      providerVersion: 'codexapp',
+    });
   });
 
   it('keeps sessions whose port is still listening after init()', async () => {

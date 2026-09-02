@@ -1,7 +1,11 @@
 export const OPENCODE_PROVIDER_ID = "opencode" as const;
+export const CODEX_PROVIDER_ID = "codex" as const;
 export const PINNED_OPENCODE_VERSION = "1.14.50" as const;
+export const PINNED_CODEX_PROVIDER_VERSION = "codexapp" as const;
 
-export type WorkbenchProviderId = typeof OPENCODE_PROVIDER_ID;
+export type WorkbenchProviderId =
+  | typeof OPENCODE_PROVIDER_ID
+  | typeof CODEX_PROVIDER_ID;
 export type WorkbenchLaunchMode = "dry-run" | "sudo" | "aws-ssm";
 
 export interface WorkbenchUser {
@@ -65,6 +69,37 @@ export class OpenCodeWorkbenchProvider implements WorkbenchProvider {
   }
 }
 
+export class CodexWorkbenchProvider implements WorkbenchProvider {
+  readonly id = CODEX_PROVIDER_ID;
+  readonly version = PINNED_CODEX_PROVIDER_VERSION;
+
+  planLaunch(request: WorkbenchLaunchRequest): WorkbenchLaunchPlan {
+    const homeDir = `/home/${request.user.linuxUser}`;
+    const workspaceDir = `${homeDir}/repos`;
+    const command = [
+      request.binaryPath,
+      "--no-tunnel",
+      "--no-open",
+      "--no-login",
+      "--port",
+      String(request.port),
+      "--open-project",
+      workspaceDir,
+    ];
+
+    return {
+      providerId: this.id,
+      providerVersion: this.version,
+      sessionId: request.sessionId,
+      workspaceDir,
+      urlPath: `${request.basePath.replace(/\/$/, "")}/code/session/${request.sessionId}/`,
+      command,
+      environment: codexRuntimeEnvironment(homeDir),
+      runtimeDirs: codexRuntimeDirs(homeDir),
+    };
+  }
+}
+
 export function opencodeRuntimeEnvironment(homeDir: string): Record<string, string> {
   return {
     HOME: homeDir,
@@ -74,6 +109,27 @@ export function opencodeRuntimeEnvironment(homeDir: string): Record<string, stri
     XDG_CACHE_HOME: `${homeDir}/.cache`,
     OPENCODE_CONFIG: `${homeDir}/.config/opencode/opencode.json`,
   };
+}
+
+export function codexRuntimeEnvironment(homeDir: string): Record<string, string> {
+  return {
+    HOME: homeDir,
+    XDG_CONFIG_HOME: `${homeDir}/.config`,
+    XDG_DATA_HOME: `${homeDir}/.local/share`,
+    XDG_STATE_HOME: `${homeDir}/.local/state`,
+    XDG_CACHE_HOME: `${homeDir}/.cache`,
+    CODEX_HOME: `${homeDir}/.codex`,
+  };
+}
+
+export function codexRuntimeDirs(homeDir: string): string[] {
+  return [
+    `${homeDir}/.codex`,
+    `${homeDir}/.codex/skills`,
+    `${homeDir}/.local/share/codex`,
+    `${homeDir}/.local/state/codex`,
+    `${homeDir}/.cache/codex`,
+  ];
 }
 
 export function opencodeRuntimeDirs(homeDir: string): string[] {
