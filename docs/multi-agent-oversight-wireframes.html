@@ -1,0 +1,1251 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+  <title>OpenCortex Multi-Agent Oversight Wireframes</title>
+  <style>
+    :root {
+      --bg: #f6f7f9;
+      --panel: #ffffff;
+      --panel-2: #f0f3f6;
+      --line: #c9d1da;
+      --line-strong: #8c98a6;
+      --text: #1f2933;
+      --muted: #5d6875;
+      --subtle: #7a8491;
+      --accent: #245b96;
+      --accent-soft: #e5eef8;
+      --ok: #226b44;
+      --warn: #8a5a00;
+      --bad: #9d2b2b;
+      --review: #6a3fa0;
+      --shadow: 0 1px 2px rgba(31, 41, 51, 0.08);
+      font-family: Inter, ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont,
+        "Segoe UI", sans-serif;
+    }
+
+    * {
+      box-sizing: border-box;
+    }
+
+    body {
+      margin: 0;
+      background: var(--bg);
+      color: var(--text);
+      font-size: 14px;
+      line-height: 1.45;
+    }
+
+    a {
+      color: var(--accent);
+    }
+
+    a:focus-visible,
+    button:focus-visible,
+    textarea:focus-visible,
+    [tabindex]:focus-visible {
+      outline: 3px solid #f0a202;
+      outline-offset: 2px;
+    }
+
+    .skip-link {
+      position: fixed;
+      left: 12px;
+      top: 8px;
+      z-index: 100;
+      transform: translateY(-150%);
+      background: var(--text);
+      color: #fff;
+      padding: 8px 12px;
+      border-radius: 4px;
+    }
+
+    .skip-link:focus {
+      transform: translateY(0);
+    }
+
+    .sr-only {
+      position: absolute;
+      width: 1px;
+      height: 1px;
+      padding: 0;
+      margin: -1px;
+      overflow: hidden;
+      clip: rect(0, 0, 0, 0);
+      white-space: nowrap;
+      border: 0;
+    }
+
+    .app-shell {
+      min-height: 100vh;
+      min-width: 0;
+      display: grid;
+      grid-template-columns: 220px minmax(0, 1fr);
+      grid-template-rows: 56px minmax(0, 1fr);
+    }
+
+    .topbar {
+      grid-column: 1 / -1;
+      display: flex;
+      align-items: center;
+      gap: 16px;
+      padding: 0 20px;
+      border-bottom: 1px solid var(--line);
+      background: var(--panel);
+      position: sticky;
+      top: 0;
+      z-index: 10;
+    }
+
+    .brand {
+      min-width: 180px;
+      font-weight: 700;
+      letter-spacing: 0;
+    }
+
+    .search {
+      flex: 1;
+      min-width: 0;
+      height: 34px;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel-2);
+      color: var(--muted);
+      display: flex;
+      align-items: center;
+      padding: 0 12px;
+    }
+
+    .search input {
+      width: 100%;
+      min-width: 0;
+      border: 0;
+      outline: 0;
+      background: transparent;
+      color: var(--text);
+      font: inherit;
+    }
+
+    .top-meta {
+      display: flex;
+      align-items: center;
+      gap: 8px;
+      color: var(--muted);
+      white-space: nowrap;
+    }
+
+    .sidebar {
+      border-right: 1px solid var(--line);
+      background: var(--panel);
+      padding: 16px 12px;
+    }
+
+    .nav-item {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 9px 10px;
+      margin-bottom: 4px;
+      border-radius: 6px;
+      color: var(--muted);
+      font-weight: 600;
+      text-decoration: none;
+    }
+
+    .nav-item.active {
+      color: var(--accent);
+      background: var(--accent-soft);
+    }
+
+    .main {
+      padding: 20px;
+      overflow: auto;
+      min-width: 0;
+    }
+
+    .page-header {
+      display: flex;
+      align-items: flex-start;
+      justify-content: space-between;
+      gap: 16px;
+      margin-bottom: 16px;
+    }
+
+    h1,
+    h2,
+    h3 {
+      margin: 0;
+      letter-spacing: 0;
+    }
+
+    h1 {
+      font-size: 24px;
+      line-height: 1.2;
+    }
+
+    h2 {
+      font-size: 17px;
+      margin-bottom: 10px;
+    }
+
+    h3 {
+      font-size: 14px;
+      margin-bottom: 8px;
+    }
+
+    .subtitle {
+      color: var(--muted);
+      margin-top: 4px;
+    }
+
+    .actions {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      justify-content: flex-end;
+    }
+
+    button,
+    .button {
+      border: 1px solid var(--line-strong);
+      background: var(--panel);
+      color: var(--text);
+      border-radius: 6px;
+      padding: 7px 11px;
+      font: inherit;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .button.primary,
+    button.primary {
+      background: var(--accent);
+      border-color: var(--accent);
+      color: #fff;
+    }
+
+    .button.danger {
+      color: var(--bad);
+      border-color: #d8aaaa;
+    }
+
+    .toolbar,
+    .scopebar {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 8px;
+      align-items: center;
+      margin-bottom: 12px;
+    }
+
+    .chip,
+    .filter,
+    .status {
+      display: inline-flex;
+      align-items: center;
+      gap: 6px;
+      min-height: 26px;
+      padding: 3px 8px;
+      border: 1px solid var(--line);
+      border-radius: 999px;
+      background: var(--panel);
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 600;
+      white-space: nowrap;
+    }
+
+    .status.running {
+      color: var(--ok);
+      background: #e7f4ed;
+      border-color: #b8dbc8;
+    }
+
+    .status.review {
+      color: var(--review);
+      background: #f0e9f8;
+      border-color: #d3c0e8;
+    }
+
+    .status.warn {
+      color: var(--warn);
+      background: #fff2cf;
+      border-color: #e5c675;
+    }
+
+    .status.failed {
+      color: var(--bad);
+      background: #f9e7e7;
+      border-color: #e1bbbb;
+    }
+
+    .screen-grid {
+      display: grid;
+      gap: 18px;
+    }
+
+    .metrics {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(120px, 1fr));
+      gap: 10px;
+    }
+
+    .metric,
+    .panel {
+      background: var(--panel);
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      box-shadow: var(--shadow);
+    }
+
+    .metric {
+      padding: 12px;
+    }
+
+    .metric .label {
+      color: var(--muted);
+      font-size: 12px;
+      font-weight: 700;
+      text-transform: uppercase;
+    }
+
+    .metric .value {
+      margin-top: 4px;
+      font-size: 22px;
+      font-weight: 750;
+    }
+
+    .panel {
+      padding: 14px;
+    }
+
+    .subsection {
+      min-width: 0;
+      padding-top: 2px;
+    }
+
+    .panel-header {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 12px;
+      margin-bottom: 10px;
+    }
+
+    .table-wrap {
+      overflow: auto;
+      border: 1px solid var(--line);
+      border-radius: 8px;
+    }
+
+    table {
+      width: 100%;
+      border-collapse: collapse;
+      min-width: 780px;
+      background: var(--panel);
+    }
+
+    caption {
+      text-align: left;
+      padding: 8px 10px;
+      color: var(--muted);
+      font-weight: 600;
+    }
+
+    th,
+    td {
+      border-bottom: 1px solid var(--line);
+      padding: 9px 10px;
+      text-align: left;
+      vertical-align: top;
+    }
+
+    th {
+      background: var(--panel-2);
+      color: var(--muted);
+      font-size: 12px;
+      text-transform: uppercase;
+      position: sticky;
+      top: 0;
+      z-index: 1;
+    }
+
+    tr:last-child td {
+      border-bottom: 0;
+    }
+
+    .num {
+      text-align: right;
+      font-variant-numeric: tabular-nums;
+    }
+
+    .id {
+      color: var(--subtle);
+      font-size: 12px;
+    }
+
+    .split {
+      display: grid;
+      grid-template-columns: minmax(0, 1.2fr) minmax(360px, 0.8fr);
+      gap: 14px;
+    }
+
+    .three-col {
+      display: grid;
+      grid-template-columns: repeat(3, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .flow {
+      display: grid;
+      grid-template-columns: repeat(5, minmax(150px, 1fr));
+      gap: 10px;
+    }
+
+    .flow-step {
+      min-width: 0;
+      background: var(--panel);
+      border: 1px dashed var(--line-strong);
+      border-radius: 8px;
+      padding: 12px;
+      min-height: 112px;
+    }
+
+    .flow-step strong {
+      display: block;
+      margin-bottom: 6px;
+    }
+
+    .form-grid {
+      display: grid;
+      grid-template-columns: repeat(2, minmax(0, 1fr));
+      gap: 12px;
+    }
+
+    .field {
+      display: grid;
+      gap: 5px;
+    }
+
+    label {
+      font-size: 12px;
+      font-weight: 700;
+      color: var(--muted);
+      text-transform: uppercase;
+    }
+
+    .input,
+    textarea {
+      width: 100%;
+      border: 1px solid var(--line);
+      border-radius: 6px;
+      background: var(--panel);
+      color: var(--text);
+      padding: 8px 10px;
+      min-height: 36px;
+    }
+
+    textarea {
+      min-height: 88px;
+      resize: vertical;
+      font: inherit;
+    }
+
+    .full {
+      grid-column: 1 / -1;
+    }
+
+    .tabs {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 2px;
+      border-bottom: 1px solid var(--line);
+      margin: 6px -14px 12px;
+      padding: 0 14px;
+    }
+
+    .tab {
+      border: 0;
+      border-radius: 0;
+      background: transparent;
+      padding: 9px 10px;
+      border-bottom: 2px solid transparent;
+      color: var(--muted);
+      font-weight: 700;
+      font-size: 12px;
+    }
+
+    .tab.active {
+      color: var(--accent);
+      border-color: var(--accent);
+    }
+
+    .timeline {
+      display: grid;
+      gap: 9px;
+    }
+
+    .event {
+      display: grid;
+      grid-template-columns: 66px minmax(0, 1fr);
+      gap: 10px;
+      align-items: start;
+    }
+
+    .event time {
+      color: var(--subtle);
+      font-variant-numeric: tabular-nums;
+      font-size: 12px;
+    }
+
+    .callout {
+      border-left: 4px solid var(--accent);
+      background: var(--accent-soft);
+      padding: 10px 12px;
+      border-radius: 6px;
+      color: #183a5d;
+    }
+
+    .callout.warning {
+      border-left-color: var(--warn);
+      background: #fff7df;
+      color: #5c3c00;
+    }
+
+    .callout.error {
+      border-left-color: var(--bad);
+      background: #fbecec;
+      color: #702020;
+    }
+
+    .attention-list {
+      display: grid;
+      gap: 1px;
+      border: 1px solid var(--line);
+      background: var(--line);
+      border-radius: 8px;
+      overflow: hidden;
+      margin: 12px 0;
+    }
+
+    .attention-item {
+      display: grid;
+      grid-template-columns: 110px minmax(180px, 1fr) minmax(220px, 2fr) auto;
+      gap: 12px;
+      align-items: center;
+      background: var(--panel);
+      padding: 10px 12px;
+    }
+
+    .freshness {
+      color: var(--muted);
+      font-size: 12px;
+    }
+
+    .mobile-strip {
+      max-width: 360px;
+      border: 1px solid var(--line);
+      border-radius: 16px;
+      background: var(--panel);
+      padding: 12px;
+      box-shadow: var(--shadow);
+    }
+
+    .mobile-card {
+      border: 1px solid var(--line);
+      border-radius: 8px;
+      padding: 10px;
+      margin-top: 10px;
+    }
+
+    .section {
+      min-width: 0;
+      margin-bottom: 30px;
+      scroll-margin-top: 72px;
+    }
+
+    @media (max-width: 980px) {
+      .app-shell {
+        grid-template-columns: 1fr;
+      }
+
+      .sidebar {
+        display: none;
+      }
+
+      .topbar {
+        gap: 10px;
+        padding: 0 14px;
+      }
+
+      .brand {
+        min-width: auto;
+      }
+
+      .metrics,
+      .split,
+      .three-col,
+      .flow,
+      .form-grid {
+        grid-template-columns: 1fr;
+      }
+
+      .top-meta {
+        display: none;
+      }
+
+      .main {
+        grid-column: 1;
+        grid-row: 2;
+        padding: 14px;
+      }
+
+      .page-header {
+        flex-direction: column;
+      }
+
+      .attention-item {
+        grid-template-columns: 1fr;
+      }
+
+      .actions {
+        justify-content: flex-start;
+      }
+    }
+  </style>
+</head>
+<body>
+  <a class="skip-link" href="#main-content">Skip to main content</a>
+  <div class="app-shell">
+    <header class="topbar">
+      <div class="brand">OpenCortex</div>
+      <form class="search" role="search">
+        <label class="sr-only" for="global-search">Search OpenCortex</label>
+        <input id="global-search" type="search" placeholder="Search OpenCortex...">
+      </form>
+      <div class="top-meta">
+        <span class="status running">OIDC: Google</span>
+        <span class="status running">Runtime live</span>
+        <span>mfox</span>
+      </div>
+    </header>
+
+    <nav class="sidebar" aria-label="Primary navigation">
+      <a class="nav-item active" href="#tasks" aria-current="page">Tasks <span>14</span></a>
+      <a class="nav-item" href="#agents-hosts">Agents <span>9</span></a>
+      <a class="nav-item" href="#agents-hosts">Hosts <span>3</span></a>
+      <a class="nav-item" href="#review-ledger">Review <span>4</span></a>
+      <a class="nav-item" href="#review-ledger">Ledger</a>
+      <a class="nav-item" href="#knowledge">Memory</a>
+      <a class="nav-item" href="#knowledge">Skills</a>
+      <a class="nav-item" href="#settings">Settings</a>
+    </nav>
+
+    <main class="main" id="main-content" tabindex="-1">
+      <section class="section">
+        <div class="page-header">
+          <div>
+            <h1>Multi-Agent Oversight</h1>
+            <div class="subtitle">Web control plane for distributed agent work across hosts, Linux users, worktrees, providers, memory, skill bundles, and reviews.</div>
+          </div>
+          <div class="actions">
+            <button>Import work reference</button>
+            <button class="primary">Launch workbench</button>
+          </div>
+        </div>
+
+        <div class="flow" aria-label="System intent">
+          <div class="flow-step">
+            <strong>1. Authenticated user</strong>
+            OIDC subject, tenant, roles, and host/Linux-user mapping.
+          </div>
+          <div class="flow-step">
+            <strong>2. AgentTask</strong>
+            Objective, owner, members, work references, repos, and priority.
+          </div>
+          <div class="flow-step">
+            <strong>3. Context and skills</strong>
+            Jira/GitHub/docs, reviewed memory, repo instructions, skill bundles, and policy.
+          </div>
+          <div class="flow-step">
+            <strong>4. Workbench launch</strong>
+            Temporal child workflow, host selection, user provisioning, worktree, provider process.
+          </div>
+          <div class="flow-step">
+            <strong>5. Oversight loop</strong>
+            Events, approvals, diffs, tests, commits, PRs, skill versions, ledger, replay.
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="tasks">
+        <div class="page-header">
+          <div>
+            <h2>Tasks Dashboard</h2>
+            <div class="subtitle">Scan work status, cost, agents, and next required action.</div>
+          </div>
+          <div class="actions">
+            <button>New task</button>
+            <button class="primary">Launch</button>
+          </div>
+        </div>
+
+        <div class="metrics">
+          <div class="metric"><div class="label">Needs attention</div><div class="value">4</div></div>
+          <div class="metric"><div class="label">Running</div><div class="value">9</div></div>
+          <div class="metric"><div class="label">Review ready</div><div class="value">3</div></div>
+          <div class="metric"><div class="label">Failed</div><div class="value">1</div></div>
+          <div class="metric"><div class="label">Cost today</div><div class="value">$18.42</div></div>
+        </div>
+
+        <div class="attention-list" aria-labelledby="attention-heading">
+          <div class="attention-item">
+            <strong id="attention-heading">Needs attention</strong>
+            <span>Host agent launch failed</span>
+            <span>OpenCode could not bind its assigned port on fedora-2.</span>
+            <button>View recovery</button>
+          </div>
+          <div class="attention-item">
+            <span class="status warn">Approval required</span>
+            <span>ACP adapter plan</span>
+            <span>Claude is waiting for an authorized reviewer. Due 11:30.</span>
+            <button>Review plan</button>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 12px;">
+          <div class="toolbar" aria-label="Task filters">
+            <span class="filter">Saved view: My attention queue</span>
+            <span class="filter">Project: All</span>
+            <span class="filter">Owner: All</span>
+            <span class="filter">Provider: All</span>
+            <span class="filter">State: Attention first</span>
+            <span class="filter">Work ref: Any</span>
+            <span class="filter">Host: All</span>
+            <span class="filter">Sort: Next action</span>
+            <span class="filter">Columns</span>
+            <span class="filter">Density: Compact</span>
+          </div>
+          <div class="freshness" role="status">14 tasks. Updated 18 seconds ago. Live updates connected.</div>
+          <div class="table-wrap">
+            <table>
+              <caption class="sr-only">Tasks ordered by required attention, with orchestration, execution, reviewer, cost, and next-action status.</caption>
+              <thead>
+                <tr>
+                  <th scope="col">Orchestration</th>
+                  <th scope="col">Execution</th>
+                  <th scope="col">Task</th>
+                  <th scope="col">Review</th>
+                  <th scope="col">Work Ref</th>
+                  <th scope="col">Agents</th>
+                  <th scope="col">Repo</th>
+                  <th scope="col" class="num">Cost</th>
+                  <th scope="col">Next Action</th>
+                </tr>
+              </thead>
+              <tbody>
+                <tr>
+                  <td><span class="status running">Active</span></td>
+                  <td><span class="status running">Running</span></td>
+                  <td><strong>OIDC polish</strong><div class="id">task_oc_1042</div></td>
+                  <td><span class="status review">Ready</span></td>
+                  <td>JIRA-42, PR #31</td>
+                  <td>Claude running<br>Codex idle</td>
+                  <td>runtime</td>
+                  <td class="num">$3.11</td>
+                  <td><button>Review</button></td>
+                </tr>
+                <tr>
+                  <td><span class="status warn">Waiting</span></td>
+                  <td><span class="status review">Review</span></td>
+                  <td><strong>ACP adapter</strong><div class="id">task_oc_1188</div></td>
+                  <td><span class="status warn">Plan due</span></td>
+                  <td>GH#118</td>
+                  <td>Codex editing</td>
+                  <td>workbench</td>
+                  <td class="num">$7.80</td>
+                  <td><button>Run tests</button></td>
+                </tr>
+                <tr>
+                  <td><span class="status failed">Recovering</span></td>
+                  <td><span class="status failed">Failed</span></td>
+                  <td><strong>Host agent</strong><div class="id">task_oc_1201</div></td>
+                  <td>Not started</td>
+                  <td>Manual</td>
+                  <td>OpenCode failed</td>
+                  <td>deploy</td>
+                  <td class="num">$0.16</td>
+                  <td><button>Relaunch</button></td>
+                </tr>
+                <tr>
+                  <td><span class="status warn">Draft</span></td>
+                  <td><span class="status warn">Draft</span></td>
+                  <td><strong>Skill import</strong><div class="id">task_oc_1210</div></td>
+                  <td>Not requested</td>
+                  <td>OC-S-19</td>
+                  <td>0</td>
+                  <td>skills</td>
+                  <td class="num">$0.00</td>
+                  <td><button>Generate context</button></td>
+                </tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="task-detail">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Task Detail: ACP provider adapter</h2>
+              <div class="subtitle">Running. Owner mfox. Project OpenCortex. Priority high.</div>
+            </div>
+            <div class="actions">
+              <button>Rename</button>
+              <button>Hand off</button>
+              <button class="danger">Stop all</button>
+            </div>
+          </div>
+          <div class="callout">Objective: build the internal AgentClient around ACP and wire provider events to the activity ledger.</div>
+          <div class="freshness" style="margin-top: 8px;">Sources: GitHub issue 118 observed 10:12; Jira OC-77 observed 10:10; four approved memory entries. Task projection updated 18 seconds ago.</div>
+          <div class="split" style="margin-top: 12px;">
+            <section class="subsection" aria-labelledby="work-references-heading">
+              <h3 id="work-references-heading">Work References</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Provider</th><th>Reference</th><th>Status</th><th>Evidence</th></tr></thead>
+                  <tbody>
+                    <tr><td>GitHub</td><td>GH#118</td><td>Open</td><td>issue body, comments</td></tr>
+                    <tr><td>Jira</td><td>JIRA-OC-77</td><td>In review</td><td>team cache, source count 3</td></tr>
+                    <tr><td>OpenCortex</td><td>Prior task</td><td>Archived</td><td>session summary</td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+            <section class="subsection" aria-labelledby="active-workbenches-heading">
+              <h3 id="active-workbenches-heading">Active Workbenches</h3>
+              <div class="table-wrap">
+                <table>
+                  <thead><tr><th>Provider</th><th>Status</th><th>Host/User</th><th>Link</th></tr></thead>
+                  <tbody>
+                    <tr><td>Codex</td><td><span class="status running">Editing</span></td><td>fedora-2/mfox</td><td><button>Open native</button></td></tr>
+                    <tr><td>Claude</td><td><span class="status warn">Waiting</span></td><td>macbook/ada</td><td><button>claude.ai</button></td></tr>
+                  </tbody>
+                </table>
+              </div>
+            </section>
+          </div>
+          <div class="tabs" role="tablist" aria-label="Task details">
+            <button class="tab active" role="tab" aria-selected="true">Timeline</button>
+            <button class="tab" role="tab" aria-selected="false">Context Pack</button>
+            <button class="tab" role="tab" aria-selected="false">Review</button>
+            <button class="tab" role="tab" aria-selected="false">Diffs</button>
+            <button class="tab" role="tab" aria-selected="false">Memory</button>
+            <button class="tab" role="tab" aria-selected="false">Skills</button>
+            <button class="tab" role="tab" aria-selected="false">Artifacts</button>
+            <button class="tab" role="tab" aria-selected="false">Ledger</button>
+          </div>
+          <div class="timeline">
+            <div class="event"><time>10:13</time><div>Context pack generated from GH#118, 4 memory entries, AGENTS.md, and agent-baseline skills.</div></div>
+            <div class="event"><time>10:14</time><div>Temporal child workflow started; Codex process launched on fedora-2 as mfox.</div></div>
+            <div class="event"><time>10:22</time><div>File diff observed: packages/workbench/src/acpClient.ts.</div></div>
+            <div class="event"><time>10:27</time><div>Claude requested approval: update provider policy routing.</div></div>
+            <div class="event"><time>10:31</time><div>Tests running: npm test --workspace packages/workbench.</div></div>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="temporal-supervision">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>Temporal Session Supervision</h2>
+              <div class="subtitle">Durable orchestration for Codex / ACP adapter while the provider process remains host-local.</div>
+            </div>
+            <span class="status failed">Recovering</span>
+          </div>
+          <div class="three-col">
+            <section class="subsection">
+              <h3>Orchestration</h3>
+              <p><strong>Workflow running</strong><br>Run 03f...<br>Launch attempt 1 of 3</p>
+            </section>
+            <section class="subsection">
+              <h3>Provider process</h3>
+              <p><strong>State unknown</strong><br>Native session codex_82<br>Last event: diff observed</p>
+            </section>
+            <section class="subsection">
+              <h3>Execution host</h3>
+              <p><strong>fedora-2 offline</strong><br>Linux user mfox<br>Last heartbeat 2m 14s ago</p>
+            </section>
+          </div>
+          <div class="callout warning" role="status" style="margin-top: 12px;"><strong>Waiting durably for fedora-2.</strong> When its worker reconnects, the workflow will reconcile workbench wb_92 before reattaching or relaunching. It will not duplicate the provider process or the last prompt.</div>
+          <div class="actions" style="justify-content: flex-start; margin-top: 12px;">
+            <button>Request status</button>
+            <button>Move to replacement host</button>
+            <button class="danger">Stop and archive</button>
+          </div>
+          <div class="freshness" style="margin-top: 10px;">Workflow id workbench/wb_92. Next retry at 10:36. Recovery requires approval before changing hosts.</div>
+        </div>
+      </section>
+
+      <section class="section" id="launch">
+        <div class="panel">
+          <div class="panel-header">
+            <div>
+              <h2>New Task and Launch</h2>
+              <div class="subtitle">Create a task from any work source and launch the right provider under the right user.</div>
+            </div>
+            <div class="actions">
+              <button>Save draft</button>
+              <button>Generate context pack</button>
+              <button class="primary">Launch workbench</button>
+            </div>
+          </div>
+          <form class="form-grid" aria-describedby="launch-help">
+            <p class="subtitle full" id="launch-help">Required launch inputs are checked before a provider process starts. Entered values remain available after a failed check.</p>
+            <div class="field full">
+              <label for="objective">Objective</label>
+              <textarea id="objective">Implement ACP event capture for workbench providers and persist normalized events to the ledger.</textarea>
+            </div>
+            <div class="field">
+              <label for="work-references">Work references</label>
+              <input class="input" id="work-references" value="JIRA-123, GitHub issue 118, prior session" readonly>
+            </div>
+            <div class="field">
+              <label for="repository">Repository</label>
+              <input class="input" id="repository" value="OpenCortex-implementation / main / new worktree" readonly>
+            </div>
+            <div class="field">
+              <label for="context-sources">Context sources</label>
+              <input class="input" id="context-sources" value="Reviewed memory, issue details, docs, prior summary" readonly>
+            </div>
+            <div class="field">
+              <label for="skill-bundle">Skill bundle</label>
+              <input class="input" id="skill-bundle" value="Agent baseline, repo-test-runner, Jira context builder" readonly>
+            </div>
+            <div class="field">
+              <label for="launch-policy">Policy</label>
+              <input class="input" id="launch-policy" value="Plan before edits; diff review before PR" readonly>
+            </div>
+            <div class="field">
+              <label for="provider">Provider</label>
+              <input class="input" id="provider" value="Claude Code" readonly>
+            </div>
+            <div class="field">
+              <label for="execution-target">Host and Linux user</label>
+              <input class="input" id="execution-target" value="linux-macbook as ada" readonly>
+            </div>
+          </form>
+          <div class="callout warning" role="alert" style="margin-top: 12px;"><strong>Launch blocked for Codex on linux-macbook as ada.</strong> Provider login is missing. Start device login, then rerun preflight; the task configuration will be preserved.</div>
+        </div>
+
+        <div class="panel" style="margin-top: 12px;">
+          <h3>Provider Readiness</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Provider</th><th>Host</th><th>Linux user</th><th>Status</th><th>Action</th></tr></thead>
+              <tbody>
+                <tr><td>Claude Code</td><td>linux-macbook</td><td>ada</td><td><span class="status running">Ready</span></td><td><button>Launch</button></td></tr>
+                <tr><td>Codex</td><td>linux-macbook</td><td>ada</td><td><span class="status warn">Login needed</span></td><td><button>Start device login</button></td></tr>
+                <tr><td>OpenCode</td><td>fedora-2</td><td>mfox</td><td><span class="status running">Ready</span></td><td><button>Launch</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 12px;">
+          <h3>Skill Bundle Readiness</h3>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Bundle</th><th>Host</th><th>Linux user</th><th>Status</th><th>Action</th></tr></thead>
+              <tbody>
+                <tr><td>Agent baseline</td><td>linux-macbook</td><td>ada</td><td><span class="status running">Installed</span></td><td><button>Update</button></td></tr>
+                <tr><td>Brain import review tools</td><td>linux-macbook</td><td>ada</td><td><span class="status warn">Not present</span></td><td><button>Install</button></td></tr>
+                <tr><td>Repo workflow scripts</td><td>fedora-2</td><td>mfox</td><td><span class="status running">Installed</span></td><td><button>View</button></td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="agents-hosts">
+        <div class="split">
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Agents</h2>
+              <button>Refresh</button>
+            </div>
+            <div class="toolbar">
+              <span class="filter">State: All</span>
+              <span class="filter">Provider: All</span>
+              <span class="filter">Needs action</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Status</th><th>Provider</th><th>Task</th><th>Host/User</th><th>Last</th><th>Action</th></tr></thead>
+                <tbody>
+                  <tr><td><span class="status running">Running</span></td><td>Claude</td><td>OIDC polish</td><td>macbook/ada</td><td>1m ago</td><td><button>Open UI</button></td></tr>
+                  <tr><td><span class="status running">Editing</span></td><td>Codex</td><td>ACP adapter</td><td>fedora/mfox</td><td>18s ago</td><td><button>Prompt</button></td></tr>
+                  <tr><td><span class="status failed">Failed</span></td><td>OpenCode</td><td>Host agent</td><td>fedora/ada</td><td>12m ago</td><td><button>Logs</button></td></tr>
+                  <tr><td><span class="status warn">Waiting</span></td><td>Claude</td><td>Ledger costs</td><td>macbook/mfx</td><td>4m ago</td><td><button>Approve</button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Selected Agent</h2>
+            <div class="callout">Codex / ACP adapter is editing packages/workbench/src/acpClient.ts.</div>
+            <div class="scopebar" style="margin-top: 10px;">
+              <span class="chip">Temporal supervising</span>
+              <span class="chip">ACP connected</span>
+              <span class="chip">Cost $7.80 estimated from model usage</span>
+              <span class="chip">Pending none</span>
+            </div>
+            <div class="actions" style="justify-content: flex-start;">
+              <button>Open native UI</button>
+              <button>Attach terminal</button>
+              <button>Request status</button>
+              <button>Pause</button>
+              <button class="danger">Stop</button>
+              <button>Hand off</button>
+            </div>
+            <h3 style="margin-top: 14px;">Recent Events</h3>
+            <div class="timeline">
+              <div class="event"><time>10:22</time><div>tool: read_file</div></div>
+              <div class="event"><time>10:23</time><div>diff: acpClient.ts</div></div>
+              <div class="event"><time>10:27</time><div>model complete</div></div>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 12px;">
+          <div class="panel-header">
+            <h2>Hosts</h2>
+            <button>Enroll host</button>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Host</th><th>Status</th><th>Address</th><th>Providers</th><th class="num">Agents</th><th>Last beat</th></tr></thead>
+              <tbody>
+                <tr><td><strong>linux-macbook</strong><div class="id">100.x.x.x / 192.168.x.x</div></td><td><span class="status running">Online</span></td><td>tailnet/local</td><td>Claude, Codex</td><td class="num">5</td><td>14s ago</td></tr>
+                <tr><td><strong>fedora-2</strong><div class="id">100.x.x.x / 192.168.x.x</div></td><td><span class="status warn">Degraded</span></td><td>tailnet/local</td><td>OpenCode</td><td class="num">2</td><td>31s ago</td></tr>
+                <tr><td><strong>builder-1</strong></td><td><span class="status failed">Offline</span></td><td>tailnet</td><td>0</td><td class="num">0</td><td>2h ago</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="review-ledger">
+        <div class="split">
+          <div class="panel">
+            <h2>Review Queue</h2>
+            <div class="scopebar">
+              <span class="chip">Required 3</span>
+              <span class="chip">Memory pending 5</span>
+              <span class="chip">PRs 2</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Status</th><th>Request</th><th>Task</th><th>Kind</th><th>Action</th></tr></thead>
+                <tbody>
+                  <tr><td><span class="status warn">Required</span></td><td>Approve plan</td><td>ACP adapter</td><td>prompt</td><td><button>Review</button></td></tr>
+                  <tr><td><span class="status warn">Required</span></td><td>Allow tool</td><td>Host agent</td><td>tool</td><td><button>Approve/Reject</button></td></tr>
+                  <tr><td><span class="status review">Ready</span></td><td>PR review</td><td>OIDC polish</td><td>pr</td><td><button>Open diff</button></td></tr>
+                  <tr><td><span class="status warn">Pending</span></td><td>Memory entry</td><td>Skill import</td><td>memory</td><td><button>Accept/Edit</button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <h2>Review Detail</h2>
+            <div class="callout">Agent proposes to add ACP client events and ledger persistence before provider UI changes.</div>
+            <div class="freshness" style="margin-top: 8px;">Requested by Claude at 10:27 from context pack cp_183. Reviewer role required: project maintainer. Evidence updated 34 seconds ago.</div>
+            <div class="three-col" style="margin-top: 12px;">
+              <div><h3>Context</h3><p>Context pack cp_183, work ref GH#118, memory entries 4.</p></div>
+              <div><h3>Likely files</h3><p>packages/workbench/src, packages/activity-ledger/src.</p></div>
+              <div><h3>Decision</h3><p>Require provider-neutral ledger event names.</p></div>
+            </div>
+            <div class="actions" style="justify-content: flex-start;">
+              <button class="danger">Reject</button>
+              <button>Request changes</button>
+              <button class="primary">Approve</button>
+            </div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 12px;">
+          <div class="panel-header">
+            <h2>Ledger and Replay</h2>
+            <div class="actions"><button>Export</button><button>Replay</button></div>
+          </div>
+          <div class="table-wrap">
+            <table>
+              <thead><tr><th>Time</th><th>Event</th><th>Actor</th><th>Provider</th><th>Object</th><th class="num">Cost</th></tr></thead>
+              <tbody>
+                <tr><td>10:13:02</td><td>context generated</td><td>mfox</td><td>OpenCortex</td><td>cp_183</td><td class="num">n/a</td></tr>
+                <tr><td>10:14:11</td><td>launched</td><td>mfox/ada</td><td>Claude Code</td><td>wb_92</td><td class="num">n/a</td></tr>
+                <tr><td>10:22:47</td><td>diff observed</td><td>Claude</td><td>Claude Code</td><td>acpClient</td><td class="num">$1.34 est</td></tr>
+                <tr><td>10:27:03</td><td>approval</td><td>mfox</td><td>OpenCortex</td><td>rr_44</td><td class="num">n/a</td></tr>
+                <tr><td>10:31:50</td><td>tests</td><td>Codex</td><td>Codex</td><td>npm test</td><td class="num">$0.42 est</td></tr>
+              </tbody>
+            </table>
+          </div>
+        </div>
+      </section>
+
+      <section class="section" id="knowledge">
+        <div class="split">
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Memory</h2>
+              <button>Capture</button>
+            </div>
+            <div class="toolbar">
+              <span class="filter">Scope: Project</span>
+              <span class="filter">Review state: Any</span>
+              <span class="filter">Task: ACP adapter</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Status</th><th>Type</th><th>Title</th><th>Scope</th><th>Source</th><th>Used by</th></tr></thead>
+                <tbody>
+                  <tr><td><span class="status running">Approved</span></td><td>decision</td><td>ACP names</td><td>project</td><td>review</td><td>4 context packs</td></tr>
+                  <tr><td><span class="status review">Review</span></td><td>finding</td><td>Dex issuer</td><td>runtime</td><td>session</td><td>1 context pack</td></tr>
+                  <tr><td><span class="status warn">Pending</span></td><td>handoff</td><td>Skills plan</td><td>task</td><td>chat</td><td>0</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </div>
+
+          <div class="panel">
+            <div class="panel-header">
+              <h2>Skill Library</h2>
+              <div class="actions"><button>Import</button><button>Publish</button></div>
+            </div>
+            <div class="toolbar">
+              <span class="filter">Source: All</span>
+              <span class="filter">Provider: All</span>
+              <span class="filter">Review state: Any</span>
+              <span class="filter">Installed: Any</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Status</th><th>Skill</th><th>Source</th><th>Type</th><th>Providers</th><th>Install</th></tr></thead>
+                <tbody>
+                  <tr><td><span class="status running">Ready</span></td><td>agent-baseline</td><td>OpenCortex</td><td>prompt</td><td>generic</td><td>6 targets</td></tr>
+                  <tr><td><span class="status review">Review</span></td><td>repo-test-runner</td><td>brain import</td><td>script</td><td>Claude, Codex</td><td>2 targets</td></tr>
+                  <tr><td><span class="status failed">Blocked</span></td><td>legacy-dsn-helper</td><td>brain import</td><td>script</td><td>unknown</td><td>blocked</td></tr>
+                  <tr><td><span class="status warn">Pending</span></td><td>jira-context-builder</td><td>brain import</td><td>workflow</td><td>generic</td><td>review</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="callout" style="margin-top: 12px;">Skill detail shows package files, checksums, branding/import notes, required binaries, MCP servers, install targets, validation, and ledger usage.</div>
+          </div>
+        </div>
+
+        <div class="panel" style="margin-top: 12px;">
+          <div class="panel-header">
+            <div>
+              <h2>Skill Bundle Builder</h2>
+              <div class="subtitle">Attach installable capabilities to projects, tasks, providers, hosts, and Linux users.</div>
+            </div>
+            <div class="actions">
+              <button>Validate dependencies</button>
+              <button>Install to targets</button>
+              <button class="primary">Publish bundle</button>
+            </div>
+          </div>
+          <div class="three-col">
+            <section class="subsection">
+              <h3>Bundle</h3>
+              <p><strong>OpenCortex agent baseline</strong><br>Scope: project<br>Version: 2026.09.04</p>
+            </section>
+            <section class="subsection">
+              <h3>Included skills</h3>
+              <p>agent-baseline, repo-test-runner, jira-context-builder</p>
+            </section>
+            <section class="subsection">
+              <h3>Targets</h3>
+              <p>linux-macbook/ada, fedora-2/mfox. Attach to Claude, Codex, and OpenCode launches by default.</p>
+            </section>
+          </div>
+        </div>
+
+        <div class="panel" id="settings" style="margin-top: 12px;">
+          <h2>Settings and Governance</h2>
+            <div class="table-wrap">
+              <table>
+                <thead><tr><th>Area</th><th>Current setting</th><th>Status</th></tr></thead>
+                <tbody>
+                  <tr><td>Identity</td><td>Google OIDC, Dex bundled for local users</td><td><span class="status running">Ready</span></td></tr>
+                  <tr><td>Users</td><td>Linux user overrides configured</td><td><span class="status running">Ready</span></td></tr>
+                  <tr><td>Providers</td><td>Claude, Codex, OpenCode</td><td><span class="status warn">Mixed auth</span></td></tr>
+                  <tr><td>Skill bundles</td><td>Baseline required, brain imports require review</td><td><span class="status review">Policy</span></td></tr>
+                  <tr><td>MCP tools</td><td>Approved MCP only by default</td><td><span class="status review">Policy</span></td></tr>
+                  <tr><td>Billing</td><td>Estimated until provider-native cost exists</td><td><span class="status warn">Estimated</span></td></tr>
+                </tbody>
+              </table>
+            </div>
+        </div>
+      </section>
+
+      <section class="section" id="operational-states">
+        <div class="page-header">
+          <div>
+            <h2>Operational State Patterns</h2>
+            <div class="subtitle">Every data surface specifies loading, empty, partial, stale, and failed states without blocking unaffected work.</div>
+          </div>
+        </div>
+        <div class="three-col">
+          <section class="panel" aria-labelledby="loading-state-heading">
+            <h3 id="loading-state-heading">Refreshing one region</h3>
+            <p>Agent events are updating. Existing task and review data remains available.</p>
+            <div class="freshness" role="status">Timeline refresh in progress...</div>
+          </section>
+          <section class="panel" aria-labelledby="empty-state-heading">
+            <h3 id="empty-state-heading">No tasks match this view</h3>
+            <p>The saved view has no matching tasks. Clear filters or create a task.</p>
+            <button>Clear filters</button>
+          </section>
+          <section class="panel" aria-labelledby="error-state-heading">
+            <h3 id="error-state-heading">Host status is unavailable</h3>
+            <p>linux-macbook missed three heartbeats. Last confirmed online at 10:31.</p>
+            <button>Retry host check</button>
+          </section>
+        </div>
+      </section>
+
+      <section class="section" id="mobile">
+        <div class="page-header">
+          <div>
+            <h2>Mobile Oversight Intent</h2>
+            <div class="subtitle">Useful for approvals and triage, not full development.</div>
+          </div>
+        </div>
+        <div class="mobile-strip">
+          <strong>OpenCortex</strong>
+          <span style="float: right;">mfox</span>
+          <h3 style="margin-top: 16px;">Needs attention</h3>
+          <div class="mobile-card">
+            <strong>Approve plan</strong>
+            <div>ACP adapter</div>
+            <div class="subtitle">Claude / linux-macbook</div>
+            <button style="margin-top: 8px;">Review</button>
+          </div>
+          <div class="mobile-card">
+            <strong>Codex editing</strong>
+            <div>Host: fedora-2</div>
+            <div class="subtitle">Last activity 18s ago</div>
+            <button style="margin-top: 8px;">Open native UI</button>
+          </div>
+        </div>
+      </section>
+    </main>
+  </div>
+</body>
+</html>
