@@ -727,6 +727,81 @@ button.secondary {
   padding: 10px;
 }
 
+.inventory-panel {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 10px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  background: rgb(var(--surface-2));
+  padding: 10px;
+}
+
+.inventory-panel[hidden] {
+  display: none;
+}
+
+.inventory-heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.inventory-heading h3 {
+  margin: 0;
+  color: rgb(var(--brand-secondary));
+  font-size: 14px;
+}
+
+.inventory-heading span,
+.inventory-empty {
+  margin: 0;
+  color: rgb(var(--text-muted));
+  font-size: 12px;
+}
+
+.inventory-list {
+  display: grid;
+  gap: 6px;
+}
+
+.inventory-item {
+  display: grid;
+  grid-template-columns: 84px minmax(0, 1fr) minmax(160px, auto);
+  align-items: center;
+  gap: 8px;
+  min-width: 0;
+  border: 1px solid #d7dee8;
+  border-radius: 6px;
+  padding: 7px 8px;
+  background: #f8fbff;
+}
+
+.inventory-item span {
+  color: rgb(var(--text-muted));
+  font-size: 11px;
+  font-weight: 800;
+  text-transform: uppercase;
+}
+
+.inventory-item strong {
+  min-width: 0;
+  overflow: hidden;
+  font-size: 13px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.inventory-item code {
+  overflow: hidden;
+  color: rgb(var(--text-muted));
+  font-family: ui-monospace, SFMono-Regular, Menlo, Monaco, Consolas, "Liberation Mono", monospace;
+  font-size: 11px;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
 .observability-heading {
   display: flex;
   align-items: center;

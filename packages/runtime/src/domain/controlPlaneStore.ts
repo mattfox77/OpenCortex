@@ -1,0 +1,1025 @@
+import {
+  accessSync,
+  constants as fsConstants,
+  mkdirSync,
+  readFileSync,
+  writeFileSync,
+} from "node:fs";
+import { join } from "node:path";
+import { nanoid } from "nanoid";
+import type { AuthenticatedUser } from "../auth/types.js";
+import type { CodeSession } from "../code/sessionLauncher.js";
+
+export const localTenantId = "tenant_local";
+
+export type TenantMembershipRole =
+  | "owner"
+  | "operator"
+  | "reviewer"
+  | "observer"
+  | "class_admin"
+  | "teacher"
+  | "teaching_assistant"
+  | "student"
+  | "auditor";
+
+export type ShareMode =
+  | "observe"
+  | "annotate"
+  | "assist"
+  | "pair"
+  | "takeover"
+  | "handoff"
+  | "review-only"
+  | "replay-only";
+
+export interface Tenant {
+  id: string;
+  slug: string;
+  name: string;
+  status: "active" | "archived";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface TenantMembership {
+  id: string;
+  tenantId: string;
+  subject: string;
+  email: string;
+  role: TenantMembershipRole;
+  scopes: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AgentTask {
+  id: string;
+  tenantId: string;
+  ownerSubject: string;
+  ownerEmail: string;
+  title: string;
+  description: string;
+  status: "active" | "blocked" | "review" | "completed" | "archived";
+  cohortId?: string;
+  assignmentInstanceId?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+export interface WorkReference {
+  id: string;
+  tenantId: string;
+  taskId: string;
+  kind:
+    | "jira"
+    | "github_issue"
+    | "github_pr"
+    | "manual"
+    | "link"
+    | "note"
+    | "repository"
+    | "file"
+    | "artifact";
+  externalId?: string;
+  url?: string;
+  title?: string;
+  metadata: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+export interface Workbench {
+  id: string;
+  tenantId: string;
+  taskId: string;
+  ownerSubject: string;
+  ownerEmail: string;
+  linuxUser: string;
+  name?: string;
+  status:
+    "active" | "starting" | "running" | "stopped" | "archived" | "unknown";
+  workspaceDir?: string;
+  hostId?: string;
+  legacySessionId?: string;
+  migrationMetadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+export interface ProviderSession {
+  id: string;
+  tenantId: string;
+  workbenchId: string;
+  providerId: string;
+  providerVersion?: string;
+  nativeSessionId?: string;
+  status:
+    | "active"
+    | "running"
+    | "idle"
+    | "blocked"
+    | "completed"
+    | "archived"
+    | "unknown";
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+export interface Cohort {
+  id: string;
+  tenantId: string;
+  name: string;
+  status: "active" | "archived";
+  metadata: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+export interface CohortEnrollment {
+  id: string;
+  tenantId: string;
+  cohortId: string;
+  subject: string;
+  email: string;
+  role: Extract<
+    TenantMembershipRole,
+    "class_admin" | "teacher" | "teaching_assistant" | "student" | "auditor"
+  >;
+  status: "invited" | "active" | "removed";
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface AssignmentTemplate {
+  id: string;
+  tenantId: string;
+  cohortId?: string;
+  title: string;
+  objective: string;
+  policy: Record<string, unknown>;
+  rubric: Record<string, unknown>;
+  metadata: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+export interface AssignmentInstance {
+  id: string;
+  tenantId: string;
+  templateId: string;
+  cohortId?: string;
+  taskId?: string;
+  assignee: string;
+  assigneeEmail: string;
+  status:
+    | "assigned"
+    | "in_progress"
+    | "submitted"
+    | "reviewed"
+    | "returned"
+    | "archived";
+  dueAt?: string;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface SessionShareGrant {
+  id: string;
+  tenantId: string;
+  workbenchId: string;
+  grantee: string;
+  mode: ShareMode;
+  status: "pending" | "active" | "revoked" | "expired";
+  reason?: string;
+  createdBy: string;
+  createdAt: string;
+  expiresAt?: string;
+}
+
+interface ControlPlaneState {
+  tenants: Tenant[];
+  memberships: TenantMembership[];
+  tasks: AgentTask[];
+  workReferences: WorkReference[];
+  workbenches: Workbench[];
+  providerSessions: ProviderSession[];
+  cohorts: Cohort[];
+  cohortEnrollments: CohortEnrollment[];
+  assignmentTemplates: AssignmentTemplate[];
+  assignmentInstances: AssignmentInstance[];
+  sessionShareGrants: SessionShareGrant[];
+}
+
+export interface LegacyControlPlaneIds {
+  tenantId: string;
+  taskId: string;
+  workbenchId: string;
+  providerSessionId: string;
+}
+
+export class ControlPlaneStore {
+  private readonly filePath: string;
+  private readonly state: ControlPlaneState;
+  private persistent = false;
+
+  constructor(dataDir: string) {
+    this.filePath = join(dataDir, "control-plane.json");
+    this.persistent = this.ensureWritable(dataDir);
+    this.state = this.readFromDisk();
+    this.ensureLocalTenant();
+    this.persist();
+  }
+
+  ensureUserMembership(user: AuthenticatedUser): TenantMembership {
+    const existing = this.state.memberships.find(
+      (item) => item.tenantId === localTenantId && item.subject === user.sub,
+    );
+    if (existing) {
+      return existing;
+    }
+    const now = new Date().toISOString();
+    const membership: TenantMembership = {
+      id: `membership_${nanoid(12)}`,
+      tenantId: localTenantId,
+      subject: user.sub,
+      email: user.email,
+      role: user.isSuperAdmin ? "owner" : "operator",
+      scopes: {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.memberships.push(membership);
+    this.persist();
+    return membership;
+  }
+
+  ensureLegacySession(session: CodeSession): LegacyControlPlaneIds {
+    const tenantId = session.tenantId ?? localTenantId;
+    this.ensureLocalTenant();
+    const now = new Date().toISOString();
+    const task =
+      this.state.tasks.find(
+        (item) =>
+          item.tenantId === tenantId &&
+          item.metadata.legacySessionId === session.id,
+      ) ??
+      this.createTaskRecord({
+        tenantId,
+        ownerSubject: session.ownerSubject ?? `legacy:${session.ownerEmail}`,
+        ownerEmail: session.ownerEmail,
+        title: session.name ?? `Workbench ${session.id}`,
+        description:
+          "Imported from legacy code-sessions.json compatibility data.",
+        metadata: {
+          legacySessionId: session.id,
+          legacySource: "code-sessions.json",
+        },
+        now,
+      });
+    const workbench =
+      this.state.workbenches.find(
+        (item) =>
+          item.tenantId === tenantId && item.legacySessionId === session.id,
+      ) ??
+      this.createWorkbenchRecord({
+        tenantId,
+        taskId: task.id,
+        ownerSubject: session.ownerSubject ?? task.ownerSubject,
+        ownerEmail: session.ownerEmail,
+        linuxUser: session.linuxUser,
+        name: session.name,
+        status: session.mode === "dry-run" ? "unknown" : "running",
+        workspaceDir: session.workspaceDir,
+        legacySessionId: session.id,
+        migrationMetadata: {
+          legacySessionId: session.id,
+          urlPath: session.urlPath,
+          port: session.port,
+          command: session.command,
+          mode: session.mode,
+          threads: session.threads ?? [],
+        },
+        now,
+      });
+    const provider =
+      this.state.providerSessions.find(
+        (item) =>
+          item.tenantId === tenantId &&
+          item.workbenchId === workbench.id &&
+          item.metadata.legacySessionId === session.id,
+      ) ??
+      this.createProviderSessionRecord({
+        tenantId,
+        workbenchId: workbench.id,
+        providerId: session.providerId ?? "opencode",
+        providerVersion: session.providerVersion,
+        nativeSessionId: session.openCodeSessionId,
+        status: session.openCodeSessionId ? "active" : "unknown",
+        metadata: {
+          legacySessionId: session.id,
+          activeThreadId: session.activeThreadId,
+        },
+        now,
+      });
+
+    const changed =
+      session.tenantId !== tenantId ||
+      session.taskId !== task.id ||
+      session.workbenchId !== workbench.id ||
+      session.providerSessionId !== provider.id ||
+      session.ownerSubject !== task.ownerSubject;
+    if (changed) {
+      session.tenantId = tenantId;
+      session.taskId = task.id;
+      session.workbenchId = workbench.id;
+      session.providerSessionId = provider.id;
+      session.ownerSubject = task.ownerSubject;
+    }
+    this.persist();
+    return {
+      tenantId,
+      taskId: task.id,
+      workbenchId: workbench.id,
+      providerSessionId: provider.id,
+    };
+  }
+
+  listTasks(user: AuthenticatedUser, limit = 50): AgentTask[] {
+    this.ensureUserMembership(user);
+    return this.state.tasks
+      .filter((task) => this.canReadTask(user, task))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
+  }
+
+  getTask(user: AuthenticatedUser, id: string): AgentTask | undefined {
+    const task = this.state.tasks.find((item) => item.id === id);
+    return task && this.canReadTask(user, task) ? task : undefined;
+  }
+
+  createTask(input: {
+    user: AuthenticatedUser;
+    title: string;
+    description?: string;
+    cohortId?: string;
+    assignmentInstanceId?: string;
+  }): AgentTask {
+    this.ensureUserMembership(input.user);
+    const now = new Date().toISOString();
+    const task = this.createTaskRecord({
+      tenantId: localTenantId,
+      ownerSubject: input.user.sub,
+      ownerEmail: input.user.email,
+      title: input.title,
+      description: input.description ?? "",
+      cohortId: input.cohortId,
+      assignmentInstanceId: input.assignmentInstanceId,
+      metadata: {},
+      now,
+    });
+    this.persist();
+    return task;
+  }
+
+  archiveTask(user: AuthenticatedUser, id: string): AgentTask | undefined {
+    const task = this.getTask(user, id);
+    if (!task || !this.canOperate(user, task.ownerEmail)) {
+      return undefined;
+    }
+    const now = new Date().toISOString();
+    task.status = "archived";
+    task.archivedAt = now;
+    task.updatedAt = now;
+    this.persist();
+    return task;
+  }
+
+  createWorkReference(input: {
+    user: AuthenticatedUser;
+    taskId: string;
+    kind: WorkReference["kind"];
+    externalId?: string;
+    url?: string;
+    title?: string;
+    metadata?: Record<string, unknown>;
+  }): WorkReference | undefined {
+    const task = this.getTask(input.user, input.taskId);
+    if (!task || !this.canOperate(input.user, task.ownerEmail)) {
+      return undefined;
+    }
+    const now = new Date().toISOString();
+    const reference: WorkReference = {
+      id: `ref_${nanoid(12)}`,
+      tenantId: task.tenantId,
+      taskId: task.id,
+      kind: input.kind,
+      externalId: input.externalId,
+      url: input.url,
+      title: input.title,
+      metadata: input.metadata ?? {},
+      createdBy: input.user.sub,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.workReferences.push(reference);
+    this.persist();
+    return reference;
+  }
+
+  listWorkReferences(
+    user: AuthenticatedUser,
+    taskId: string,
+  ): WorkReference[] | undefined {
+    const task = this.getTask(user, taskId);
+    if (!task) {
+      return undefined;
+    }
+    return this.state.workReferences.filter(
+      (item) =>
+        item.tenantId === task.tenantId &&
+        item.taskId === task.id &&
+        !item.archivedAt,
+    );
+  }
+
+  listWorkbenches(user: AuthenticatedUser, limit = 50): Workbench[] {
+    this.ensureUserMembership(user);
+    return this.state.workbenches
+      .filter((workbench) => this.canReadWorkbench(user, workbench))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt))
+      .slice(0, limit);
+  }
+
+  getWorkbench(user: AuthenticatedUser, id: string): Workbench | undefined {
+    const workbench = this.state.workbenches.find((item) => item.id === id);
+    return workbench && this.canReadWorkbench(user, workbench)
+      ? workbench
+      : undefined;
+  }
+
+  createWorkbench(input: {
+    user: AuthenticatedUser;
+    taskId: string;
+    name?: string;
+    workspaceDir?: string;
+  }): Workbench | undefined {
+    const task = this.getTask(input.user, input.taskId);
+    if (!task || !this.canOperate(input.user, task.ownerEmail)) {
+      return undefined;
+    }
+    const now = new Date().toISOString();
+    const workbench = this.createWorkbenchRecord({
+      tenantId: task.tenantId,
+      taskId: task.id,
+      ownerSubject: input.user.sub,
+      ownerEmail: input.user.email,
+      linuxUser: input.user.linuxUser,
+      name: input.name,
+      status: "active",
+      workspaceDir: input.workspaceDir,
+      migrationMetadata: {},
+      now,
+    });
+    this.persist();
+    return workbench;
+  }
+
+  listProviderSessions(
+    user: AuthenticatedUser,
+    workbenchId: string,
+  ): ProviderSession[] | undefined {
+    const workbench = this.getWorkbench(user, workbenchId);
+    if (!workbench) {
+      return undefined;
+    }
+    return this.state.providerSessions.filter(
+      (item) =>
+        item.tenantId === workbench.tenantId &&
+        item.workbenchId === workbench.id,
+    );
+  }
+
+  createCohort(input: {
+    user: AuthenticatedUser;
+    name: string;
+    metadata?: Record<string, unknown>;
+  }): Cohort {
+    this.ensureUserMembership(input.user);
+    const now = new Date().toISOString();
+    const cohort: Cohort = {
+      id: `cohort_${nanoid(12)}`,
+      tenantId: localTenantId,
+      name: input.name,
+      status: "active",
+      metadata: input.metadata ?? {},
+      createdBy: input.user.sub,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.cohorts.push(cohort);
+    this.state.cohortEnrollments.push({
+      id: `enrollment_${nanoid(12)}`,
+      tenantId: cohort.tenantId,
+      cohortId: cohort.id,
+      subject: input.user.sub,
+      email: input.user.email,
+      role: "teacher",
+      status: "active",
+      createdBy: input.user.sub,
+      createdAt: now,
+      updatedAt: now,
+    });
+    this.persist();
+    return cohort;
+  }
+
+  listCohorts(user: AuthenticatedUser): Cohort[] {
+    this.ensureUserMembership(user);
+    return this.state.cohorts
+      .filter((cohort) => this.canReadCohort(user, cohort))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  getCohort(user: AuthenticatedUser, id: string): Cohort | undefined {
+    const cohort = this.state.cohorts.find((item) => item.id === id);
+    return cohort && this.canReadCohort(user, cohort) ? cohort : undefined;
+  }
+
+  addEnrollment(input: {
+    user: AuthenticatedUser;
+    cohortId: string;
+    email: string;
+    role: CohortEnrollment["role"];
+    subject?: string;
+  }): CohortEnrollment | undefined {
+    const cohort = this.getCohort(input.user, input.cohortId);
+    if (!cohort || !this.canManageCohort(input.user, cohort)) {
+      return undefined;
+    }
+    const subject = input.subject ?? `email:${input.email.toLowerCase()}`;
+    const existing = this.state.cohortEnrollments.find(
+      (item) =>
+        item.cohortId === cohort.id &&
+        item.subject === subject &&
+        item.role === input.role,
+    );
+    if (existing) {
+      return existing;
+    }
+    const now = new Date().toISOString();
+    const enrollment: CohortEnrollment = {
+      id: `enrollment_${nanoid(12)}`,
+      tenantId: cohort.tenantId,
+      cohortId: cohort.id,
+      subject,
+      email: input.email.toLowerCase(),
+      role: input.role,
+      status: "active",
+      createdBy: input.user.sub,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.cohortEnrollments.push(enrollment);
+    this.persist();
+    return enrollment;
+  }
+
+  listEnrollments(
+    user: AuthenticatedUser,
+    cohortId: string,
+  ): CohortEnrollment[] | undefined {
+    const cohort = this.getCohort(user, cohortId);
+    if (!cohort) {
+      return undefined;
+    }
+    if (this.canManageCohort(user, cohort) || user.isSuperAdmin) {
+      return this.state.cohortEnrollments.filter(
+        (item) => item.cohortId === cohort.id,
+      );
+    }
+    return this.state.cohortEnrollments.filter(
+      (item) => item.cohortId === cohort.id && item.subject === user.sub,
+    );
+  }
+
+  createAssignmentTemplate(input: {
+    user: AuthenticatedUser;
+    cohortId?: string;
+    title: string;
+    objective?: string;
+    policy?: Record<string, unknown>;
+    rubric?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+  }): AssignmentTemplate | undefined {
+    if (input.cohortId) {
+      const cohort = this.getCohort(input.user, input.cohortId);
+      if (!cohort || !this.canManageCohort(input.user, cohort)) {
+        return undefined;
+      }
+    }
+    const now = new Date().toISOString();
+    const template: AssignmentTemplate = {
+      id: `assignment_template_${nanoid(12)}`,
+      tenantId: localTenantId,
+      cohortId: input.cohortId,
+      title: input.title,
+      objective: input.objective ?? "",
+      policy: input.policy ?? {},
+      rubric: input.rubric ?? {},
+      metadata: input.metadata ?? {},
+      createdBy: input.user.sub,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.assignmentTemplates.push(template);
+    this.persist();
+    return template;
+  }
+
+  listAssignmentTemplates(user: AuthenticatedUser): AssignmentTemplate[] {
+    this.ensureUserMembership(user);
+    return this.state.assignmentTemplates
+      .filter((template) => this.canReadAssignmentTemplate(user, template))
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  createAssignmentInstance(input: {
+    user: AuthenticatedUser;
+    templateId: string;
+    assignee: string;
+    assigneeEmail: string;
+    dueAt?: string;
+    taskId?: string;
+    metadata?: Record<string, unknown>;
+  }): AssignmentInstance | undefined {
+    const template = this.state.assignmentTemplates.find(
+      (item) => item.id === input.templateId,
+    );
+    if (!template || !this.canManageAssignmentTemplate(input.user, template)) {
+      return undefined;
+    }
+    if (input.taskId) {
+      const task = this.getTask(input.user, input.taskId);
+      if (!task) {
+        return undefined;
+      }
+    }
+    const existing = this.state.assignmentInstances.find(
+      (item) =>
+        item.templateId === template.id &&
+        item.assignee === input.assignee &&
+        item.status !== "archived",
+    );
+    if (existing) {
+      return existing;
+    }
+    const now = new Date().toISOString();
+    const instance: AssignmentInstance = {
+      id: `assignment_instance_${nanoid(12)}`,
+      tenantId: template.tenantId,
+      templateId: template.id,
+      cohortId: template.cohortId,
+      taskId: input.taskId,
+      assignee: input.assignee,
+      assigneeEmail: input.assigneeEmail.toLowerCase(),
+      status: "assigned",
+      dueAt: input.dueAt,
+      metadata: input.metadata ?? {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.assignmentInstances.push(instance);
+    this.persist();
+    return instance;
+  }
+
+  listAssignmentInstances(
+    user: AuthenticatedUser,
+    templateId: string,
+  ): AssignmentInstance[] | undefined {
+    this.ensureUserMembership(user);
+    const template = this.state.assignmentTemplates.find(
+      (item) => item.id === templateId,
+    );
+    if (!template) {
+      return undefined;
+    }
+    if (this.canManageAssignmentTemplate(user, template)) {
+      return this.state.assignmentInstances
+        .filter((item) => item.templateId === template.id)
+        .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+    }
+    if (!this.canReadAssignmentTemplate(user, template)) {
+      return undefined;
+    }
+    return this.state.assignmentInstances
+      .filter(
+        (item) => item.templateId === template.id && item.assignee === user.sub,
+      )
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  createSessionShareGrant(input: {
+    user: AuthenticatedUser;
+    workbenchId: string;
+    grantee: string;
+    mode: ShareMode;
+    reason?: string;
+  }): SessionShareGrant | undefined {
+    const workbench = this.getWorkbench(input.user, input.workbenchId);
+    if (!workbench || !this.canOperate(input.user, workbench.ownerEmail)) {
+      return undefined;
+    }
+    const now = new Date().toISOString();
+    const grant: SessionShareGrant = {
+      id: `share_${nanoid(12)}`,
+      tenantId: workbench.tenantId,
+      workbenchId: workbench.id,
+      grantee: input.grantee,
+      mode: input.mode,
+      status: "active",
+      reason: input.reason,
+      createdBy: input.user.sub,
+      createdAt: now,
+    };
+    this.state.sessionShareGrants.push(grant);
+    this.persist();
+    return grant;
+  }
+
+  listSessionShareGrants(
+    user: AuthenticatedUser,
+    workbenchId?: string,
+  ): SessionShareGrant[] {
+    return this.state.sessionShareGrants
+      .filter((grant) => {
+        if (workbenchId && grant.workbenchId !== workbenchId) {
+          return false;
+        }
+        const workbench = this.state.workbenches.find(
+          (item) => item.id === grant.workbenchId,
+        );
+        if (!workbench) {
+          return false;
+        }
+        return (
+          this.canReadWorkbench(user, workbench) || grant.grantee === user.sub
+        );
+      })
+      .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
+  }
+
+  private canReadTask(user: AuthenticatedUser, task: AgentTask): boolean {
+    return user.isSuperAdmin === true || task.ownerEmail === user.email;
+  }
+
+  private canReadWorkbench(
+    user: AuthenticatedUser,
+    workbench: Workbench,
+  ): boolean {
+    if (user.isSuperAdmin === true || workbench.ownerEmail === user.email) {
+      return true;
+    }
+    return this.state.sessionShareGrants.some(
+      (grant) =>
+        grant.workbenchId === workbench.id &&
+        grant.status === "active" &&
+        grant.grantee === user.sub,
+    );
+  }
+
+  private canOperate(user: AuthenticatedUser, ownerEmail: string): boolean {
+    return user.isSuperAdmin === true || user.email === ownerEmail;
+  }
+
+  private canReadCohort(user: AuthenticatedUser, cohort: Cohort): boolean {
+    return (
+      user.isSuperAdmin === true ||
+      this.state.cohortEnrollments.some(
+        (item) =>
+          item.cohortId === cohort.id &&
+          item.status === "active" &&
+          item.subject === user.sub,
+      )
+    );
+  }
+
+  private canManageCohort(user: AuthenticatedUser, cohort: Cohort): boolean {
+    return (
+      user.isSuperAdmin === true ||
+      this.state.cohortEnrollments.some(
+        (item) =>
+          item.cohortId === cohort.id &&
+          item.status === "active" &&
+          item.subject === user.sub &&
+          ["class_admin", "teacher", "teaching_assistant"].includes(item.role),
+      )
+    );
+  }
+
+  private canReadAssignmentTemplate(
+    user: AuthenticatedUser,
+    template: AssignmentTemplate,
+  ): boolean {
+    if (user.isSuperAdmin || template.createdBy === user.sub) {
+      return true;
+    }
+    if (!template.cohortId) {
+      return this.state.assignmentInstances.some(
+        (item) => item.templateId === template.id && item.assignee === user.sub,
+      );
+    }
+    const cohort = this.state.cohorts.find(
+      (item) => item.id === template.cohortId,
+    );
+    return Boolean(cohort && this.canReadCohort(user, cohort));
+  }
+
+  private canManageAssignmentTemplate(
+    user: AuthenticatedUser,
+    template: AssignmentTemplate,
+  ): boolean {
+    if (user.isSuperAdmin || template.createdBy === user.sub) {
+      return true;
+    }
+    if (!template.cohortId) {
+      return false;
+    }
+    const cohort = this.state.cohorts.find(
+      (item) => item.id === template.cohortId,
+    );
+    return Boolean(cohort && this.canManageCohort(user, cohort));
+  }
+
+  private createTaskRecord(input: {
+    tenantId: string;
+    ownerSubject: string;
+    ownerEmail: string;
+    title: string;
+    description: string;
+    cohortId?: string;
+    assignmentInstanceId?: string;
+    metadata: Record<string, unknown>;
+    now: string;
+  }): AgentTask {
+    const task: AgentTask = {
+      id: `task_${nanoid(12)}`,
+      tenantId: input.tenantId,
+      ownerSubject: input.ownerSubject,
+      ownerEmail: input.ownerEmail,
+      title: input.title,
+      description: input.description,
+      status: "active",
+      cohortId: input.cohortId,
+      assignmentInstanceId: input.assignmentInstanceId,
+      metadata: input.metadata,
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+    this.state.tasks.push(task);
+    return task;
+  }
+
+  private createWorkbenchRecord(input: {
+    tenantId: string;
+    taskId: string;
+    ownerSubject: string;
+    ownerEmail: string;
+    linuxUser: string;
+    name?: string;
+    status: Workbench["status"];
+    workspaceDir?: string;
+    hostId?: string;
+    legacySessionId?: string;
+    migrationMetadata: Record<string, unknown>;
+    now: string;
+  }): Workbench {
+    const workbench: Workbench = {
+      id: `workbench_${nanoid(12)}`,
+      tenantId: input.tenantId,
+      taskId: input.taskId,
+      ownerSubject: input.ownerSubject,
+      ownerEmail: input.ownerEmail,
+      linuxUser: input.linuxUser,
+      name: input.name,
+      status: input.status,
+      workspaceDir: input.workspaceDir,
+      hostId: input.hostId,
+      legacySessionId: input.legacySessionId,
+      migrationMetadata: input.migrationMetadata,
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+    this.state.workbenches.push(workbench);
+    return workbench;
+  }
+
+  private createProviderSessionRecord(input: {
+    tenantId: string;
+    workbenchId: string;
+    providerId: string;
+    providerVersion?: string;
+    nativeSessionId?: string;
+    status: ProviderSession["status"];
+    metadata: Record<string, unknown>;
+    now: string;
+  }): ProviderSession {
+    const providerSession: ProviderSession = {
+      id: `provider_session_${nanoid(12)}`,
+      tenantId: input.tenantId,
+      workbenchId: input.workbenchId,
+      providerId: input.providerId,
+      providerVersion: input.providerVersion,
+      nativeSessionId: input.nativeSessionId,
+      status: input.status,
+      metadata: input.metadata,
+      createdAt: input.now,
+      updatedAt: input.now,
+    };
+    this.state.providerSessions.push(providerSession);
+    return providerSession;
+  }
+
+  private ensureLocalTenant(): void {
+    if (this.state.tenants.some((tenant) => tenant.id === localTenantId)) {
+      return;
+    }
+    const now = new Date().toISOString();
+    this.state.tenants.push({
+      id: localTenantId,
+      slug: "local",
+      name: "Local OpenCortex",
+      status: "active",
+      createdAt: now,
+      updatedAt: now,
+    });
+  }
+
+  private readFromDisk(): ControlPlaneState {
+    try {
+      const parsed = JSON.parse(
+        readFileSync(this.filePath, "utf8"),
+      ) as Partial<ControlPlaneState>;
+      return {
+        tenants: parsed.tenants ?? [],
+        memberships: parsed.memberships ?? [],
+        tasks: parsed.tasks ?? [],
+        workReferences: parsed.workReferences ?? [],
+        workbenches: parsed.workbenches ?? [],
+        providerSessions: parsed.providerSessions ?? [],
+        cohorts: parsed.cohorts ?? [],
+        cohortEnrollments: parsed.cohortEnrollments ?? [],
+        assignmentTemplates: parsed.assignmentTemplates ?? [],
+        assignmentInstances: parsed.assignmentInstances ?? [],
+        sessionShareGrants: parsed.sessionShareGrants ?? [],
+      };
+    } catch {
+      return {
+        tenants: [],
+        memberships: [],
+        tasks: [],
+        workReferences: [],
+        workbenches: [],
+        providerSessions: [],
+        cohorts: [],
+        cohortEnrollments: [],
+        assignmentTemplates: [],
+        assignmentInstances: [],
+        sessionShareGrants: [],
+      };
+    }
+  }
+
+  private ensureWritable(dataDir: string): boolean {
+    try {
+      mkdirSync(dataDir, { recursive: true });
+      accessSync(dataDir, fsConstants.W_OK);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  private persist(): void {
+    if (!this.persistent) {
+      return;
+    }
+    writeFileSync(this.filePath, `${JSON.stringify(this.state, null, 2)}\n`, {
+      encoding: "utf8",
+    });
+  }
+}

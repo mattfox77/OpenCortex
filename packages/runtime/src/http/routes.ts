@@ -65,6 +65,11 @@ import {
   type WorkflowProjectionStatus,
   type WorkflowProjectionStore,
 } from '../workflows/workflowProjectionStore.js';
+import {
+  ControlPlaneStore,
+  type ShareMode,
+  type WorkReference,
+} from '../domain/controlPlaneStore.js';
 
 const tokenExchangeResponseSchema = z.object({
   id_token: z.string().optional(),
@@ -93,6 +98,95 @@ const workflowListQuerySchema = z.object({
 
 const codeSessionRenameSchema = z.object({
   name: z.string().trim().min(1).max(120),
+});
+
+const listLimitSchema = z.coerce.number().int().positive().max(200).optional();
+
+const createTaskSchema = z.object({
+  title: z.string().trim().min(1).max(160),
+  description: z.string().trim().max(4000).optional(),
+  cohortId: z.string().trim().min(1).optional(),
+  assignmentInstanceId: z.string().trim().min(1).optional(),
+});
+
+const workReferenceKindSchema = z.enum([
+  'jira',
+  'github_issue',
+  'github_pr',
+  'manual',
+  'link',
+  'note',
+  'repository',
+  'file',
+  'artifact',
+]) satisfies z.ZodType<WorkReference['kind']>;
+
+const createWorkReferenceSchema = z.object({
+  kind: workReferenceKindSchema,
+  externalId: z.string().trim().min(1).optional(),
+  url: z.string().url().optional(),
+  title: z.string().trim().min(1).max(240).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const createWorkbenchSchema = z.object({
+  taskId: z.string().trim().min(1),
+  name: z.string().trim().min(1).max(160).optional(),
+  workspaceDir: z.string().trim().min(1).optional(),
+});
+
+const createCohortSchema = z.object({
+  name: z.string().trim().min(1).max(160),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const cohortEnrollmentRoleSchema = z.enum([
+  'class_admin',
+  'teacher',
+  'teaching_assistant',
+  'student',
+  'auditor',
+]);
+
+const createCohortEnrollmentSchema = z.object({
+  email: z.string().email(),
+  role: cohortEnrollmentRoleSchema,
+  subject: z.string().trim().min(1).optional(),
+});
+
+const createAssignmentTemplateSchema = z.object({
+  cohortId: z.string().trim().min(1).optional(),
+  title: z.string().trim().min(1).max(160),
+  objective: z.string().trim().max(4000).optional(),
+  policy: z.record(z.string(), z.unknown()).optional(),
+  rubric: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const createAssignmentInstanceSchema = z.object({
+  assignee: z.string().trim().min(1),
+  assigneeEmail: z.string().email(),
+  dueAt: z.string().datetime().optional(),
+  taskId: z.string().trim().min(1).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const shareModeSchema = z.enum([
+  'observe',
+  'annotate',
+  'assist',
+  'pair',
+  'takeover',
+  'handoff',
+  'review-only',
+  'replay-only',
+]) satisfies z.ZodType<ShareMode>;
+
+const createSessionShareGrantSchema = z.object({
+  workbenchId: z.string().trim().min(1),
+  grantee: z.string().trim().min(1),
+  mode: shareModeSchema,
+  reason: z.string().trim().max(1000).optional(),
 });
 
 const memoryReviewSchema = z.enum([
@@ -266,6 +360,9 @@ export function apiRouter(
     pairPromptReviewWorkflow,
   pairPromptResponseSignaler: PairPromptResponseSignaler =
     capturePairPromptResponseWorkflow,
+  controlPlane: ControlPlaneStore = new ControlPlaneStore(
+    config.OPENCORTEX_DATA_DIR,
+  ),
 ): express.Router {
   const router = express.Router();
   const launcher = new SessionLauncher(config);
@@ -277,7 +374,260 @@ export function apiRouter(
   });
 
   router.get('/me', requireUser, (req, res) => {
+    controlPlane.ensureUserMembership(req.user!);
     res.json({ user: req.user });
+  });
+
+  router.post('/tasks', requireUser, (req, res, next) => {
+    try {
+      const body = createTaskSchema.parse(req.body);
+      const task = controlPlane.createTask({
+        user: req.user!,
+        title: body.title,
+        description: body.description,
+        cohortId: body.cohortId,
+        assignmentInstanceId: body.assignmentInstanceId,
+      });
+      return res.status(201).json({ task });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/tasks', requireUser, (req, res, next) => {
+    try {
+      const limit = listLimitSchema.parse(req.query.limit) ?? 50;
+      return res.json({ tasks: controlPlane.listTasks(req.user!, limit) });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/tasks/:id', requireUser, (req, res) => {
+    const task = controlPlane.getTask(req.user!, String(req.params.id));
+    if (!task) {
+      return res.status(404).json({ error: 'task_not_found' });
+    }
+    return res.json({ task });
+  });
+
+  router.delete('/tasks/:id', requireUser, (req, res) => {
+    const task = controlPlane.archiveTask(req.user!, String(req.params.id));
+    if (!task) {
+      return res.status(404).json({ error: 'task_not_found' });
+    }
+    return res.json({ task });
+  });
+
+  router.post('/tasks/:id/resources', requireUser, (req, res, next) => {
+    try {
+      const body = createWorkReferenceSchema.parse(req.body);
+      const resource = controlPlane.createWorkReference({
+        user: req.user!,
+        taskId: String(req.params.id),
+        kind: body.kind,
+        externalId: body.externalId,
+        url: body.url,
+        title: body.title,
+        metadata: body.metadata,
+      });
+      if (!resource) {
+        return res.status(404).json({ error: 'task_not_found' });
+      }
+      return res.status(201).json({ resource });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/tasks/:id/resources', requireUser, (req, res) => {
+    const resources = controlPlane.listWorkReferences(
+      req.user!,
+      String(req.params.id),
+    );
+    if (!resources) {
+      return res.status(404).json({ error: 'task_not_found' });
+    }
+    return res.json({ resources });
+  });
+
+  router.post('/workbenches', requireUser, (req, res, next) => {
+    try {
+      const body = createWorkbenchSchema.parse(req.body);
+      const workbench = controlPlane.createWorkbench({
+        user: req.user!,
+        taskId: body.taskId,
+        name: body.name,
+        workspaceDir: body.workspaceDir,
+      });
+      if (!workbench) {
+        return res.status(404).json({ error: 'task_not_found' });
+      }
+      return res.status(201).json({ workbench });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/workbenches', requireUser, (req, res, next) => {
+    try {
+      const limit = listLimitSchema.parse(req.query.limit) ?? 50;
+      return res.json({
+        workbenches: controlPlane.listWorkbenches(req.user!, limit),
+      });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/workbenches/:id', requireUser, (req, res) => {
+    const workbench = controlPlane.getWorkbench(
+      req.user!,
+      String(req.params.id),
+    );
+    if (!workbench) {
+      return res.status(404).json({ error: 'workbench_not_found' });
+    }
+    return res.json({
+      workbench,
+      providerSessions:
+        controlPlane.listProviderSessions(req.user!, workbench.id) ?? [],
+    });
+  });
+
+  router.post('/cohorts', requireUser, (req, res, next) => {
+    try {
+      const body = createCohortSchema.parse(req.body);
+      const cohort = controlPlane.createCohort({
+        user: req.user!,
+        name: body.name,
+        metadata: body.metadata,
+      });
+      return res.status(201).json({ cohort });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/cohorts', requireUser, (req, res) => {
+    return res.json({ cohorts: controlPlane.listCohorts(req.user!) });
+  });
+
+  router.get('/cohorts/:id/enrollments', requireUser, (req, res) => {
+    const enrollments = controlPlane.listEnrollments(
+      req.user!,
+      String(req.params.id),
+    );
+    if (!enrollments) {
+      return res.status(404).json({ error: 'cohort_not_found' });
+    }
+    return res.json({ enrollments });
+  });
+
+  router.post('/cohorts/:id/enrollments', requireUser, (req, res, next) => {
+    try {
+      const body = createCohortEnrollmentSchema.parse(req.body);
+      const enrollment = controlPlane.addEnrollment({
+        user: req.user!,
+        cohortId: String(req.params.id),
+        email: body.email,
+        role: body.role,
+        subject: body.subject,
+      });
+      if (!enrollment) {
+        return res.status(404).json({ error: 'cohort_not_found' });
+      }
+      return res.status(201).json({ enrollment });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/assignments/templates', requireUser, (req, res, next) => {
+    try {
+      const body = createAssignmentTemplateSchema.parse(req.body);
+      const template = controlPlane.createAssignmentTemplate({
+        user: req.user!,
+        cohortId: body.cohortId,
+        title: body.title,
+        objective: body.objective,
+        policy: body.policy,
+        rubric: body.rubric,
+        metadata: body.metadata,
+      });
+      if (!template) {
+        return res.status(404).json({ error: 'cohort_not_found' });
+      }
+      return res.status(201).json({ template });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/assignments/templates', requireUser, (req, res) => {
+    return res.json({
+      templates: controlPlane.listAssignmentTemplates(req.user!),
+    });
+  });
+
+  router.post('/assignments/:id/instances', requireUser, (req, res, next) => {
+    try {
+      const body = createAssignmentInstanceSchema.parse(req.body);
+      const instance = controlPlane.createAssignmentInstance({
+        user: req.user!,
+        templateId: String(req.params.id),
+        assignee: body.assignee,
+        assigneeEmail: body.assigneeEmail,
+        dueAt: body.dueAt,
+        taskId: body.taskId,
+        metadata: body.metadata,
+      });
+      if (!instance) {
+        return res.status(404).json({ error: 'assignment_template_not_found' });
+      }
+      return res.status(201).json({ instance });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/assignments/:id/instances', requireUser, (req, res) => {
+    const instances = controlPlane.listAssignmentInstances(
+      req.user!,
+      String(req.params.id),
+    );
+    if (!instances) {
+      return res.status(404).json({ error: 'assignment_template_not_found' });
+    }
+    return res.json({ instances });
+  });
+
+  router.post('/session-share-grants', requireUser, (req, res, next) => {
+    try {
+      const body = createSessionShareGrantSchema.parse(req.body);
+      const grant = controlPlane.createSessionShareGrant({
+        user: req.user!,
+        workbenchId: body.workbenchId,
+        grantee: body.grantee,
+        mode: body.mode,
+        reason: body.reason,
+      });
+      if (!grant) {
+        return res.status(404).json({ error: 'workbench_not_found' });
+      }
+      return res.status(201).json({ grant });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/session-share-grants', requireUser, (req, res) => {
+    return res.json({
+      grants: controlPlane.listSessionShareGrants(
+        req.user!,
+        optionalQuery(req.query.workbenchId),
+      ),
+    });
   });
 
   router.post('/auth/internal-token', requireUser, async (req, res, next) => {
@@ -440,6 +790,8 @@ export function apiRouter(
         launcher,
         user: req.user!,
       });
+      controlPlane.ensureLegacySession(result.session);
+      sessions.set(result.session.id, result.session);
       res.status(result.existing ? 200 : 201).json({
         session: result.session,
         channel: result.channel,
@@ -454,6 +806,9 @@ export function apiRouter(
     await ensureOwnedSessionsRunning(sessions, chat, launcher, req.user!);
     await refreshVisibleSessionNames(sessions, chat, req.user!);
     const visible = visibleCodeSessionViews(sessions, chat, req.user!);
+    for (const session of visible) {
+      controlPlane.ensureLegacySession(session);
+    }
     res.json({
       sessions: visible.map(session => ({
         ...session,
@@ -489,6 +844,7 @@ export function apiRouter(
             }
           : {}),
       };
+      controlPlane.ensureLegacySession(updated);
       sessions.set(updated.id, updated);
       chat.updateSessionChannelName(updated);
       if (activeThread) {

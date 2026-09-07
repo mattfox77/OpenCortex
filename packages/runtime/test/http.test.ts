@@ -26,6 +26,7 @@ import type {
 } from '../src/workflows/workflowProjectionStore.js';
 import type { AuthenticatedUser } from '../src/auth/types.js';
 import type { CodeSession } from '../src/code/sessionLauncher.js';
+import { ControlPlaneStore } from '../src/domain/controlPlaneStore.js';
 import type {
   PairPromptWorkflowStarter,
   PairPromptResponseSignaler,
@@ -2895,5 +2896,242 @@ describe('http app', () => {
         },
       },
     ]);
+  });
+
+  it('creates tenant-scoped tasks and workbenches through the control-plane API', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+    const ownerAuth = {
+      Authorization: 'Dev owner@acme.test',
+      'Content-Type': 'application/json',
+    };
+
+    const createdTask = await fetch(`${base}/diwan/api/tasks`, {
+      method: 'POST',
+      headers: ownerAuth,
+      body: JSON.stringify({
+        title: 'Implement provider-neutral task',
+        description: 'Slice 1 task record',
+      }),
+    });
+    expect(createdTask.status).toBe(201);
+    const createdTaskBody = await createdTask.json();
+    expect(createdTaskBody.task).toMatchObject({
+      ownerEmail: 'owner@acme.test',
+      title: 'Implement provider-neutral task',
+      status: 'active',
+    });
+
+    const firstWorkbench = await fetch(`${base}/diwan/api/workbenches`, {
+      method: 'POST',
+      headers: ownerAuth,
+      body: JSON.stringify({
+        taskId: createdTaskBody.task.id,
+        name: 'Implementation',
+      }),
+    });
+    const secondWorkbench = await fetch(`${base}/diwan/api/workbenches`, {
+      method: 'POST',
+      headers: ownerAuth,
+      body: JSON.stringify({
+        taskId: createdTaskBody.task.id,
+        name: 'Review',
+      }),
+    });
+    expect(firstWorkbench.status).toBe(201);
+    expect(secondWorkbench.status).toBe(201);
+    const firstWorkbenchBody = await firstWorkbench.json();
+    const secondWorkbenchBody = await secondWorkbench.json();
+    expect(firstWorkbenchBody.workbench.id).not.toBe(
+      secondWorkbenchBody.workbench.id,
+    );
+
+    const listedForOwner = await fetch(`${base}/diwan/api/workbenches`, {
+      headers: { Authorization: 'Dev owner@acme.test' },
+    });
+    expect(listedForOwner.status).toBe(200);
+    const listedForOwnerBody = await listedForOwner.json();
+    expect(
+      listedForOwnerBody.workbenches.map((item: { id: string }) => item.id),
+    ).toEqual(
+      expect.arrayContaining([
+        firstWorkbenchBody.workbench.id,
+        secondWorkbenchBody.workbench.id,
+      ]),
+    );
+
+    const listedForOther = await fetch(`${base}/diwan/api/tasks`, {
+      headers: { Authorization: 'Dev other@acme.test' },
+    });
+    expect(listedForOther.status).toBe(200);
+    const listedForOtherBody = await listedForOther.json();
+    expect(listedForOtherBody.tasks).toEqual([]);
+  });
+
+  it('returns canonical control-plane ids on legacy code session responses', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+
+    const created = await fetch(`${base}/diwan/api/code/sessions`, {
+      method: 'POST',
+      headers: { Authorization: 'Dev owner@acme.test' },
+    });
+    expect(created.status).toBe(201);
+    const createdBody = await created.json();
+    expect(createdBody.session.taskId).toMatch(/^task_/);
+    expect(createdBody.session.workbenchId).toMatch(/^workbench_/);
+    expect(createdBody.session.providerSessionId).toMatch(/^provider_session_/);
+
+    const listed = await fetch(`${base}/diwan/api/code/sessions`, {
+      headers: { Authorization: 'Dev owner@acme.test' },
+    });
+    const listedBody = await listed.json();
+    expect(listedBody.sessions[0]).toMatchObject({
+      id: createdBody.session.id,
+      taskId: createdBody.session.taskId,
+      workbenchId: createdBody.session.workbenchId,
+      providerSessionId: createdBody.session.providerSessionId,
+    });
+  });
+
+  it('supports low-level classroom cohort enrollment and session share grants', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const controlPlane = new ControlPlaneStore(config.OPENCORTEX_DATA_DIR);
+    const app = createApp(
+      config,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      undefined,
+      controlPlane,
+    );
+    const listener = app.listen(0);
+    server = listener;
+    const address = listener.address();
+    if (!address || typeof address === 'string')
+      throw new Error('Expected TCP listener');
+    const base = `http://127.0.0.1:${address.port}`;
+    const teacherAuth = {
+      Authorization: 'Dev teacher@acme.test',
+      'Content-Type': 'application/json',
+    };
+
+    const cohortResponse = await fetch(`${base}/diwan/api/cohorts`, {
+      method: 'POST',
+      headers: teacherAuth,
+      body: JSON.stringify({ name: 'Agentic Software 101' }),
+    });
+    expect(cohortResponse.status).toBe(201);
+    const cohortBody = await cohortResponse.json();
+
+    const enrollmentResponse = await fetch(
+      `${base}/diwan/api/cohorts/${cohortBody.cohort.id}/enrollments`,
+      {
+        method: 'POST',
+        headers: teacherAuth,
+        body: JSON.stringify({
+          email: 'student@acme.test',
+          subject: 'dev:student@acme.test',
+          role: 'student',
+        }),
+      },
+    );
+    expect(enrollmentResponse.status).toBe(201);
+
+    const studentCohorts = await fetch(`${base}/diwan/api/cohorts`, {
+      headers: { Authorization: 'Dev student@acme.test' },
+    });
+    expect(studentCohorts.status).toBe(200);
+    const studentCohortsBody = await studentCohorts.json();
+    expect(
+      studentCohortsBody.cohorts.map((item: { id: string }) => item.id),
+    ).toEqual([cohortBody.cohort.id]);
+
+    const templateResponse = await fetch(
+      `${base}/diwan/api/assignments/templates`,
+      {
+        method: 'POST',
+        headers: teacherAuth,
+        body: JSON.stringify({
+          cohortId: cohortBody.cohort.id,
+          title: 'Trace a provider session',
+          objective: 'Explain the task, workbench, and provider session links.',
+        }),
+      },
+    );
+    expect(templateResponse.status).toBe(201);
+    const templateBody = await templateResponse.json();
+
+    const instanceResponse = await fetch(
+      `${base}/diwan/api/assignments/${templateBody.template.id}/instances`,
+      {
+        method: 'POST',
+        headers: teacherAuth,
+        body: JSON.stringify({
+          assignee: 'dev:student@acme.test',
+          assigneeEmail: 'student@acme.test',
+        }),
+      },
+    );
+    expect(instanceResponse.status).toBe(201);
+    const instanceBody = await instanceResponse.json();
+    expect(instanceBody.instance).toMatchObject({
+      templateId: templateBody.template.id,
+      cohortId: cohortBody.cohort.id,
+      assignee: 'dev:student@acme.test',
+      status: 'assigned',
+    });
+
+    const studentInstances = await fetch(
+      `${base}/diwan/api/assignments/${templateBody.template.id}/instances`,
+      {
+        headers: { Authorization: 'Dev student@acme.test' },
+      },
+    );
+    expect(studentInstances.status).toBe(200);
+    const studentInstancesBody = await studentInstances.json();
+    expect(
+      studentInstancesBody.instances.map((item: { id: string }) => item.id),
+    ).toEqual([instanceBody.instance.id]);
+
+    const task = controlPlane.createTask({
+      user: authUser('teacher@acme.test'),
+      title: 'Shared review',
+    });
+    const workbench = controlPlane.createWorkbench({
+      user: authUser('teacher@acme.test'),
+      taskId: task.id,
+      name: 'Teacher session',
+    });
+    const grantResponse = await fetch(`${base}/diwan/api/session-share-grants`, {
+      method: 'POST',
+      headers: teacherAuth,
+      body: JSON.stringify({
+        workbenchId: workbench!.id,
+        grantee: 'dev:student@acme.test',
+        mode: 'observe',
+        reason: 'classroom review',
+      }),
+    });
+    expect(grantResponse.status).toBe(201);
+
+    const visibleToStudent = await fetch(
+      `${base}/diwan/api/workbenches/${workbench!.id}`,
+      {
+        headers: { Authorization: 'Dev student@acme.test' },
+      },
+    );
+    expect(visibleToStudent.status).toBe(200);
   });
 });

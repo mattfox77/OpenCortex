@@ -25,6 +25,11 @@ const execFileAsync = promisify(execFile);
 
 export interface CodeSession {
   id: string;
+  tenantId?: string;
+  taskId?: string;
+  workbenchId?: string;
+  providerSessionId?: string;
+  ownerSubject?: string;
   providerId?: WorkbenchProviderId;
   providerVersion?: string;
   openCodeSessionId?: string;
@@ -143,6 +148,7 @@ export class SessionLauncher {
       ...(openCodeSessionId ? { openCodeSessionId } : {}),
       providerId: launchPlan.providerId,
       providerVersion: launchPlan.providerVersion,
+      ownerSubject: user.sub,
       createdAt: new Date().toISOString(),
       ownerEmail: user.email,
       linuxUser: user.linuxUser,

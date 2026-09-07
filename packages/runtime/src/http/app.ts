@@ -30,6 +30,7 @@ import {
   type WorkflowProjectionStore,
 } from '../workflows/workflowProjectionStore.js';
 import { RuntimeMetrics, runtimeMetricsMiddleware } from './metrics.js';
+import { ControlPlaneStore } from '../domain/controlPlaneStore.js';
 
 export function createApp(
   config: AppConfig,
@@ -49,6 +50,7 @@ export function createApp(
   reviewWorkflowStarter?: ReviewWorkflowStarter,
   pairPromptWorkflowStarter?: PairPromptWorkflowStarter,
   pairPromptResponseSignaler?: PairPromptResponseSignaler,
+  controlPlane: ControlPlaneStore = new ControlPlaneStore(config.OPENCORTEX_DATA_DIR),
 ): express.Express {
   const app = express();
   const mountPath = config.OPENCORTEX_BASE_PATH || '/';
@@ -118,6 +120,7 @@ export function createApp(
       workbenchSessionWorkflowPairPromptSender,
       pairPromptWorkflowStarter,
       pairPromptResponseSignaler,
+      controlPlane,
     ),
   );
   mounted.use(

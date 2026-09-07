@@ -207,6 +207,7 @@ let pairPrompts = [];
 let jiraLinks = [];
 let workSearchResults = [];
 let observabilitySummary;
+let controlPlaneInventory;
 let selectedChannelId = 'general';
 let chatEvents;
 let chatEventReconnectTimer;
@@ -239,6 +240,7 @@ function setAuthenticated(user) {
     : 'Signed out';
   renderProfile();
   renderObservabilityPanel();
+  renderControlPlaneInventory();
 }
 
 function showWorkspace() {
@@ -623,6 +625,24 @@ async function refreshChannels() {
 async function refreshSessions() {
   const data = await api('/code/sessions');
   sessions = data && Array.isArray(data.sessions) ? data.sessions : [];
+}
+
+async function refreshControlPlaneInventory() {
+  try {
+    const [tasksData, workbenchesData] = await Promise.all([
+      api('/tasks?limit=6', { redirectOnUnauthorized: false }),
+      api('/workbenches?limit=6', { redirectOnUnauthorized: false }),
+    ]);
+    controlPlaneInventory = {
+      tasks: Array.isArray(tasksData?.tasks) ? tasksData.tasks : [],
+      workbenches: Array.isArray(workbenchesData?.workbenches)
+        ? workbenchesData.workbenches
+        : [],
+    };
+  } catch (error) {
+    controlPlaneInventory = { error: error.message };
+  }
+  renderControlPlaneInventory();
 }
 
 async function refreshObservabilitySummary() {
@@ -1353,6 +1373,80 @@ function renderObservabilityPanel() {
   }
 }
 
+function renderControlPlaneInventory() {
+  const panel = document.querySelector('#control-plane-panel');
+  if (!panel) return;
+  panel.innerHTML = '';
+  panel.hidden = !currentUser;
+  if (panel.hidden) return;
+
+  const heading = document.createElement('div');
+  heading.className = 'inventory-heading';
+  const title = document.createElement('h3');
+  title.textContent = 'Inventory';
+  const meta = document.createElement('span');
+  meta.textContent = controlPlaneInventory
+    ? `${controlPlaneInventory.tasks?.length ?? 0} tasks · ${
+        controlPlaneInventory.workbenches?.length ?? 0
+      } workbenches`
+    : '';
+  heading.append(title, meta);
+  panel.append(heading);
+
+  if (!controlPlaneInventory) {
+    panel.append(inventoryEmpty('Loading inventory'));
+    return;
+  }
+  if (controlPlaneInventory.error) {
+    panel.append(inventoryEmpty(controlPlaneInventory.error));
+    return;
+  }
+
+  const tasks = controlPlaneInventory.tasks ?? [];
+  const workbenches = controlPlaneInventory.workbenches ?? [];
+  if (tasks.length === 0 && workbenches.length === 0) {
+    panel.append(inventoryEmpty('No tasks or workbenches yet'));
+    return;
+  }
+
+  const list = document.createElement('div');
+  list.className = 'inventory-list';
+  for (const task of tasks.slice(0, 3)) {
+    list.append(inventoryItem('Task', task.title, task.id, task.status));
+  }
+  for (const workbench of workbenches.slice(0, 3)) {
+    list.append(
+      inventoryItem(
+        'Workbench',
+        workbench.name || workbench.linuxUser,
+        workbench.id,
+        workbench.status,
+      ),
+    );
+  }
+  panel.append(list);
+}
+
+function inventoryItem(kind, title, id, status) {
+  const row = document.createElement('div');
+  row.className = 'inventory-item';
+  const label = document.createElement('span');
+  label.textContent = kind;
+  const body = document.createElement('strong');
+  body.textContent = title || id;
+  const meta = document.createElement('code');
+  meta.textContent = [status, id].filter(Boolean).join(' · ');
+  row.append(label, body, meta);
+  return row;
+}
+
+function inventoryEmpty(text) {
+  const empty = document.createElement('p');
+  empty.className = 'inventory-empty';
+  empty.textContent = text;
+  return empty;
+}
+
 function observabilityStat(label, value) {
   const stat = document.createElement('div');
   stat.className = 'observability-stat';
@@ -1621,6 +1715,7 @@ bindUiAction('#start-code', 'click', async event => {
     ];
     selectedChannelId = data.channel.id;
     await refreshChannels();
+    await refreshControlPlaneInventory();
     await renderSelectedChannel();
     renderSession(data.session);
   } catch (error) {
@@ -1752,6 +1847,7 @@ handleCallback()
     if (!me) return;
     await refreshChannels();
     await restoreSession();
+    await refreshControlPlaneInventory();
     await renderSelectedChannel();
   })
   .then(() => {
