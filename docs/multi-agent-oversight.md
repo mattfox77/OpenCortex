@@ -5,11 +5,20 @@
 Wireframes: [multi-agent-oversight-wireframes.md](multi-agent-oversight-wireframes.md)
 and [multi-agent-oversight-wireframes.html](multi-agent-oversight-wireframes.html).
 
+Canonical execution plan:
+[kepler-herdr-opencortex-implementation-plan.md](kepler-herdr-opencortex-implementation-plan.md).
+Its validated nine-slice order supersedes the older phase ordering in this
+design document and includes classroom/cohort oversight as a first-class mode.
+
 OpenCortex should be a web-first control plane for distributed agent work. The
 important product idea borrowed from Kepler is not a desktop agent launcher; it
 is multi-agent oversight: knowing what every agent is doing, what work it is
 attached to, what it changed, what it needs from a person, and whether it is
 moving toward something mergeable.
+
+The same architecture also supports classrooms and cohorts: a teacher can
+oversee many student sessions, assignments, submissions, interventions, and
+replays without OpenCortex needing a separate education-only stack.
 
 Kepler proves the category. OpenCortex should push past its constraints:
 

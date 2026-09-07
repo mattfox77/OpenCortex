@@ -24,6 +24,11 @@ profiles/           # local-dev, staging-dex, external-oidc, dsn-internal
 The previous OB1 Temporal worker/client/workflow code is preserved in
 `packages/orchestrator` as the starting point for Cortex Orchestrator.
 
+The multi-agent product design and its canonical Kepler-inspired oversight,
+classroom mode, and Herdr runtime implementation plan are documented in
+[`docs/multi-agent-oversight.md`](docs/multi-agent-oversight.md) and
+[`docs/kepler-herdr-opencortex-implementation-plan.md`](docs/kepler-herdr-opencortex-implementation-plan.md).
+
 ## Current Phase
 
 Phase 0/1 guardrails are being established:
