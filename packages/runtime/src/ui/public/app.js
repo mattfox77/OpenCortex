@@ -629,14 +629,20 @@ async function refreshSessions() {
 
 async function refreshControlPlaneInventory() {
   try {
-    const [tasksData, workbenchesData] = await Promise.all([
+    const [tasksData, workbenchesData, hostsData, worktreesData] = await Promise.all([
       api('/tasks?limit=6', { redirectOnUnauthorized: false }),
       api('/workbenches?limit=6', { redirectOnUnauthorized: false }),
+      api('/hosts', { redirectOnUnauthorized: false }),
+      api('/worktrees', { redirectOnUnauthorized: false }),
     ]);
     controlPlaneInventory = {
       tasks: Array.isArray(tasksData?.tasks) ? tasksData.tasks : [],
       workbenches: Array.isArray(workbenchesData?.workbenches)
         ? workbenchesData.workbenches
+        : [],
+      hosts: Array.isArray(hostsData?.hosts) ? hostsData.hosts : [],
+      worktrees: Array.isArray(worktreesData?.worktrees)
+        ? worktreesData.worktrees
         : [],
     };
   } catch (error) {
@@ -1386,9 +1392,12 @@ function renderControlPlaneInventory() {
   title.textContent = 'Inventory';
   const meta = document.createElement('span');
   meta.textContent = controlPlaneInventory
-    ? `${controlPlaneInventory.tasks?.length ?? 0} tasks · ${
-        controlPlaneInventory.workbenches?.length ?? 0
-      } workbenches`
+    ? [
+        `${controlPlaneInventory.tasks?.length ?? 0} tasks`,
+        `${controlPlaneInventory.workbenches?.length ?? 0} workbenches`,
+        `${controlPlaneInventory.hosts?.length ?? 0} hosts`,
+        `${controlPlaneInventory.worktrees?.length ?? 0} worktrees`,
+      ].join(' · ')
     : '';
   heading.append(title, meta);
   panel.append(heading);
@@ -1404,7 +1413,14 @@ function renderControlPlaneInventory() {
 
   const tasks = controlPlaneInventory.tasks ?? [];
   const workbenches = controlPlaneInventory.workbenches ?? [];
-  if (tasks.length === 0 && workbenches.length === 0) {
+  const hosts = controlPlaneInventory.hosts ?? [];
+  const worktrees = controlPlaneInventory.worktrees ?? [];
+  if (
+    tasks.length === 0 &&
+    workbenches.length === 0 &&
+    hosts.length === 0 &&
+    worktrees.length === 0
+  ) {
     panel.append(inventoryEmpty('No tasks or workbenches yet'));
     return;
   }
@@ -1421,6 +1437,28 @@ function renderControlPlaneInventory() {
         workbench.name || workbench.linuxUser,
         workbench.id,
         workbench.status,
+      ),
+    );
+  }
+  for (const host of hosts.slice(0, 2)) {
+    list.append(
+      inventoryItem(
+        'Host',
+        host.name,
+        host.id,
+        [host.status, host.driverId, host.driverVersion]
+          .filter(Boolean)
+          .join(' '),
+      ),
+    );
+  }
+  for (const worktree of worktrees.slice(0, 2)) {
+    list.append(
+      inventoryItem(
+        'Worktree',
+        worktree.branch || worktree.path,
+        worktree.id,
+        worktree.status,
       ),
     );
   }

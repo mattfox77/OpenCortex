@@ -5,7 +5,7 @@ import {
   readFileSync,
   writeFileSync,
 } from "node:fs";
-import { join } from "node:path";
+import { join, resolve } from "node:path";
 import { nanoid } from "nanoid";
 import type { AuthenticatedUser } from "../auth/types.js";
 import type { CodeSession } from "../code/sessionLauncher.js";
@@ -133,6 +133,53 @@ export interface ProviderSession {
   archivedAt?: string;
 }
 
+export interface HostRecord {
+  id: string;
+  tenantId: string;
+  name: string;
+  status: "online" | "stale" | "offline" | "unknown" | "archived";
+  labels: string[];
+  metadata: Record<string, unknown>;
+  driverId?: string;
+  driverVersion?: string;
+  pathRoots?: string[];
+  capacity?: Record<string, unknown>;
+  lastHeartbeatAt?: string;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
+export interface HostUserCapability {
+  id: string;
+  tenantId: string;
+  hostId: string;
+  subject: string;
+  email?: string;
+  linuxUser: string;
+  providers: Array<Record<string, unknown>>;
+  tools: Array<Record<string, unknown>>;
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface Worktree {
+  id: string;
+  tenantId: string;
+  taskId: string;
+  hostId?: string;
+  repoUrl?: string;
+  path: string;
+  branch?: string;
+  baseRef?: string;
+  status: "ready" | "dirty" | "conflicted" | "archived" | "unknown";
+  metadata: Record<string, unknown>;
+  createdAt: string;
+  updatedAt: string;
+  archivedAt?: string;
+}
+
 export interface Cohort {
   id: string;
   tenantId: string;
@@ -217,6 +264,9 @@ interface ControlPlaneState {
   workReferences: WorkReference[];
   workbenches: Workbench[];
   providerSessions: ProviderSession[];
+  hosts: HostRecord[];
+  hostUserCapabilities: HostUserCapability[];
+  worktrees: Worktree[];
   cohorts: Cohort[];
   cohortEnrollments: CohortEnrollment[];
   assignmentTemplates: AssignmentTemplate[];
@@ -509,8 +559,235 @@ export class ControlPlaneStore {
     return this.state.providerSessions.filter(
       (item) =>
         item.tenantId === workbench.tenantId &&
-        item.workbenchId === workbench.id,
+      item.workbenchId === workbench.id,
     );
+  }
+
+  registerHost(input: {
+    user: AuthenticatedUser;
+    id?: string;
+    name: string;
+    labels?: string[];
+    driverId?: string;
+    driverVersion?: string;
+    pathRoots?: string[];
+    capacity?: Record<string, unknown>;
+    metadata?: Record<string, unknown>;
+    status?: HostRecord["status"];
+  }): HostRecord {
+    this.ensureUserMembership(input.user);
+    const now = new Date().toISOString();
+    const id = input.id ?? `host_${nanoid(12)}`;
+    const existing = this.state.hosts.find((item) => item.id === id);
+    if (existing) {
+      existing.name = input.name;
+      existing.status = input.status ?? "online";
+      existing.labels = input.labels ?? existing.labels;
+      existing.driverId = input.driverId ?? existing.driverId;
+      existing.driverVersion = input.driverVersion ?? existing.driverVersion;
+      existing.pathRoots = input.pathRoots ?? existing.pathRoots;
+      existing.capacity = input.capacity ?? existing.capacity;
+      existing.metadata = { ...existing.metadata, ...(input.metadata ?? {}) };
+      existing.lastHeartbeatAt = now;
+      existing.updatedAt = now;
+      this.persist();
+      return existing;
+    }
+    const host: HostRecord = {
+      id,
+      tenantId: localTenantId,
+      name: input.name,
+      status: input.status ?? "online",
+      labels: input.labels ?? [],
+      metadata: input.metadata ?? {},
+      driverId: input.driverId,
+      driverVersion: input.driverVersion,
+      pathRoots: input.pathRoots,
+      capacity: input.capacity,
+      lastHeartbeatAt: now,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.hosts.push(host);
+    this.persist();
+    return host;
+  }
+
+  heartbeatHost(
+    user: AuthenticatedUser,
+    hostId: string,
+    input: {
+      status?: HostRecord["status"];
+      labels?: string[];
+      driverId?: string;
+      driverVersion?: string;
+      pathRoots?: string[];
+      capacity?: Record<string, unknown>;
+      metadata?: Record<string, unknown>;
+    } = {},
+  ): HostRecord | undefined {
+    this.ensureUserMembership(user);
+    const host = this.state.hosts.find((item) => item.id === hostId);
+    if (!host || host.status === "archived") {
+      return undefined;
+    }
+    const now = new Date().toISOString();
+    host.status = input.status ?? "online";
+    host.labels = input.labels ?? host.labels;
+    host.driverId = input.driverId ?? host.driverId;
+    host.driverVersion = input.driverVersion ?? host.driverVersion;
+    host.pathRoots = input.pathRoots ?? host.pathRoots;
+    host.capacity = input.capacity ?? host.capacity;
+    host.metadata = { ...host.metadata, ...(input.metadata ?? {}) };
+    host.lastHeartbeatAt = now;
+    host.updatedAt = now;
+    this.persist();
+    return host;
+  }
+
+  listHosts(user: AuthenticatedUser): HostRecord[] {
+    this.ensureUserMembership(user);
+    return this.state.hosts
+      .filter((host) => host.status !== "archived")
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  upsertHostUserCapability(input: {
+    user: AuthenticatedUser;
+    hostId: string;
+    subject: string;
+    email?: string;
+    linuxUser: string;
+    providers?: Array<Record<string, unknown>>;
+    tools?: Array<Record<string, unknown>>;
+    metadata?: Record<string, unknown>;
+  }): HostUserCapability | undefined {
+    this.ensureUserMembership(input.user);
+    const host = this.state.hosts.find((item) => item.id === input.hostId);
+    if (!host || host.status === "archived") {
+      return undefined;
+    }
+    const now = new Date().toISOString();
+    const existing = this.state.hostUserCapabilities.find(
+      (item) =>
+        item.hostId === host.id &&
+        item.subject === input.subject &&
+        item.linuxUser === input.linuxUser,
+    );
+    if (existing) {
+      existing.email = input.email ?? existing.email;
+      existing.providers = input.providers ?? existing.providers;
+      existing.tools = input.tools ?? existing.tools;
+      existing.metadata = { ...existing.metadata, ...(input.metadata ?? {}) };
+      existing.updatedAt = now;
+      this.persist();
+      return existing;
+    }
+    const capability: HostUserCapability = {
+      id: `host_user_capability_${nanoid(12)}`,
+      tenantId: host.tenantId,
+      hostId: host.id,
+      subject: input.subject,
+      email: input.email,
+      linuxUser: input.linuxUser,
+      providers: input.providers ?? [],
+      tools: input.tools ?? [],
+      metadata: input.metadata ?? {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.hostUserCapabilities.push(capability);
+    this.persist();
+    return capability;
+  }
+
+  listHostUserCapabilities(
+    user: AuthenticatedUser,
+    hostId?: string,
+  ): HostUserCapability[] {
+    this.ensureUserMembership(user);
+    return this.state.hostUserCapabilities
+      .filter((capability) => {
+        if (hostId && capability.hostId !== hostId) {
+          return false;
+        }
+        return user.isSuperAdmin || capability.subject === user.sub;
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+  }
+
+  createWorktree(input: {
+    user: AuthenticatedUser;
+    taskId: string;
+    hostId?: string;
+    repoUrl?: string;
+    path: string;
+    branch?: string;
+    baseRef?: string;
+    status?: Worktree["status"];
+    metadata?: Record<string, unknown>;
+  }): Worktree | undefined {
+    const task = this.getTask(input.user, input.taskId);
+    if (!task) {
+      return undefined;
+    }
+    const host = input.hostId
+      ? this.state.hosts.find((item) => item.id === input.hostId)
+      : undefined;
+    if (input.hostId && (!host || host.status === "archived")) {
+      return undefined;
+    }
+    if (host?.pathRoots?.length) {
+      assertPathWithinRoots(input.path, host.pathRoots);
+    }
+    const now = new Date().toISOString();
+    const existing = this.state.worktrees.find(
+      (item) =>
+        item.taskId === task.id &&
+        item.path === input.path &&
+        item.status !== "archived",
+    );
+    if (existing) {
+      return existing;
+    }
+    const worktree: Worktree = {
+      id: `worktree_${nanoid(12)}`,
+      tenantId: task.tenantId,
+      taskId: task.id,
+      hostId: input.hostId,
+      repoUrl: input.repoUrl,
+      path: input.path,
+      branch: input.branch,
+      baseRef: input.baseRef,
+      status: input.status ?? "unknown",
+      metadata: input.metadata ?? {},
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.worktrees.push(worktree);
+    this.persist();
+    return worktree;
+  }
+
+  listWorktrees(
+    user: AuthenticatedUser,
+    taskId?: string,
+  ): Worktree[] | undefined {
+    if (taskId && !this.getTask(user, taskId)) {
+      return undefined;
+    }
+    this.ensureUserMembership(user);
+    return this.state.worktrees
+      .filter((worktree) => {
+        if (taskId && worktree.taskId !== taskId) {
+          return false;
+        }
+        const task = this.state.tasks.find(
+          (item) => item.id === worktree.taskId,
+        );
+        return Boolean(task && this.canReadTask(user, task));
+      })
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
   createCohort(input: {
@@ -981,6 +1258,9 @@ export class ControlPlaneStore {
         workReferences: parsed.workReferences ?? [],
         workbenches: parsed.workbenches ?? [],
         providerSessions: parsed.providerSessions ?? [],
+        hosts: parsed.hosts ?? [],
+        hostUserCapabilities: parsed.hostUserCapabilities ?? [],
+        worktrees: parsed.worktrees ?? [],
         cohorts: parsed.cohorts ?? [],
         cohortEnrollments: parsed.cohortEnrollments ?? [],
         assignmentTemplates: parsed.assignmentTemplates ?? [],
@@ -995,6 +1275,9 @@ export class ControlPlaneStore {
         workReferences: [],
         workbenches: [],
         providerSessions: [],
+        hosts: [],
+        hostUserCapabilities: [],
+        worktrees: [],
         cohorts: [],
         cohortEnrollments: [],
         assignmentTemplates: [],
@@ -1022,4 +1305,22 @@ export class ControlPlaneStore {
       encoding: "utf8",
     });
   }
+}
+
+export function assertPathWithinRoots(path: string, roots: string[]): string {
+  if (roots.length === 0) {
+    throw new Error("At least one path root is required");
+  }
+  const resolvedPath = resolve(path);
+  const allowed = roots.some((root) => {
+    const resolvedRoot = resolve(root);
+    return (
+      resolvedPath === resolvedRoot ||
+      resolvedPath.startsWith(`${resolvedRoot}/`)
+    );
+  });
+  if (!allowed) {
+    throw new Error(`Path escapes allowed roots: ${path}`);
+  }
+  return resolvedPath;
 }

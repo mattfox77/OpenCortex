@@ -67,8 +67,10 @@ import {
 } from '../workflows/workflowProjectionStore.js';
 import {
   ControlPlaneStore,
+  type HostRecord,
   type ShareMode,
   type WorkReference,
+  type Worktree,
 } from '../domain/controlPlaneStore.js';
 
 const tokenExchangeResponseSchema = z.object({
@@ -133,6 +135,58 @@ const createWorkbenchSchema = z.object({
   taskId: z.string().trim().min(1),
   name: z.string().trim().min(1).max(160).optional(),
   workspaceDir: z.string().trim().min(1).optional(),
+});
+
+const hostStatusSchema = z.enum([
+  'online',
+  'stale',
+  'offline',
+  'unknown',
+  'archived',
+]) satisfies z.ZodType<HostRecord['status']>;
+
+const registerHostSchema = z.object({
+  id: z.string().trim().min(1).optional(),
+  name: z.string().trim().min(1).max(160),
+  labels: z.array(z.string().trim().min(1)).optional(),
+  driverId: z.string().trim().min(1).optional(),
+  driverVersion: z.string().trim().min(1).optional(),
+  pathRoots: z.array(z.string().trim().min(1)).optional(),
+  capacity: z.record(z.string(), z.unknown()).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+  status: hostStatusSchema.optional(),
+});
+
+const heartbeatHostSchema = registerHostSchema
+  .omit({ id: true, name: true })
+  .partial();
+
+const hostUserCapabilitySchema = z.object({
+  subject: z.string().trim().min(1),
+  email: z.string().email().optional(),
+  linuxUser: z.string().trim().min(1),
+  providers: z.array(z.record(z.string(), z.unknown())).optional(),
+  tools: z.array(z.record(z.string(), z.unknown())).optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const worktreeStatusSchema = z.enum([
+  'ready',
+  'dirty',
+  'conflicted',
+  'archived',
+  'unknown',
+]) satisfies z.ZodType<Worktree['status']>;
+
+const createWorktreeSchema = z.object({
+  taskId: z.string().trim().min(1),
+  hostId: z.string().trim().min(1).optional(),
+  repoUrl: z.string().trim().min(1).optional(),
+  path: z.string().trim().min(1),
+  branch: z.string().trim().min(1).optional(),
+  baseRef: z.string().trim().min(1).optional(),
+  status: worktreeStatusSchema.optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
 const createCohortSchema = z.object({
@@ -493,6 +547,119 @@ export function apiRouter(
       providerSessions:
         controlPlane.listProviderSessions(req.user!, workbench.id) ?? [],
     });
+  });
+
+  router.post('/hosts', requireUser, (req, res, next) => {
+    try {
+      const body = registerHostSchema.parse(req.body);
+      const host = controlPlane.registerHost({
+        user: req.user!,
+        id: body.id,
+        name: body.name,
+        labels: body.labels,
+        driverId: body.driverId,
+        driverVersion: body.driverVersion,
+        pathRoots: body.pathRoots,
+        capacity: body.capacity,
+        metadata: body.metadata,
+        status: body.status,
+      });
+      return res.status(201).json({ host });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/hosts', requireUser, (req, res) => {
+    return res.json({ hosts: controlPlane.listHosts(req.user!) });
+  });
+
+  router.post('/hosts/:id/heartbeat', requireUser, (req, res, next) => {
+    try {
+      const body = heartbeatHostSchema.parse(req.body);
+      const host = controlPlane.heartbeatHost(req.user!, String(req.params.id), {
+        labels: body.labels,
+        driverId: body.driverId,
+        driverVersion: body.driverVersion,
+        pathRoots: body.pathRoots,
+        capacity: body.capacity,
+        metadata: body.metadata,
+        status: body.status,
+      });
+      if (!host) {
+        return res.status(404).json({ error: 'host_not_found' });
+      }
+      return res.json({ host });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/hosts/:id/capabilities', requireUser, (req, res, next) => {
+    try {
+      const body = hostUserCapabilitySchema.parse(req.body);
+      const capability = controlPlane.upsertHostUserCapability({
+        user: req.user!,
+        hostId: String(req.params.id),
+        subject: body.subject,
+        email: body.email,
+        linuxUser: body.linuxUser,
+        providers: body.providers,
+        tools: body.tools,
+        metadata: body.metadata,
+      });
+      if (!capability) {
+        return res.status(404).json({ error: 'host_not_found' });
+      }
+      return res.status(201).json({ capability });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/hosts/:id/capabilities', requireUser, (req, res) => {
+    return res.json({
+      capabilities: controlPlane.listHostUserCapabilities(
+        req.user!,
+        String(req.params.id),
+      ),
+    });
+  });
+
+  router.post('/worktrees', requireUser, (req, res, next) => {
+    try {
+      const body = createWorktreeSchema.parse(req.body);
+      const worktree = controlPlane.createWorktree({
+        user: req.user!,
+        taskId: body.taskId,
+        hostId: body.hostId,
+        repoUrl: body.repoUrl,
+        path: body.path,
+        branch: body.branch,
+        baseRef: body.baseRef,
+        status: body.status,
+        metadata: body.metadata,
+      });
+      if (!worktree) {
+        return res.status(404).json({ error: 'task_or_host_not_found' });
+      }
+      return res.status(201).json({ worktree });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.get('/worktrees', requireUser, (req, res, next) => {
+    try {
+      const taskId = optionalQuery(req.query.taskId);
+      const worktrees = controlPlane.listWorktrees(req.user!, taskId);
+      if (!worktrees) {
+        return res.status(404).json({ error: 'task_not_found' });
+      }
+      return res.json({ worktrees });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   router.post('/cohorts', requireUser, (req, res, next) => {

@@ -2969,6 +2969,103 @@ describe('http app', () => {
     expect(listedForOtherBody.tasks).toEqual([]);
   });
 
+  it('registers hosts, user capabilities, and worktrees through the control-plane API', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const app = createApp(config);
+    const listener = app.listen(0);
+    server = listener;
+    const address = listener.address();
+    if (!address || typeof address === 'string')
+      throw new Error('Expected TCP listener');
+    const base = `http://127.0.0.1:${address.port}`;
+    const headers = {
+      Authorization: 'Dev owner@acme.test',
+      'Content-Type': 'application/json',
+    };
+
+    const hostResponse = await fetch(`${base}/diwan/api/hosts`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        id: 'linux-macbook',
+        name: 'linux-macbook',
+        labels: ['fedora', 'tailscale'],
+        driverId: 'direct-process',
+        driverVersion: '0.1.0',
+        pathRoots: ['/home/owner/repos'],
+      }),
+    });
+    expect(hostResponse.status).toBe(201);
+
+    const heartbeatResponse = await fetch(
+      `${base}/diwan/api/hosts/linux-macbook/heartbeat`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({ status: 'online', capacity: { sessions: 4 } }),
+      },
+    );
+    expect(heartbeatResponse.status).toBe(200);
+    const heartbeatBody = await heartbeatResponse.json();
+    expect(heartbeatBody.host.capacity).toEqual({ sessions: 4 });
+
+    const capabilityResponse = await fetch(
+      `${base}/diwan/api/hosts/linux-macbook/capabilities`,
+      {
+        method: 'POST',
+        headers,
+        body: JSON.stringify({
+          subject: 'dev:owner@acme.test',
+          email: 'owner@acme.test',
+          linuxUser: 'owner',
+          providers: [{ providerId: 'opencode', ready: true }],
+        }),
+      },
+    );
+    expect(capabilityResponse.status).toBe(201);
+
+    const taskResponse = await fetch(`${base}/diwan/api/tasks`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ title: 'Host-backed task' }),
+    });
+    const taskBody = await taskResponse.json();
+    const worktreeResponse = await fetch(`${base}/diwan/api/worktrees`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        taskId: taskBody.task.id,
+        hostId: 'linux-macbook',
+        repoUrl: 'https://github.com/mattfox77/OpenCortex.git',
+        path: '/home/owner/repos/OpenCortex',
+        branch: 'slice-2-host-runtime',
+        baseRef: 'origin/main',
+        status: 'ready',
+      }),
+    });
+    expect(worktreeResponse.status).toBe(201);
+
+    const rejectedWorktree = await fetch(`${base}/diwan/api/worktrees`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        taskId: taskBody.task.id,
+        hostId: 'linux-macbook',
+        path: '/etc/opencortex',
+      }),
+    });
+    expect(rejectedWorktree.status).toBe(400);
+
+    const capabilitiesForOther = await fetch(
+      `${base}/diwan/api/hosts/linux-macbook/capabilities`,
+      {
+        headers: { Authorization: 'Dev other@acme.test' },
+      },
+    );
+    expect(capabilitiesForOther.status).toBe(200);
+    expect((await capabilitiesForOther.json()).capabilities).toEqual([]);
+  });
+
   it('returns canonical control-plane ids on legacy code session responses', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const { listener, base } = startApp(config);

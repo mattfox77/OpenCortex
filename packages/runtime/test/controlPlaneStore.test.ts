@@ -114,6 +114,54 @@ describe('ControlPlaneStore', () => {
     );
   });
 
+  it('tracks host capabilities and refuses worktrees outside host roots', () => {
+    const controlPlane = store();
+    const owner = user('owner@acme.test');
+    const host = controlPlane.registerHost({
+      user: owner,
+      id: 'linux-macbook',
+      name: 'linux-macbook',
+      labels: ['fedora', 'tailscale'],
+      driverId: 'direct-process',
+      driverVersion: '0.1.0',
+      pathRoots: ['/home/owner/repos'],
+    });
+    expect(host.status).toBe('online');
+
+    const capability = controlPlane.upsertHostUserCapability({
+      user: owner,
+      hostId: host.id,
+      subject: owner.sub,
+      email: owner.email,
+      linuxUser: owner.linuxUser,
+      providers: [{ providerId: 'opencode', ready: true }],
+    });
+    expect(capability?.providers).toEqual([
+      { providerId: 'opencode', ready: true },
+    ]);
+
+    const task = controlPlane.createTask({ user: owner, title: 'Worktree task' });
+    const worktree = controlPlane.createWorktree({
+      user: owner,
+      taskId: task.id,
+      hostId: host.id,
+      repoUrl: 'https://github.com/mattfox77/OpenCortex.git',
+      path: '/home/owner/repos/OpenCortex',
+      branch: 'slice-2',
+      baseRef: 'origin/main',
+      status: 'ready',
+    });
+    expect(worktree?.status).toBe('ready');
+    expect(() =>
+      controlPlane.createWorktree({
+        user: owner,
+        taskId: task.id,
+        hostId: host.id,
+        path: '/etc/opencortex',
+      }),
+    ).toThrow(/escapes allowed roots/);
+  });
+
   it('applies classroom cohort visibility without leaking peer sessions', () => {
     const controlPlane = store();
     const teacher = user('teacher@acme.test');
