@@ -7,6 +7,9 @@ const sourceRoots = [
   join("packages", "orchestrator", "src"),
   join("packages", "orchestrator", "scripts"),
 ];
+const workflowRoots = [
+  join("packages", "orchestrator", "src", "workflows"),
+];
 
 const forbidden = [
   /\bFROM\s+tasks\b/i,
@@ -29,6 +32,18 @@ for (const root of sourceRoots) {
       if (pattern.test(text)) {
         failures.push(`${file} matches ${pattern}`);
       }
+    }
+  }
+}
+
+for (const root of workflowRoots) {
+  for await (const file of walk(root)) {
+    if (!/\.[cm]?[jt]s$/.test(file)) {
+      continue;
+    }
+    const text = await readFile(file, "utf8");
+    if (/\bauthorizationHeader\b|Authorization|Bearer\s+/i.test(text)) {
+      failures.push(`${file} contains workflow-history authorization material`);
     }
   }
 }

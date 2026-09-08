@@ -43,7 +43,6 @@ export interface PairPromptWorkflowInput {
   channelId: string;
   ownerId: string;
   runtimeBaseUrl?: string;
-  authorizationHeader?: string;
   traceContext?: TraceContext;
 }
 
@@ -118,7 +117,6 @@ export async function pairPromptWorkflow(
             sessionId: input.sessionId,
             draftId: input.draftId,
             runtimeBaseUrl: input.runtimeBaseUrl,
-            authorizationHeader: input.authorizationHeader,
             workflowId,
             runId,
             traceContext: input.traceContext,
@@ -128,7 +126,6 @@ export async function pairPromptWorkflow(
             draftId: input.draftId,
             reason: decision.reason,
             runtimeBaseUrl: input.runtimeBaseUrl,
-            authorizationHeader: input.authorizationHeader,
             workflowId,
             runId,
             traceContext: input.traceContext,

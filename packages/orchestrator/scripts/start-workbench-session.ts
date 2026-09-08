@@ -14,7 +14,7 @@ async function main() {
   let runtimeBaseUrl =
     process.env.OPENCORTEX_RUNTIME_API_BASE_URL ??
     process.env.OPENCORTEX_RUNTIME_BASE_URL;
-  let authorizationHeader = process.env.OPENCORTEX_RUNTIME_AUTH_HEADER;
+  const authorizationHeader = process.env.OPENCORTEX_RUNTIME_AUTH_HEADER;
   let monitorInterval: Duration | undefined;
   let maxProbeIterations: number | undefined;
   let queue: string | undefined;
@@ -31,9 +31,6 @@ async function main() {
         break;
       case '--runtime-base-url':
         runtimeBaseUrl = args[++i];
-        break;
-      case '--auth-header':
-        authorizationHeader = args[++i];
         break;
       case '--monitor-interval':
         monitorInterval = args[++i] as Duration;
@@ -60,11 +57,14 @@ OpenCortex - Start Workbench Session
 Usage:
   OPENCORTEX_RUNTIME_AUTH_HEADER='Dev user@example.com' npm run workbench-session -- --owner user@example.com
 
+The auth header must be configured in the Temporal worker environment. It is
+validated here for local single-process runs, but it is not stored in workflow
+input or history.
+
 Options:
   --owner <id>                 Owner for workflow projection
   --project <name>             Optional project for workflow projection
   --runtime-base-url <url>     Runtime API base URL (default: http://127.0.0.1:8080/api)
-  --auth-header <value>        Runtime Authorization header value
   --monitor-interval <dur>     Temporal duration between probes
   --max-probes <n>             Probe count before completing (default: 0)
   --queue <queue>              Temporal task queue (default: cortex-tasks)
@@ -87,7 +87,6 @@ Options:
       ownerId,
       project,
       runtimeBaseUrl,
-      authorizationHeader,
       monitorInterval,
       maxProbeIterations,
       queue,

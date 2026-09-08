@@ -6,3 +6,5 @@ export * from './userProvisioning';
 export * from './workbenchSession';
 export * from './review';
 export * from './pairPrompt';
+export * from './agentTask';
+export * from './agentSession';

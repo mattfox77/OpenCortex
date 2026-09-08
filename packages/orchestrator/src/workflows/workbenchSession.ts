@@ -32,7 +32,6 @@ export interface WorkbenchSessionInput {
   ownerId: string;
   project?: string;
   runtimeBaseUrl?: string;
-  authorizationHeader?: string;
   monitorInterval?: Duration;
   maxProbeIterations?: number;
   traceContext?: TraceContext;
@@ -94,7 +93,6 @@ export async function workbenchSessionWorkflow(
   try {
     const started = await runtime.startRuntimeWorkbenchSession({
       runtimeBaseUrl: input.runtimeBaseUrl,
-      authorizationHeader: input.authorizationHeader,
       workflowId,
       runId,
       traceContext: input.traceContext,
@@ -135,7 +133,6 @@ export async function workbenchSessionWorkflow(
       const probe = await runtime.probeRuntimeWorkbenchSession({
         sessionId: session.id,
         runtimeBaseUrl: input.runtimeBaseUrl,
-        authorizationHeader: input.authorizationHeader,
         workflowId,
         runId,
         traceContext: input.traceContext,
@@ -161,7 +158,6 @@ export async function workbenchSessionWorkflow(
       await runtime.archiveRuntimeWorkbenchSession({
         sessionId: session.id,
         runtimeBaseUrl: input.runtimeBaseUrl,
-        authorizationHeader: input.authorizationHeader,
         workflowId,
         runId,
         traceContext: input.traceContext,

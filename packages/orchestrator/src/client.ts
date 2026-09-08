@@ -8,6 +8,10 @@ import {
   userProvisioningWorkflow,
   activityRollupWorkflow,
   workbenchSessionWorkflow,
+  agentTaskWorkflow,
+  agentSessionWorkflow,
+  commandAgentTaskUpdate,
+  commandAgentSessionUpdate,
   approveSignal,
   feedbackSignal,
   cancelSignal,
@@ -23,6 +27,14 @@ import type { MemoryIngestInput } from './workflows/memoryIngest';
 import type { UserProvisioningInput } from './workflows/userProvisioning';
 import type { ActivityRollupInput } from './workflows/activityRollup';
 import type { WorkbenchSessionInput } from './workflows/workbenchSession';
+import type {
+  AgentTaskCommand,
+  AgentTaskWorkflowInput,
+} from './workflows/agentTask';
+import type {
+  AgentSessionCommand,
+  AgentSessionWorkflowInput,
+} from './workflows/agentSession';
 import { newTraceContext, withTraceSpan } from './telemetry';
 import * as dotenv from 'dotenv';
 
@@ -289,6 +301,78 @@ export async function startActivityRollup(
   return handle;
 }
 
+// --- Start a canonical agent task workflow ---
+export async function startAgentTask(
+  params: AgentTaskWorkflowInput & {
+    queue?: string;
+    workflowId?: string;
+  },
+) {
+  const client = await getClient();
+  const workflowId = params.workflowId ?? `agent-task-${params.taskId}`;
+  const handle = await client.workflow.start(agentTaskWorkflow, {
+    taskQueue: params.queue || 'cortex-tasks',
+    workflowId,
+    args: [{
+      tenantId: params.tenantId,
+      taskId: params.taskId,
+      ownerId: params.ownerId,
+      title: params.title,
+      project: params.project,
+      traceContext: params.traceContext,
+    }],
+  });
+
+  console.log(`✅ Started agent task workflow: ${workflowId}`);
+  return handle;
+}
+
+export async function commandAgentTask(
+  workflowId: string,
+  command: AgentTaskCommand,
+) {
+  const client = await getClient();
+  const handle = client.workflow.getHandle(workflowId);
+  return handle.executeUpdate(commandAgentTaskUpdate, { args: [command] });
+}
+
+// --- Start a canonical agent session workflow ---
+export async function startAgentSession(
+  params: AgentSessionWorkflowInput & {
+    queue?: string;
+    workflowId?: string;
+  },
+) {
+  const client = await getClient();
+  const workflowId = params.workflowId ?? `agent-session-${params.workbenchId}`;
+  const handle = await client.workflow.start(agentSessionWorkflow, {
+    taskQueue: params.queue || 'cortex-tasks',
+    workflowId,
+    args: [{
+      tenantId: params.tenantId,
+      taskId: params.taskId,
+      workbenchId: params.workbenchId,
+      ownerId: params.ownerId,
+      hostId: params.hostId,
+      providerId: params.providerId,
+      project: params.project,
+      traceContext: params.traceContext,
+    }],
+  });
+
+  console.log(`✅ Started agent session workflow: ${workflowId}`);
+  return handle;
+}
+
+export async function commandAgentSession(
+  workflowId: string,
+  command: AgentSessionCommand,
+) {
+  const client = await getClient();
+  const handle = client.workflow.getHandle(workflowId);
+  return handle.executeUpdate(commandAgentSessionUpdate, { args: [command] });
+}
+
 // --- Start a workbench session workflow ---
 export async function startWorkbenchSession(
   params: WorkbenchSessionInput & {
@@ -313,7 +397,6 @@ export async function startWorkbenchSession(
       ownerId: params.ownerId,
       project: params.project,
       runtimeBaseUrl: params.runtimeBaseUrl,
-      authorizationHeader: params.authorizationHeader,
       monitorInterval: params.monitorInterval,
       maxProbeIterations: params.maxProbeIterations,
       traceContext: workflowTraceContext ?? traceContext,

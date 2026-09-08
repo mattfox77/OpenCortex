@@ -370,7 +370,6 @@ export async function startWorkbenchSessionWorkflow(
   config: WorkbenchSessionWorkflowConfig,
   user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
 ): Promise<WorkbenchSessionWorkflowStart> {
-  const token = await mintRuntimeSessionToken(config, user);
   const connection = await Connection.connect({
     address: config.TEMPORAL_ADDRESS,
   });
@@ -386,7 +385,6 @@ export async function startWorkbenchSessionWorkflow(
       args: [{
         ownerId: user.email,
         runtimeBaseUrl: config.OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL,
-        authorizationHeader: `Bearer ${token}`,
         monitorInterval: config.OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL,
         maxProbeIterations: config.OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES,
       }],
@@ -530,7 +528,6 @@ export async function pairPromptReviewWorkflow(
     workflowId?: string;
   },
 ): Promise<PairPromptWorkflowStart> {
-  const token = await mintInternalWorkflowToken(config, user, ['pair-prompt']);
   const connection = await Connection.connect({
     address: config.TEMPORAL_ADDRESS,
   });
@@ -551,7 +548,6 @@ export async function pairPromptReviewWorkflow(
         channelId: params.channelId,
         ownerId: params.ownerId,
         runtimeBaseUrl: config.OPENCORTEX_PAIR_PROMPT_RUNTIME_BASE_URL,
-        authorizationHeader: `Bearer ${token}`,
       }],
     });
     await handle.signal(params.decision, {
@@ -628,45 +624,6 @@ async function provisionUserViaWorkflow(
   } finally {
     await connection.close();
   }
-}
-
-async function mintRuntimeSessionToken(
-  config: Pick<AppConfig, 'OPENCORTEX_INTERNAL_TOKEN_SECRET'>,
-  user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
-): Promise<string> {
-  const { mintInternalToken } = await import('../auth/internalToken.js');
-  const minted = await mintInternalToken({
-    user: {
-      sub: user.sub,
-      email: user.email,
-      groups: [],
-      linuxUser: user.linuxUser,
-    },
-    scopes: ['session'],
-    secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
-    ttlSeconds: 3600,
-  });
-  return minted.token;
-}
-
-async function mintInternalWorkflowToken(
-  config: Pick<AppConfig, 'OPENCORTEX_INTERNAL_TOKEN_SECRET'>,
-  user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
-  scopes: Array<'pair-prompt'>,
-): Promise<string> {
-  const { mintInternalToken } = await import('../auth/internalToken.js');
-  const minted = await mintInternalToken({
-    user: {
-      sub: user.sub,
-      email: user.email,
-      groups: [],
-      linuxUser: user.linuxUser,
-    },
-    scopes,
-    secret: config.OPENCORTEX_INTERNAL_TOKEN_SECRET,
-    ttlSeconds: 3600,
-  });
-  return minted.token;
 }
 
 function prepareWorkbenchRuntime(launchPlan: WorkbenchLaunchPlan): string {
