@@ -152,6 +152,40 @@ describe('ControlPlaneStore', () => {
       status: 'ready',
     });
     expect(worktree?.status).toBe('ready');
+    expect(worktree?.path).toBe('/home/owner/repos/OpenCortex');
+    expect(worktree?.metadata.provenance).toEqual({
+      requestedPath: '/home/owner/repos/OpenCortex',
+      resolvedPath: '/home/owner/repos/OpenCortex',
+      repoUrl: 'https://github.com/mattfox77/OpenCortex.git',
+      branch: 'slice-2',
+      baseRef: 'origin/main',
+      hostId: host.id,
+    });
+    expect(
+      controlPlane.selectHost({
+        user: owner,
+        providerId: 'opencode',
+        requiredLabels: ['fedora'],
+        repositoryPath: '/home/owner/repos/OpenCortex',
+      }).selected?.id,
+    ).toBe(host.id);
+    expect(
+      controlPlane.selectHost({
+        user: owner,
+        providerId: 'claude',
+        requiredLabels: ['fedora'],
+        repositoryPath: '/home/owner/repos/OpenCortex',
+      }).rejected,
+    ).toEqual([{ hostId: host.id, reason: 'provider_not_ready' }]);
+    controlPlane.heartbeatHost(owner, host.id, { capacity: { sessions: 0 } });
+    expect(
+      controlPlane.selectHost({
+        user: owner,
+        providerId: 'opencode',
+        requiredLabels: ['fedora'],
+        repositoryPath: '/home/owner/repos/OpenCortex',
+      }).rejected,
+    ).toEqual([{ hostId: host.id, reason: 'capacity_full' }]);
     expect(() =>
       controlPlane.createWorktree({
         user: owner,

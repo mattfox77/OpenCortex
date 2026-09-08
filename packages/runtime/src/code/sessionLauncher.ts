@@ -1,16 +1,17 @@
 import {
-  closeSync,
   mkdirSync,
-  openSync,
   readFileSync,
-  writeFileSync,
 } from 'node:fs';
-import { execFile, spawn, type ChildProcess } from 'node:child_process';
+import { execFile, type ChildProcess } from 'node:child_process';
 import { promisify } from 'node:util';
 import net from 'node:net';
 import { join } from 'node:path';
 import { Client, Connection } from '@temporalio/client';
 import { nanoid } from 'nanoid';
+import {
+  DirectProcessHostSessionDriver,
+  type HostSessionDriver,
+} from '@opencortex/host-runtime';
 import {
   OpenCodeWorkbenchProvider,
   opencodeRuntimeEnvironment as workbenchOpencodeRuntimeEnvironment,
@@ -61,6 +62,8 @@ export class SessionLauncher {
   constructor(
     private readonly config: AppConfig,
     private readonly workbenchProvider = new OpenCodeWorkbenchProvider(),
+    private readonly hostDriver: HostSessionDriver =
+      new DirectProcessHostSessionDriver(),
   ) {}
 
   async launch(user: AuthenticatedUser): Promise<CodeSession> {
@@ -115,16 +118,29 @@ export class SessionLauncher {
 
     let openCodeSessionId: string | undefined;
     if (this.config.OPENCORTEX_EXEC_MODE === 'sudo') {
-      writeFileSync(logPath, '', { encoding: 'utf8' });
-      const logFd = openSync(logPath, 'a');
-      const child = spawn(command[0], command.slice(1), {
-        detached: true,
-        stdio: ['ignore', logFd, logFd],
-      });
+      const workspace = {
+        workspaceId: id,
+        path: workspaceDir,
+      };
+      const pane = await this.hostDriver.createPane(
+        workspace,
+        'OpenCortex Workbench',
+      );
       try {
-        await waitForPort(port, child, 8000);
+        await this.hostDriver.startCommand(pane, {
+          workspace,
+          command,
+          cwd: this.config.OPENCORTEX_DATA_DIR,
+          detached: true,
+          outputPath: logPath,
+          readiness: {
+            type: 'tcp-port',
+            port,
+            timeoutMs: 8000,
+          },
+          unref: true,
+        });
       } catch (error) {
-        child.kill();
         throw new Error(
           appendLogExcerpt(
             `${error instanceof Error ? error.message : 'OpenCode failed to start or initialize'}; log: ${logPath}`,
@@ -137,10 +153,7 @@ export class SessionLauncher {
       } catch {
         // OpenCortex Workbench can still be opened in the iframe. Pair-prompt delivery
         // will report a missing internal session id until OpenCode exposes one.
-      } finally {
-        closeSync(logFd);
       }
-      child.unref();
     }
 
     return sessionWithActiveThread({

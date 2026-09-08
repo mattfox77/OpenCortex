@@ -7,6 +7,10 @@ import {
 } from "node:fs";
 import { join, resolve } from "node:path";
 import { nanoid } from "nanoid";
+import {
+  selectHostForSession,
+  type HostSelectionResult,
+} from "@opencortex/host-runtime";
 import type { AuthenticatedUser } from "../auth/types.js";
 import type { CodeSession } from "../code/sessionLauncher.js";
 
@@ -716,6 +720,48 @@ export class ControlPlaneStore {
       .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
   }
 
+  selectHost(input: {
+    user: AuthenticatedUser;
+    linuxUser?: string;
+    providerId: string;
+    explicitHostId?: string;
+    requiredLabels?: string[];
+    repositoryPath?: string;
+  }): HostSelectionResult {
+    this.ensureUserMembership(input.user);
+    return selectHostForSession(
+      this.state.hosts
+        .filter((host) => host.status !== "archived")
+        .map((host) => ({
+          id: host.id,
+          status: host.status,
+          labels: host.labels,
+          capacity: normalizeHostCapacity(host.capacity),
+          pathRoots: host.pathRoots,
+          capabilities: this.state.hostUserCapabilities
+            .filter(
+              (capability) =>
+                capability.hostId === host.id &&
+                capability.tenantId === host.tenantId &&
+                capability.subject === input.user.sub,
+            )
+            .map((capability) => ({
+              subject: capability.subject,
+              linuxUser: capability.linuxUser,
+              providers: capability.providers.map(normalizeProviderCapability),
+            })),
+        })),
+      {
+        subject: input.user.sub,
+        linuxUser: input.linuxUser ?? input.user.linuxUser,
+        providerId: input.providerId,
+        explicitHostId: input.explicitHostId,
+        requiredLabels: input.requiredLabels,
+        repositoryPath: input.repositoryPath,
+      },
+    );
+  }
+
   createWorktree(input: {
     user: AuthenticatedUser;
     taskId: string;
@@ -737,14 +783,14 @@ export class ControlPlaneStore {
     if (input.hostId && (!host || host.status === "archived")) {
       return undefined;
     }
-    if (host?.pathRoots?.length) {
-      assertPathWithinRoots(input.path, host.pathRoots);
-    }
+    const resolvedPath = host?.pathRoots?.length
+      ? assertPathWithinRoots(input.path, host.pathRoots)
+      : resolve(input.path);
     const now = new Date().toISOString();
     const existing = this.state.worktrees.find(
       (item) =>
         item.taskId === task.id &&
-        item.path === input.path &&
+        item.path === resolvedPath &&
         item.status !== "archived",
     );
     if (existing) {
@@ -756,11 +802,21 @@ export class ControlPlaneStore {
       taskId: task.id,
       hostId: input.hostId,
       repoUrl: input.repoUrl,
-      path: input.path,
+      path: resolvedPath,
       branch: input.branch,
       baseRef: input.baseRef,
       status: input.status ?? "unknown",
-      metadata: input.metadata ?? {},
+      metadata: {
+        ...(input.metadata ?? {}),
+        provenance: {
+          requestedPath: input.path,
+          resolvedPath,
+          repoUrl: input.repoUrl,
+          branch: input.branch,
+          baseRef: input.baseRef,
+          hostId: input.hostId,
+        },
+      },
       createdAt: now,
       updatedAt: now,
     };
@@ -1305,6 +1361,67 @@ export class ControlPlaneStore {
       encoding: "utf8",
     });
   }
+}
+
+function normalizeHostCapacity(
+  capacity: Record<string, unknown> | undefined,
+):
+  | {
+      availableSessions?: number;
+      maxSessions?: number;
+    }
+  | undefined {
+  if (!capacity) {
+    return undefined;
+  }
+  return {
+    availableSessions: numberRecordField(capacity, [
+      "availableSessions",
+      "available_sessions",
+      "sessions",
+    ]),
+    maxSessions: numberRecordField(capacity, [
+      "maxSessions",
+      "max_sessions",
+      "sessions",
+    ]),
+  };
+}
+
+function normalizeProviderCapability(
+  provider: Record<string, unknown>,
+): { providerId: string; ready: boolean } {
+  return {
+    providerId: stringRecordField(provider, ["providerId", "provider_id"], ""),
+    ready: provider.ready === true,
+  };
+}
+
+function numberRecordField(
+  object: Record<string, unknown>,
+  keys: string[],
+): number | undefined {
+  for (const key of keys) {
+    const value = object[key];
+    if (typeof value === "number" && Number.isFinite(value)) {
+      return value;
+    }
+  }
+  return undefined;
+}
+
+function stringRecordField(
+  object: Record<string, unknown>,
+  keys: string[],
+  fallback: string,
+): string {
+  for (const key of keys) {
+    const value = object[key];
+    if (typeof value === "string" && value.trim()) {
+      return value;
+    }
+  }
+  return fallback;
 }
 
 export function assertPathWithinRoots(path: string, roots: string[]): string {

@@ -170,6 +170,14 @@ const hostUserCapabilitySchema = z.object({
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
 
+const selectHostSchema = z.object({
+  linuxUser: z.string().trim().min(1).optional(),
+  providerId: z.string().trim().min(1),
+  explicitHostId: z.string().trim().min(1).optional(),
+  requiredLabels: z.array(z.string().trim().min(1)).optional(),
+  repositoryPath: z.string().trim().min(1).optional(),
+});
+
 const worktreeStatusSchema = z.enum([
   'ready',
   'dirty',
@@ -624,6 +632,24 @@ export function apiRouter(
         String(req.params.id),
       ),
     });
+  });
+
+  router.post('/hosts/select', requireUser, (req, res, next) => {
+    try {
+      const body = selectHostSchema.parse(req.body);
+      return res.json({
+        selection: controlPlane.selectHost({
+          user: req.user!,
+          linuxUser: body.linuxUser,
+          providerId: body.providerId,
+          explicitHostId: body.explicitHostId,
+          requiredLabels: body.requiredLabels,
+          repositoryPath: body.repositoryPath,
+        }),
+      });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   router.post('/worktrees', requireUser, (req, res, next) => {

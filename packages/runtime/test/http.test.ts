@@ -3044,6 +3044,25 @@ describe('http app', () => {
       }),
     });
     expect(worktreeResponse.status).toBe(201);
+    const worktreeBody = await worktreeResponse.json();
+    expect(worktreeBody.worktree.metadata.provenance).toMatchObject({
+      requestedPath: '/home/owner/repos/OpenCortex',
+      resolvedPath: '/home/owner/repos/OpenCortex',
+      hostId: 'linux-macbook',
+    });
+
+    const selectionResponse = await fetch(`${base}/diwan/api/hosts/select`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({
+        providerId: 'opencode',
+        requiredLabels: ['fedora'],
+        repositoryPath: '/home/owner/repos/OpenCortex',
+      }),
+    });
+    expect(selectionResponse.status).toBe(200);
+    const selectionBody = await selectionResponse.json();
+    expect(selectionBody.selection.selected.id).toBe('linux-macbook');
 
     const rejectedWorktree = await fetch(`${base}/diwan/api/worktrees`, {
       method: 'POST',
