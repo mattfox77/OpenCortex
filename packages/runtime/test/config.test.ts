@@ -103,6 +103,27 @@ describe('runtime config compatibility', () => {
     expect(enabled.OPENCORTEX_ACTIVITY_LEDGER_ENABLED).toBe(true);
   });
 
+  it('keeps OpenCode as the default workbench provider and accepts explicit provider selection', () => {
+    const local = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+    });
+    const claude = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      OPENCORTEX_WORKBENCH_PROVIDER: 'claude-code',
+    });
+    const legacy = loadConfig({
+      ...requiredAuthEnv(),
+      OPENCORTEX_DATA_DIR: mkdtempSync(join(tmpdir(), 'opencortex-config-')),
+      DIWAN_WORKBENCH_PROVIDER: 'codex',
+    });
+
+    expect(local.OPENCORTEX_WORKBENCH_PROVIDER).toBe('opencode');
+    expect(claude.OPENCORTEX_WORKBENCH_PROVIDER).toBe('claude-code');
+    expect(legacy.OPENCORTEX_WORKBENCH_PROVIDER).toBe('codex');
+  });
+
   it('keeps provisioning workflow integration opt-in', () => {
     const local = loadConfig({
       ...requiredAuthEnv(),

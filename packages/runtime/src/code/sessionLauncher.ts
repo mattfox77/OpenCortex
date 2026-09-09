@@ -13,8 +13,11 @@ import {
   type HostSessionDriver,
 } from '@opencortex/host-runtime';
 import {
+  ClaudeCodeWorkbenchProvider,
+  CodexWorkbenchProvider,
   OpenCodeWorkbenchProvider,
   opencodeRuntimeEnvironment as workbenchOpencodeRuntimeEnvironment,
+  type WorkbenchProvider,
   type WorkbenchProviderId,
   type WorkbenchLaunchPlan,
 } from '@opencortex/workbench';
@@ -61,7 +64,9 @@ export interface CodeThread {
 export class SessionLauncher {
   constructor(
     private readonly config: AppConfig,
-    private readonly workbenchProvider = new OpenCodeWorkbenchProvider(),
+    private readonly workbenchProvider = selectWorkbenchProvider(
+      config.OPENCORTEX_WORKBENCH_PROVIDER,
+    ),
     private readonly hostDriver: HostSessionDriver =
       new DirectProcessHostSessionDriver(),
   ) {}
@@ -78,6 +83,7 @@ export class SessionLauncher {
       dataDir: this.config.OPENCORTEX_DATA_DIR,
       binaryPath: this.config.OPENCORTEX_WORKBENCH_BIN,
       mode: this.config.OPENCORTEX_EXEC_MODE,
+      displayName: `OpenCortex Workbench for ${user.linuxUser}`,
     });
     const workspaceDir = launchPlan.workspaceDir;
     const logPath = join(
@@ -173,6 +179,20 @@ export class SessionLauncher {
     });
   }
 
+}
+
+export function selectWorkbenchProvider(
+  providerId: WorkbenchProviderId | undefined,
+): WorkbenchProvider {
+  switch (providerId) {
+    case 'claude-code':
+      return new ClaudeCodeWorkbenchProvider();
+    case 'codex':
+      return new CodexWorkbenchProvider();
+    case 'opencode':
+    case undefined:
+      return new OpenCodeWorkbenchProvider();
+  }
 }
 
 export function sessionWithActiveThread(session: CodeSession): CodeSession {

@@ -53,6 +53,9 @@ const schema = z.object({
   OPENCORTEX_LINUX_USER_OVERRIDES: csv(''),
   OPENCORTEX_WORKSPACE_ROOT: z.string().default('/srv/opencortex/workspaces'),
   OPENCORTEX_EXEC_MODE: z.enum(['dry-run', 'sudo']).default('dry-run'),
+  OPENCORTEX_WORKBENCH_PROVIDER: z
+    .enum(['opencode', 'claude-code', 'codex'])
+    .default('opencode'),
   OPENCORTEX_WORKBENCH_PORT_BASE: z.coerce.number().int().positive().default(4100),
   OPENCORTEX_WORKBENCH_BIN: z.string().default('/usr/local/bin/opencode'),
   OPENCORTEX_WORKBENCH_SESSION_MODE: z.enum(['local', 'workflow']).default('local'),
@@ -101,6 +104,7 @@ function normalizeEnv(env: NodeJS.ProcessEnv): NodeJS.ProcessEnv {
   applyAlias(normalized, 'OPENCORTEX_ACTIVITY_LEDGER_ENABLED', 'DIWAN_ACTIVITY_LEDGER_ENABLED');
   applyAlias(normalized, 'OPENCORTEX_LINUX_USER_PREFIX', 'DIWAN_LINUX_USER_PREFIX');
   applyAlias(normalized, 'OPENCORTEX_EXEC_MODE', 'DIWAN_EXEC_MODE');
+  applyAlias(normalized, 'OPENCORTEX_WORKBENCH_PROVIDER', 'DIWAN_WORKBENCH_PROVIDER');
   applyAlias(normalized, 'OPENCORTEX_WORKBENCH_PORT_BASE', 'DIWAN_OPENCODE_PORT_BASE');
   applyAlias(normalized, 'OPENCORTEX_WORKBENCH_BIN', 'DIWAN_OPENCODE_BIN');
   applyAlias(normalized, 'OPENCORTEX_WORKBENCH_SESSION_MODE', 'DIWAN_WORKBENCH_SESSION_MODE');

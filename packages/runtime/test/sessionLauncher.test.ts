@@ -9,6 +9,7 @@ import {
   codeWorkspaceId,
   localProvisionCommand,
   opencodeRuntimeEnvironment,
+  selectWorkbenchProvider,
   userProvisioningWorkflowInput,
   waitForPort,
 } from '../src/code/sessionLauncher.js';
@@ -38,6 +39,12 @@ const config = {
 describe('SessionLauncher', () => {
   it('uses a stable per-user Code Workspace id', () => {
     expect(codeWorkspaceId({ linuxUser: 'mfox' })).toBe('workspace-mfox');
+  });
+
+  it('selects workbench providers from explicit runtime config values', () => {
+    expect(selectWorkbenchProvider('opencode').id).toBe('opencode');
+    expect(selectWorkbenchProvider('claude-code').id).toBe('claude-code');
+    expect(selectWorkbenchProvider('codex').id).toBe('codex');
   });
 
   it('builds a non-interactive local provisioning command before sudo launch', () => {
