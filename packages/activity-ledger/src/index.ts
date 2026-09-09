@@ -4,6 +4,7 @@ export interface ActivityLedgerPolicy {
 
 export interface ActivityEvent {
   id: string;
+  tenantId?: string;
   actorId: string;
   kind: string;
   startedAt: string;
@@ -11,7 +12,41 @@ export interface ActivityEvent {
   durationSeconds?: number;
   project?: string;
   workflowId?: string;
+  taskId?: string;
+  workbenchId?: string;
   sessionId?: string;
+  providerSessionId?: string;
+  source?: string;
+  confidence?: string;
+  metadata?: Record<string, unknown>;
+}
+
+export interface AgentActivityEvent {
+  id: string;
+  providerId: string;
+  providerSessionId: string;
+  workbenchId?: string;
+  taskId?: string;
+  turnId?: string;
+  kind: string;
+  source: string;
+  confidence: string;
+  observedAt: string;
+  sequence?: number;
+  raw?: {
+    providerEventId: string;
+    artifactId?: string;
+    sha256?: string;
+    sizeBytes?: number;
+  };
+}
+
+export interface AgentActivityEventInput {
+  tenantId?: string;
+  actorId: string;
+  project?: string;
+  workflowId?: string;
+  event: AgentActivityEvent;
 }
 
 export interface ActivityRollupInput {
@@ -42,6 +77,71 @@ export interface ActivityRollup {
 
 export function disabledActivityLedgerPolicy(): ActivityLedgerPolicy {
   return { enabled: false };
+}
+
+export function activityFromAgentEvent(
+  input: AgentActivityEventInput,
+): ActivityEvent {
+  if (!input.actorId.trim()) {
+    throw new TypeError('actorId is required');
+  }
+  if (!input.event.id.trim()) {
+    throw new TypeError('agent event id is required');
+  }
+  if (!input.event.providerId.trim()) {
+    throw new TypeError('agent event providerId is required');
+  }
+  if (!input.event.providerSessionId.trim()) {
+    throw new TypeError('agent event providerSessionId is required');
+  }
+  if (!input.event.kind.trim()) {
+    throw new TypeError('agent event kind is required');
+  }
+  if (
+    !input.event.observedAt.trim() ||
+    Number.isNaN(Date.parse(input.event.observedAt))
+  ) {
+    throw new TypeError('agent event observedAt must be an ISO timestamp');
+  }
+
+  return {
+    id: input.event.id,
+    ...(input.tenantId ? { tenantId: input.tenantId } : {}),
+    actorId: input.actorId,
+    kind: `agent.${input.event.kind}`,
+    startedAt: input.event.observedAt,
+    ...(input.project ? { project: input.project } : {}),
+    ...(input.workflowId ? { workflowId: input.workflowId } : {}),
+    ...(input.event.taskId ? { taskId: input.event.taskId } : {}),
+    ...(input.event.workbenchId
+      ? { workbenchId: input.event.workbenchId }
+      : {}),
+    sessionId: input.event.providerSessionId,
+    providerSessionId: input.event.providerSessionId,
+    source: input.event.source,
+    confidence: input.event.confidence,
+    metadata: {
+      providerId: input.event.providerId,
+      ...(input.event.turnId ? { turnId: input.event.turnId } : {}),
+      ...(input.event.sequence !== undefined
+        ? { sequence: input.event.sequence }
+        : {}),
+      ...(input.event.raw
+        ? {
+            rawProviderEventId: input.event.raw.providerEventId,
+            ...(input.event.raw.artifactId
+              ? { rawArtifactId: input.event.raw.artifactId }
+              : {}),
+            ...(input.event.raw.sha256
+              ? { rawSha256: input.event.raw.sha256 }
+              : {}),
+            ...(input.event.raw.sizeBytes !== undefined
+              ? { rawSizeBytes: input.event.raw.sizeBytes }
+              : {}),
+          }
+        : {}),
+    },
+  };
 }
 
 export function rollupActivity(input: ActivityRollupInput): ActivityRollup {

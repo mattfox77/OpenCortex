@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import test from "node:test";
 
 import {
+  activityFromAgentEvent,
   disabledActivityLedgerPolicy,
   rollupActivity,
 } from "../dist/index.js";
@@ -30,6 +31,95 @@ test("activity ledger is disabled by default policy", () => {
     durationSeconds: 0,
     buckets: [],
   });
+});
+
+test("converts normalized agent events into bounded activity events", () => {
+  const event = activityFromAgentEvent({
+    tenantId: "tenant-1",
+    actorId: "owner@acme.test",
+    project: "runtime",
+    workflowId: "workflow-1",
+    event: {
+      id: "agent-event-1",
+      providerId: "codex",
+      providerSessionId: "provider-session-1",
+      workbenchId: "workbench-1",
+      taskId: "task-1",
+      turnId: "turn-1",
+      kind: "tool_call",
+      source: "acp",
+      confidence: "authoritative",
+      observedAt: "2026-08-01T10:00:00.000Z",
+      sequence: 7,
+      raw: {
+        providerEventId: "raw-event-1",
+        artifactId: "artifact-1",
+        sha256: "abc123",
+        sizeBytes: 1024,
+      },
+    },
+  });
+
+  assert.deepEqual(event, {
+    id: "agent-event-1",
+    tenantId: "tenant-1",
+    actorId: "owner@acme.test",
+    kind: "agent.tool_call",
+    startedAt: "2026-08-01T10:00:00.000Z",
+    project: "runtime",
+    workflowId: "workflow-1",
+    taskId: "task-1",
+    workbenchId: "workbench-1",
+    sessionId: "provider-session-1",
+    providerSessionId: "provider-session-1",
+    source: "acp",
+    confidence: "authoritative",
+    metadata: {
+      providerId: "codex",
+      turnId: "turn-1",
+      sequence: 7,
+      rawProviderEventId: "raw-event-1",
+      rawArtifactId: "artifact-1",
+      rawSha256: "abc123",
+      rawSizeBytes: 1024,
+    },
+  });
+});
+
+test("rejects agent activity without stable actor or event timestamps", () => {
+  assert.throws(
+    () =>
+      activityFromAgentEvent({
+        actorId: " ",
+        event: {
+          id: "agent-event-1",
+          providerId: "codex",
+          providerSessionId: "provider-session-1",
+          kind: "session",
+          source: "acp",
+          confidence: "authoritative",
+          observedAt: "2026-08-01T10:00:00.000Z",
+        },
+      }),
+    /actorId is required/,
+  );
+
+  assert.throws(
+    () =>
+      activityFromAgentEvent({
+        actorId: "owner@acme.test",
+        event: {
+          id: "agent-event-1",
+          providerId: "codex",
+          providerSessionId: "provider-session-1",
+          kind: "session",
+          source: "acp",
+          confidence: "authoritative",
+          observedAt: "not-a-date",
+        },
+      }),
+    /observedAt must be an ISO timestamp/,
+  );
 });
 
 test("rolls up enabled activity by actor project and kind", () => {
