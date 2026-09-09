@@ -122,6 +122,8 @@ export const agentSessionCommandLogQuery =
   defineQuery<AgentSessionCommandResult[]>('commandLog');
 export const reconcileHostSignal =
   defineSignal<[HostReconciliationSignal]>('reconcileHost');
+export const commandAgentSessionSignal =
+  defineSignal<[AgentSessionCommand]>('commandSignal');
 export const commandAgentSessionUpdate =
   defineUpdate<AgentSessionCommandResult, [AgentSessionCommand]>('command');
 
@@ -169,7 +171,9 @@ export async function agentSessionWorkflow(
     nativeSessionId = data.nativeSessionId ?? nativeSessionId;
     lastRecoveryDecision = recoveryDecisionFor(data);
   });
-  setHandler(commandAgentSessionUpdate, async command => {
+  const recordCommand = async (
+    command: AgentSessionCommand,
+  ): Promise<AgentSessionCommandResult> => {
     const previous = commandResults.get(command.commandId);
     if (previous) {
       return { ...previous, duplicate: true };
@@ -189,6 +193,7 @@ export async function agentSessionWorkflow(
           reviewState,
           archived,
         }));
+      result.orchestrationState = orchestrationState;
       await projections.setWorkflowContext(
         workflowId,
         `agent-session:${input.workbenchId}:command:${command.commandId}`,
@@ -200,7 +205,11 @@ export async function agentSessionWorkflow(
       );
     }
     return result;
+  };
+  setHandler(commandAgentSessionSignal, async command => {
+    await recordCommand(command);
   });
+  setHandler(commandAgentSessionUpdate, recordCommand);
 
   await projections.upsertWorkflowProjection({
     workflowId,

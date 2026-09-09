@@ -103,6 +103,14 @@ export interface UserProvisioningVerificationResult {
 
 export interface RuntimeWorkbenchSession {
   id: string;
+  tenantId?: string;
+  taskId?: string;
+  workbenchId?: string;
+  providerSessionId?: string;
+  ownerSubject?: string;
+  providerId?: string;
+  providerVersion?: string;
+  hostId?: string;
   ownerEmail?: string;
   linuxUser?: string;
   workspaceDir?: string;

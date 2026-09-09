@@ -1,8 +1,10 @@
 import {
   defineSignal,
+  ParentClosePolicy,
   proxyActivities,
   setHandler,
   sleep,
+  startChild,
   workflowInfo,
 } from '@temporalio/workflow';
 import type { Duration } from '@temporalio/common';
@@ -12,6 +14,14 @@ import type {
   RuntimeWorkbenchSession,
 } from '../activities';
 import type { TraceContext } from '../telemetry';
+import {
+  agentSessionWorkflow,
+  commandAgentSessionSignal,
+} from './agentSession';
+import {
+  agentTaskWorkflow,
+  commandAgentTaskSignal,
+} from './agentTask';
 
 const runtime = proxyActivities<typeof activities>({
   startToCloseTimeout: '2 minutes',
@@ -45,6 +55,14 @@ export interface WorkbenchSessionResult {
   probes: RuntimeWorkbenchProbeResult[];
   stopped: boolean;
   archived: boolean;
+  authority?: WorkbenchSessionAuthorityResult;
+}
+
+export interface WorkbenchSessionAuthorityResult {
+  taskWorkflowId: string;
+  sessionWorkflowId: string;
+  taskCommandId: string;
+  sessionCommandId: string;
 }
 
 export async function workbenchSessionWorkflow(
@@ -98,6 +116,17 @@ export async function workbenchSessionWorkflow(
       traceContext: input.traceContext,
     });
     const session = started.session;
+    const authority = await startAuthorityWorkflows({
+      workflowId,
+      tenantId: session.tenantId,
+      taskId: session.taskId,
+      workbenchId: session.workbenchId,
+      ownerId: input.ownerId,
+      providerId: session.providerId,
+      project: input.project,
+      hostId: session.hostId,
+      traceContext: input.traceContext,
+    });
 
     await projections.upsertWorkflowProjection({
       workflowId,
@@ -112,6 +141,7 @@ export async function workbenchSessionWorkflow(
       data: {
         session,
         channel: started.channel,
+        authority,
         traceId: input.traceContext?.traceId,
       },
       traceContext: input.traceContext,
@@ -172,6 +202,7 @@ export async function workbenchSessionWorkflow(
       probes,
       stopped: Boolean(stopRequested),
       archived: shouldArchive,
+      authority,
     };
     await projections.upsertWorkflowProjection({
       workflowId,
@@ -234,6 +265,87 @@ async function flushSignalQueues(params: {
       item,
     );
   }
+}
+
+async function startAuthorityWorkflows(params: {
+  workflowId: string;
+  tenantId?: string;
+  taskId?: string;
+  workbenchId?: string;
+  ownerId: string;
+  providerId?: string;
+  project?: string;
+  hostId?: string;
+  traceContext?: TraceContext;
+}): Promise<WorkbenchSessionAuthorityResult | undefined> {
+  if (!params.tenantId || !params.taskId || !params.workbenchId) {
+    await projections.setWorkflowContext(
+      params.workflowId,
+      'workbench:authority:missing-canonical-ids',
+      {
+        tenantIdPresent: Boolean(params.tenantId),
+        taskIdPresent: Boolean(params.taskId),
+        workbenchIdPresent: Boolean(params.workbenchId),
+      },
+    );
+    return undefined;
+  }
+
+  const taskWorkflowId = `agent-task-${params.taskId}`;
+  const sessionWorkflowId = `agent-session-${params.workbenchId}`;
+  const taskCommandId = `register-workbench-${params.workbenchId}`;
+  const sessionCommandId = `launch-${params.workbenchId}`;
+
+  const taskHandle = await startChild(agentTaskWorkflow, {
+    workflowId: taskWorkflowId,
+    parentClosePolicy: ParentClosePolicy.ABANDON,
+    args: [
+      {
+        tenantId: params.tenantId,
+        taskId: params.taskId,
+        ownerId: params.ownerId,
+        title: params.taskId,
+        project: params.project,
+        traceContext: params.traceContext,
+      },
+    ],
+  });
+  const sessionHandle = await startChild(agentSessionWorkflow, {
+    workflowId: sessionWorkflowId,
+    parentClosePolicy: ParentClosePolicy.ABANDON,
+    args: [
+      {
+        tenantId: params.tenantId,
+        taskId: params.taskId,
+        workbenchId: params.workbenchId,
+        ownerId: params.ownerId,
+        hostId: params.hostId,
+        providerId: params.providerId,
+        project: params.project,
+        traceContext: params.traceContext,
+      },
+    ],
+  });
+
+  await taskHandle.signal(commandAgentTaskSignal, {
+    commandId: taskCommandId,
+    type: 'register_workbench',
+    issuedBy: params.ownerId,
+    workbenchId: params.workbenchId,
+  });
+  await sessionHandle.signal(commandAgentSessionSignal, {
+    commandId: sessionCommandId,
+    type: 'launch',
+    issuedBy: params.ownerId,
+    reason: 'Legacy WorkbenchSessionWorkflow compatibility launch',
+  });
+
+  return {
+    taskWorkflowId,
+    sessionWorkflowId,
+    taskCommandId,
+    sessionCommandId,
+  };
 }
 
 function errorMessage(error: unknown): string {

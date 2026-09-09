@@ -101,7 +101,7 @@ export function createApp(
   mounted.use('/api/memory', memoryRouter(config, memory, reviewWorkflowStarter));
   mounted.use(
     '/api/runtime',
-    runtimeWorkbenchRouter(config, codeSessions, chat, pairPrompts),
+    runtimeWorkbenchRouter(config, codeSessions, chat, pairPrompts, controlPlane),
   );
   mounted.use(
     '/api',

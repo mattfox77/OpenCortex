@@ -1174,14 +1174,23 @@ describe('http app', () => {
     expect(created.status).toBe(201);
     const createdBody = await created.json();
     expect(createdBody.session.ownerEmail).toBe('owner@acme.test');
+    expect(createdBody.session.tenantId).toBe('tenant_local');
+    expect(createdBody.session.taskId).toMatch(/^task_/);
+    expect(createdBody.session.workbenchId).toMatch(/^workbench_/);
+    expect(createdBody.session.providerSessionId).toMatch(/^provider_session_/);
 
     const listed = await fetch(`${base}/diwan/api/runtime/code/sessions`, {
       headers: auth,
     });
     expect(listed.status).toBe(200);
     const listedBody = await listed.json();
-    expect(listedBody.sessions.map((item: { id: string }) => item.id)).toEqual([
-      createdBody.session.id,
+    expect(listedBody.sessions).toEqual([
+      expect.objectContaining({
+        id: createdBody.session.id,
+        taskId: createdBody.session.taskId,
+        workbenchId: createdBody.session.workbenchId,
+        providerSessionId: createdBody.session.providerSessionId,
+      }),
     ]);
 
     const archived = await fetch(

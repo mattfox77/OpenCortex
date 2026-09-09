@@ -1789,6 +1789,9 @@ export function runtimeWorkbenchRouter(
   sessions: SessionStore,
   chat: ChatStore,
   pairPrompts: PairPromptStore,
+  controlPlane: ControlPlaneStore = new ControlPlaneStore(
+    config.OPENCORTEX_DATA_DIR,
+  ),
   openCodePromptClient: OpenCodePromptClient = new HttpOpenCodePromptClient(),
 ): express.Router {
   const router = express.Router();
@@ -1810,6 +1813,8 @@ export function runtimeWorkbenchRouter(
           launcher,
           user: userFromInternalToken(token),
         });
+        controlPlane.ensureLegacySession(result.session);
+        sessions.set(result.session.id, result.session);
         return res.status(result.existing ? 200 : 201).json({
           session: result.session,
           channel: result.channel,

@@ -71,6 +71,8 @@ export const agentTaskCommandLogQuery =
   defineQuery<AgentTaskCommandResult[]>('commandLog');
 export const externalWorkbenchSignal =
   defineSignal<[{ workbenchId: string }]>('externalWorkbench');
+export const commandAgentTaskSignal =
+  defineSignal<[AgentTaskCommand]>('commandSignal');
 export const commandAgentTaskUpdate =
   defineUpdate<AgentTaskCommandResult, [AgentTaskCommand]>('command');
 
@@ -103,7 +105,9 @@ export async function agentTaskWorkflow(
   setHandler(externalWorkbenchSignal, data => {
     addWorkbench(workbenchIds, data.workbenchId);
   });
-  setHandler(commandAgentTaskUpdate, async command => {
+  const recordCommand = async (
+    command: AgentTaskCommand,
+  ): Promise<AgentTaskCommandResult> => {
     const previous = commandResults.get(command.commandId);
     if (previous) {
       return { ...previous, duplicate: true };
@@ -125,7 +129,11 @@ export async function agentTaskWorkflow(
       );
     }
     return result;
+  };
+  setHandler(commandAgentTaskSignal, async command => {
+    await recordCommand(command);
   });
+  setHandler(commandAgentTaskUpdate, recordCommand);
 
   await projections.upsertWorkflowProjection({
     workflowId,
