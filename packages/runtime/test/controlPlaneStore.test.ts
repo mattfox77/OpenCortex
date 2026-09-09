@@ -61,9 +61,60 @@ describe('ControlPlaneStore', () => {
 
     expect(controlPlane.listTasks(user())).toHaveLength(1);
     expect(controlPlane.listWorkbenches(user())).toHaveLength(1);
-    expect(
-      controlPlane.listProviderSessions(user(), first.workbenchId),
-    ).toHaveLength(1);
+    const providerSessions = controlPlane.listProviderSessions(
+      user(),
+      first.workbenchId,
+    );
+    expect(providerSessions).toHaveLength(1);
+    expect(providerSessions[0]).toMatchObject({
+      providerId: 'opencode',
+      providerVersion: 'test',
+      nativeSessionId: 'opencode-session-1',
+      status: 'active',
+      metadata: {
+        legacySessionId: 'workspace-owner',
+        nativeLink: '/diwan/code/session/workspace-owner/',
+        accountContext: {
+          kind: 'linux-user',
+          linuxUser: 'owner',
+          ownerEmail: 'owner@acme.test',
+        },
+        state: {
+          source: 'provider',
+          observedAt: expect.any(String),
+          confidence: 'authoritative',
+        },
+      },
+    });
+  });
+
+  it('preserves authoritative provider session links across inferred updates', () => {
+    const controlPlane = store();
+    const legacy = session();
+
+    const first = controlPlane.ensureLegacySession(legacy);
+    controlPlane.ensureLegacySession(
+      session({
+        openCodeSessionId: undefined,
+        providerSessionId: first.providerSessionId,
+        mode: 'dry-run',
+      }),
+    );
+
+    const [providerSession] = controlPlane.listProviderSessions(
+      user(),
+      first.workbenchId,
+    );
+    expect(providerSession).toMatchObject({
+      nativeSessionId: 'opencode-session-1',
+      status: 'active',
+      metadata: {
+        state: {
+          confidence: 'inferred',
+          source: 'process',
+        },
+      },
+    });
   });
 
   it('keeps owner-scoped tasks and workbenches isolated from other users', () => {

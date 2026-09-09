@@ -227,6 +227,52 @@ export interface AssignmentTemplate {
   archivedAt?: string;
 }
 
+function providerSessionMetadata(session: CodeSession): Record<string, unknown> {
+  return {
+    legacySessionId: session.id,
+    activeThreadId: session.activeThreadId,
+    nativeLink: session.urlPath,
+    accountContext: {
+      kind: "linux-user",
+      linuxUser: session.linuxUser,
+      ownerEmail: session.ownerEmail,
+    },
+    state: {
+      source: session.openCodeSessionId ? "provider" : "process",
+      observedAt: session.createdAt,
+      confidence: session.openCodeSessionId ? "authoritative" : "inferred",
+    },
+  };
+}
+
+function enrichProviderSession(
+  providerSession: ProviderSession,
+  session: CodeSession,
+  observedAt: string,
+): void {
+  providerSession.providerId = session.providerId ?? providerSession.providerId;
+  providerSession.providerVersion =
+    session.providerVersion ?? providerSession.providerVersion;
+  const nativeSessionId =
+    session.openCodeSessionId ?? providerSession.nativeSessionId;
+  providerSession.nativeSessionId = nativeSessionId;
+  providerSession.status = nativeSessionId
+    ? "active"
+    : providerSessionStatus(session);
+  providerSession.metadata = {
+    ...providerSession.metadata,
+    ...providerSessionMetadata({ ...session, createdAt: observedAt }),
+  };
+  providerSession.updatedAt = observedAt;
+}
+
+function providerSessionStatus(session: CodeSession): ProviderSession["status"] {
+  if (session.openCodeSessionId) {
+    return "active";
+  }
+  return session.mode === "dry-run" ? "unknown" : "running";
+}
+
 export interface AssignmentInstance {
   id: string;
   tenantId: string;
@@ -382,13 +428,11 @@ export class ControlPlaneStore {
         providerId: session.providerId ?? "opencode",
         providerVersion: session.providerVersion,
         nativeSessionId: session.openCodeSessionId,
-        status: session.openCodeSessionId ? "active" : "unknown",
-        metadata: {
-          legacySessionId: session.id,
-          activeThreadId: session.activeThreadId,
-        },
+        status: providerSessionStatus(session),
+        metadata: providerSessionMetadata(session),
         now,
       });
+    enrichProviderSession(provider, session, now);
 
     const changed =
       session.tenantId !== tenantId ||
