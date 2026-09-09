@@ -29,6 +29,46 @@
             aria-label="Workbench provider"
             hidden
           ></select>
+          <input
+            id="workbench-account"
+            class="provider-input"
+            aria-label="Provider account"
+            placeholder="Account"
+            hidden
+          />
+          <input
+            id="workbench-model"
+            class="provider-input"
+            aria-label="Provider model"
+            placeholder="Model"
+            hidden
+          />
+          <select
+            id="workbench-effort"
+            class="provider-select compact"
+            aria-label="Provider effort"
+            hidden
+          >
+            <option value="">Effort</option>
+            <option value="low">Low</option>
+            <option value="medium">Medium</option>
+            <option value="high">High</option>
+            <option value="xhigh">XHigh</option>
+            <option value="max">Max</option>
+          </select>
+          <select
+            id="workbench-permission-mode"
+            class="provider-select"
+            aria-label="Provider permission mode"
+            hidden
+          >
+            <option value="">Permissions</option>
+            <option value="manual">Manual</option>
+            <option value="plan">Plan</option>
+            <option value="auto">Auto</option>
+            <option value="acceptEdits">Accept edits</option>
+            <option value="dontAsk">Don't ask</option>
+          </select>
           <button id="start-code" type="button" hidden>Open Workbench</button>
         </div>
       </header>

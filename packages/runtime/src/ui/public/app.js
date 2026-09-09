@@ -238,6 +238,7 @@ function setAuthenticated(user) {
   document.querySelector('#profile-link').hidden = !user;
   document.querySelector('#start-code').hidden = !user;
   document.querySelector('#workbench-provider').hidden = !user;
+  renderWorkbenchLaunchControls();
   document.querySelector('#auth-status').textContent = user
     ? user.name || user.email
     : 'Signed out';
@@ -659,12 +660,66 @@ function renderWorkbenchProviderSelect() {
   select.value = providers.some(provider => provider.id === previous)
     ? previous
     : defaultWorkbenchProviderId;
+  select.onchange = renderWorkbenchLaunchControls;
+  renderWorkbenchLaunchControls();
 }
 
 function workbenchProviderLabel(provider) {
   if (provider.id === 'claude-code') return 'Claude Code';
   if (provider.id === 'codex') return 'Codex';
   return 'OpenCode';
+}
+
+function selectedWorkbenchProvider() {
+  const selected =
+    document.querySelector('#workbench-provider')?.value ??
+    defaultWorkbenchProviderId;
+  return workbenchProviders.find(provider => provider.id === selected);
+}
+
+function renderWorkbenchLaunchControls() {
+  const provider = selectedWorkbenchProvider();
+  const supportsAccounts = Boolean(
+    provider?.capabilities?.supportsMultipleAccounts,
+  );
+  const modelInput = document.querySelector('#workbench-model');
+  const accountInput = document.querySelector('#workbench-account');
+  const effortSelect = document.querySelector('#workbench-effort');
+  const permissionSelect = document.querySelector('#workbench-permission-mode');
+  if (accountInput) accountInput.hidden = !supportsAccounts;
+  if (modelInput) {
+    modelInput.hidden =
+      !provider ||
+      (provider.id === 'opencode' && !provider.capabilities?.models?.length);
+  }
+  if (effortSelect) effortSelect.hidden = provider?.id !== 'claude-code';
+  if (permissionSelect) {
+    permissionSelect.hidden = !provider?.capabilities?.controls?.includes(
+      'decide_permission',
+    );
+  }
+}
+
+function workbenchLaunchPayload() {
+  const providerId =
+    document.querySelector('#workbench-provider')?.value ??
+    defaultWorkbenchProviderId;
+  const accountId = document.querySelector('#workbench-account')?.value.trim();
+  const payload = {
+    providerId,
+    model: document.querySelector('#workbench-model')?.value.trim(),
+    effort: document.querySelector('#workbench-effort')?.value.trim(),
+    permissionMode: document
+      .querySelector('#workbench-permission-mode')
+      ?.value.trim(),
+  };
+  for (const key of ['model', 'effort', 'permissionMode']) {
+    if (!payload[key]) delete payload[key];
+  }
+  if (accountId) {
+    payload.account = { id: accountId };
+  }
+  return payload;
 }
 
 async function refreshControlPlaneInventory() {
@@ -1785,12 +1840,9 @@ bindUiAction('#start-code', 'click', async event => {
   target.textContent = 'Opening OpenCortex Workbench...';
 
   try {
-    const providerId =
-      document.querySelector('#workbench-provider')?.value ??
-      defaultWorkbenchProviderId;
     const data = await api('/code/sessions', {
       method: 'POST',
-      body: JSON.stringify({ providerId }),
+      body: JSON.stringify(workbenchLaunchPayload()),
     });
     if (!data) return;
     sessions = [
