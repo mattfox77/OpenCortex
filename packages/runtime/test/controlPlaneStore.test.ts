@@ -117,6 +117,34 @@ describe('ControlPlaneStore', () => {
     });
   });
 
+  it('records provider account and launch policy on provider sessions', () => {
+    const controlPlane = store();
+
+    const ids = controlPlane.ensureLegacySession(
+      session({
+        model: 'claude-sonnet-4-5',
+        effort: 'high',
+        permissionMode: 'plan',
+        accountContext: { id: 'work', displayName: 'Work account' },
+      }),
+    );
+
+    const [providerSession] = controlPlane.listProviderSessions(
+      user(),
+      ids.workbenchId,
+    );
+    expect(providerSession.metadata).toMatchObject({
+      accountContext: {
+        providerAccount: { id: 'work', displayName: 'Work account' },
+      },
+      launchOptions: {
+        model: 'claude-sonnet-4-5',
+        effort: 'high',
+        permissionMode: 'plan',
+      },
+    });
+  });
+
   it('keeps owner-scoped tasks and workbenches isolated from other users', () => {
     const controlPlane = store();
     const owner = user('owner@acme.test');

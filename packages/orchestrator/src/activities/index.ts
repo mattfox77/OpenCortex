@@ -110,6 +110,13 @@ export interface RuntimeWorkbenchSession {
   ownerSubject?: string;
   providerId?: string;
   providerVersion?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  accountContext?: {
+    id: string;
+    displayName?: string;
+  };
   hostId?: string;
   ownerEmail?: string;
   linuxUser?: string;
@@ -538,6 +545,10 @@ export async function startRuntimeWorkbenchSession(params: {
   runId?: string;
   providerId?: 'opencode' | 'claude-code' | 'codex';
   initialPrompt?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  account?: { id: string; displayName?: string };
   traceContext?: TraceContext;
 }): Promise<RuntimeWorkbenchSessionResult> {
   return withTraceSpan('opencortex.workbench.start_session', params.traceContext, {
@@ -550,6 +561,12 @@ export async function startRuntimeWorkbenchSession(params: {
       body: JSON.stringify({
         ...(params.providerId ? { providerId: params.providerId } : {}),
         ...(params.initialPrompt ? { initialPrompt: params.initialPrompt } : {}),
+        ...(params.model ? { model: params.model } : {}),
+        ...(params.effort ? { effort: params.effort } : {}),
+        ...(params.permissionMode
+          ? { permissionMode: params.permissionMode }
+          : {}),
+        ...(params.account ? { account: params.account } : {}),
       }),
     }) as { session?: RuntimeWorkbenchSession; channel?: Record<string, unknown> };
     if (!payload.session?.id) {

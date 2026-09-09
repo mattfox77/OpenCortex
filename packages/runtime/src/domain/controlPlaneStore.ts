@@ -236,6 +236,16 @@ function providerSessionMetadata(session: CodeSession): Record<string, unknown> 
       kind: "linux-user",
       linuxUser: session.linuxUser,
       ownerEmail: session.ownerEmail,
+      ...(session.accountContext
+        ? { providerAccount: { ...session.accountContext } }
+        : {}),
+    },
+    launchOptions: {
+      ...(session.model ? { model: session.model } : {}),
+      ...(session.effort ? { effort: session.effort } : {}),
+      ...(session.permissionMode
+        ? { permissionMode: session.permissionMode }
+        : {}),
     },
     state: {
       source: session.openCodeSessionId ? "provider" : "process",

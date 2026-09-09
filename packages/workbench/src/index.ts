@@ -31,6 +31,15 @@ export interface WorkbenchLaunchRequest {
   mode: WorkbenchLaunchMode;
   initialPrompt?: string;
   displayName?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  account?: WorkbenchProviderAccountContext;
+}
+
+export interface WorkbenchProviderAccountContext {
+  id: string;
+  displayName?: string;
 }
 
 export interface WorkbenchLaunchPlan {
@@ -47,7 +56,16 @@ export interface WorkbenchLaunchPlan {
     port: number;
     timeoutMs: number;
   };
+  launchContext: WorkbenchLaunchContext;
   supportsOpenCodeThreads: boolean;
+}
+
+export interface WorkbenchLaunchContext {
+  initialPrompt?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  account?: WorkbenchProviderAccountContext;
 }
 
 export interface WorkbenchProvider {
@@ -101,6 +119,7 @@ export class OpenCodeWorkbenchProvider implements WorkbenchProvider {
         port: request.port,
         timeoutMs: 8000,
       },
+      launchContext: workbenchLaunchContext(request),
       supportsOpenCodeThreads: true,
     };
   }
@@ -171,6 +190,7 @@ export class CodexWorkbenchProvider implements WorkbenchProvider {
         port: request.port,
         timeoutMs: 8000,
       },
+      launchContext: workbenchLaunchContext(request),
       supportsOpenCodeThreads: false,
     };
   }
@@ -231,6 +251,15 @@ export class ClaudeCodeWorkbenchProvider implements WorkbenchProvider {
       "--remote-control",
       request.displayName ?? `OpenCortex ${request.sessionId}`,
     ];
+    if (request.model?.trim()) {
+      command.push("--model", request.model);
+    }
+    if (request.effort?.trim()) {
+      command.push("--effort", request.effort);
+    }
+    if (request.permissionMode?.trim()) {
+      command.push("--permission-mode", request.permissionMode);
+    }
     if (request.initialPrompt?.trim()) {
       command.push(request.initialPrompt);
     }
@@ -244,9 +273,24 @@ export class ClaudeCodeWorkbenchProvider implements WorkbenchProvider {
       command,
       environment: claudeCodeRuntimeEnvironment(homeDir),
       runtimeDirs: claudeCodeRuntimeDirs(homeDir),
+      launchContext: workbenchLaunchContext(request),
       supportsOpenCodeThreads: false,
     };
   }
+}
+
+function workbenchLaunchContext(
+  request: WorkbenchLaunchRequest,
+): WorkbenchLaunchContext {
+  return {
+    ...(request.initialPrompt ? { initialPrompt: request.initialPrompt } : {}),
+    ...(request.model ? { model: request.model } : {}),
+    ...(request.effort ? { effort: request.effort } : {}),
+    ...(request.permissionMode
+      ? { permissionMode: request.permissionMode }
+      : {}),
+    ...(request.account ? { account: { ...request.account } } : {}),
+  };
 }
 
 export function opencodeRuntimeEnvironment(homeDir: string): Record<string, string> {

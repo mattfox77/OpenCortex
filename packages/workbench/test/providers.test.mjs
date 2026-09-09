@@ -17,6 +17,10 @@ const launchRequest = {
   mode: "sudo",
   initialPrompt: "Start from Jira OC-123 and summarize the plan.",
   displayName: "OpenCortex OC-123",
+  model: "claude-sonnet-4-5",
+  effort: "high",
+  permissionMode: "plan",
+  account: { id: "work", displayName: "Work account" },
 };
 
 test("workbench providers expose valid agent-client capabilities", () => {
@@ -40,8 +44,21 @@ test("claude-code launch uses remote control with the rendered initial prompt", 
     "/usr/local/bin/provider",
     "--remote-control",
     "OpenCortex OC-123",
+    "--model",
+    "claude-sonnet-4-5",
+    "--effort",
+    "high",
+    "--permission-mode",
+    "plan",
     "Start from Jira OC-123 and summarize the plan.",
   ]);
+  assert.deepEqual(plan.launchContext, {
+    initialPrompt: "Start from Jira OC-123 and summarize the plan.",
+    model: "claude-sonnet-4-5",
+    effort: "high",
+    permissionMode: "plan",
+    account: { id: "work", displayName: "Work account" },
+  });
   assert.equal(plan.environment.HOME, "/home/owner");
   assert.equal(plan.environment.CLAUDE_CONFIG_DIR, "/home/owner/.claude");
   assert.ok(plan.runtimeDirs.includes("/home/owner/.claude/projects"));
@@ -62,6 +79,13 @@ test("opencode launch remains loopback proxied behind OpenCortex auth", () => {
     "--port",
     "4873",
   ]);
+  assert.deepEqual(plan.launchContext, {
+    initialPrompt: "Start from Jira OC-123 and summarize the plan.",
+    model: "claude-sonnet-4-5",
+    effort: "high",
+    permissionMode: "plan",
+    account: { id: "work", displayName: "Work account" },
+  });
   assert.equal(plan.urlPath, "/diwan/code/session/workspace-owner/");
   assert.deepEqual(plan.readiness, {
     type: "tcp-port",

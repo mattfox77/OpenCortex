@@ -46,6 +46,12 @@ describe('SessionLauncher', () => {
     expect(codeWorkspaceId({ linuxUser: 'mfox' }, 'codex')).toBe(
       'workspace-mfox-codex',
     );
+    expect(codeWorkspaceId({ linuxUser: 'mfox' }, 'codex', { id: 'Work Account' })).toBe(
+      'workspace-mfox-codex-work-account',
+    );
+    expect(codeWorkspaceId({ linuxUser: 'mfox' }, 'opencode', { id: 'ignored' })).toBe(
+      'workspace-mfox',
+    );
   });
 
   it('selects workbench providers from explicit runtime config values', () => {

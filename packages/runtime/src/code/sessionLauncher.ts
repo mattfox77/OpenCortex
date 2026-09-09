@@ -37,6 +37,13 @@ export interface CodeSession {
   providerId?: WorkbenchProviderId;
   providerVersion?: string;
   openCodeSessionId?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  accountContext?: {
+    id: string;
+    displayName?: string;
+  };
   name?: string;
   manualName?: string;
   activeThreadId?: string;
@@ -73,12 +80,12 @@ export class SessionLauncher {
 
   async launch(
     user: AuthenticatedUser,
-    options: { providerId?: WorkbenchProviderId; initialPrompt?: string } = {},
+    options: WorkbenchLaunchOptions = {},
   ): Promise<CodeSession> {
     const workbenchProvider = options.providerId
       ? selectWorkbenchProvider(options.providerId)
       : this.workbenchProvider;
-    const id = codeWorkspaceId(user, workbenchProvider.id);
+    const id = codeWorkspaceId(user, workbenchProvider.id, options.account);
     const port =
       this.config.OPENCORTEX_WORKBENCH_PORT_BASE + Math.floor(Math.random() * 1000);
     const launchPlan = workbenchProvider.planLaunch({
@@ -91,6 +98,10 @@ export class SessionLauncher {
       mode: this.config.OPENCORTEX_EXEC_MODE,
       initialPrompt: options.initialPrompt,
       displayName: `OpenCortex Workbench for ${user.linuxUser}`,
+      model: options.model,
+      effort: options.effort,
+      permissionMode: options.permissionMode,
+      account: options.account,
     });
     const workspaceDir = launchPlan.workspaceDir;
     const logPath = join(
@@ -172,6 +183,18 @@ export class SessionLauncher {
       ...(openCodeSessionId ? { openCodeSessionId } : {}),
       providerId: launchPlan.providerId,
       providerVersion: launchPlan.providerVersion,
+      ...(launchPlan.launchContext.model
+        ? { model: launchPlan.launchContext.model }
+        : {}),
+      ...(launchPlan.launchContext.effort
+        ? { effort: launchPlan.launchContext.effort }
+        : {}),
+      ...(launchPlan.launchContext.permissionMode
+        ? { permissionMode: launchPlan.launchContext.permissionMode }
+        : {}),
+      ...(launchPlan.launchContext.account
+        ? { accountContext: launchPlan.launchContext.account }
+        : {}),
       ownerSubject: user.sub,
       createdAt: new Date().toISOString(),
       ownerEmail: user.email,
@@ -184,6 +207,18 @@ export class SessionLauncher {
     });
   }
 
+}
+
+export interface WorkbenchLaunchOptions {
+  providerId?: WorkbenchProviderId;
+  initialPrompt?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  account?: {
+    id: string;
+    displayName?: string;
+  };
 }
 
 export function selectWorkbenchProvider(
@@ -261,10 +296,23 @@ export function activeCodeThread(session: CodeSession): CodeThread | undefined {
 export function codeWorkspaceId(
   user: Pick<AuthenticatedUser, 'linuxUser'>,
   providerId: WorkbenchProviderId = 'opencode',
+  account?: { id: string },
 ): string {
-  return providerId === 'opencode'
-    ? `workspace-${user.linuxUser}`
-    : `workspace-${user.linuxUser}-${providerId}`;
+  if (providerId === 'opencode') {
+    return `workspace-${user.linuxUser}`;
+  }
+  const accountSlug = account?.id ? slugForSessionId(account.id) : '';
+  const accountSuffix = accountSlug ? `-${accountSlug}` : '';
+  return `workspace-${user.linuxUser}-${providerId}${accountSuffix}`;
+}
+
+function slugForSessionId(value: string): string {
+  return value
+    .trim()
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, '-')
+    .replace(/^-+|-+$/g, '')
+    .slice(0, 48);
 }
 
 export function opencodeRuntimeEnvironment(
@@ -397,7 +445,7 @@ export function userProvisioningWorkflowInput(
 export async function startWorkbenchSessionWorkflow(
   config: WorkbenchSessionWorkflowConfig,
   user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
-  options: { providerId?: WorkbenchProviderId; initialPrompt?: string } = {},
+  options: WorkbenchLaunchOptions = {},
 ): Promise<WorkbenchSessionWorkflowStart> {
   const connection = await Connection.connect({
     address: config.TEMPORAL_ADDRESS,
@@ -418,6 +466,10 @@ export async function startWorkbenchSessionWorkflow(
         maxProbeIterations: config.OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES,
         providerId: options.providerId,
         initialPrompt: options.initialPrompt,
+        model: options.model,
+        effort: options.effort,
+        permissionMode: options.permissionMode,
+        account: options.account,
       }],
     });
     return {

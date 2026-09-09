@@ -1032,7 +1032,14 @@ describe('http app', () => {
     ]);
     const starts: Array<{
       user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>;
-      options?: { providerId?: string; initialPrompt?: string };
+      options?: {
+        providerId?: string;
+        initialPrompt?: string;
+        model?: string;
+        effort?: string;
+        permissionMode?: string;
+        account?: { id: string; displayName?: string };
+      };
     }> = [];
     const starter: WorkbenchSessionWorkflowStarter = async (_config, user, options) => {
       starts.push({ user, options });
@@ -1057,6 +1064,10 @@ describe('http app', () => {
       body: JSON.stringify({
         providerId: 'claude-code',
         initialPrompt: 'Start OC-123.',
+        model: 'claude-sonnet-4-5',
+        effort: 'high',
+        permissionMode: 'plan',
+        account: { id: 'work', displayName: 'Work account' },
       }),
     });
 
@@ -1071,6 +1082,10 @@ describe('http app', () => {
         options: {
           providerId: 'claude-code',
           initialPrompt: 'Start OC-123.',
+          model: 'claude-sonnet-4-5',
+          effort: 'high',
+          permissionMode: 'plan',
+          account: { id: 'work', displayName: 'Work account' },
         },
       },
     ]);
@@ -1213,6 +1228,71 @@ describe('http app', () => {
     expect(body.session.providerId).toBe('claude-code');
     expect(body.session.urlPath).toBe('https://claude.ai/code');
     expect(body.session.openCodeSessionId).toBeUndefined();
+  });
+
+  it('persists selected provider launch policy on direct sessions', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+
+    const response = await fetch(`${base}/diwan/api/code/sessions`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Dev owner@acme.test',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        providerId: 'claude-code',
+        model: 'claude-sonnet-4-5',
+        effort: 'high',
+        permissionMode: 'plan',
+        account: { id: 'work', displayName: 'Work account' },
+      }),
+    });
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.session).toMatchObject({
+      providerId: 'claude-code',
+      id: 'workspace-owner-claude-code-work',
+      model: 'claude-sonnet-4-5',
+      effort: 'high',
+      permissionMode: 'plan',
+      accountContext: { id: 'work', displayName: 'Work account' },
+    });
+  });
+
+  it('keeps named provider accounts in separate direct sessions', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+
+    const launch = (accountId: string) =>
+      fetch(`${base}/diwan/api/code/sessions`, {
+        method: 'POST',
+        headers: {
+          Authorization: 'Dev owner@acme.test',
+          'Content-Type': 'application/json',
+        },
+        body: JSON.stringify({
+          providerId: 'codex',
+          account: { id: accountId },
+        }),
+      }).then(async response => ({
+        status: response.status,
+        body: await response.json(),
+      }));
+
+    const work = await launch('work');
+    const school = await launch('school');
+    const workAgain = await launch('work');
+
+    expect(work.status).toBe(201);
+    expect(school.status).toBe(201);
+    expect(workAgain.status).toBe(200);
+    expect(work.body.session.id).toBe('workspace-owner-codex-work');
+    expect(school.body.session.id).toBe('workspace-owner-codex-school');
+    expect(workAgain.body.session.id).toBe(work.body.session.id);
   });
 
   it('lets WorkbenchSessionWorkflow use the internal runtime session API', async () => {

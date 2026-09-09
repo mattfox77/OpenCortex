@@ -117,6 +117,15 @@ const workbenchProviderIdSchema = z.enum([
 const createCodeSessionSchema = z.object({
   providerId: workbenchProviderIdSchema.optional(),
   initialPrompt: z.string().trim().min(1).max(8000).optional(),
+  model: z.string().trim().min(1).max(120).optional(),
+  effort: z.string().trim().min(1).max(40).optional(),
+  permissionMode: z.string().trim().min(1).max(80).optional(),
+  account: z
+    .object({
+      id: z.string().trim().min(1).max(120),
+      displayName: z.string().trim().min(1).max(160).optional(),
+    })
+    .optional(),
 });
 
 const listLimitSchema = z.coerce.number().int().positive().max(200).optional();
@@ -280,7 +289,14 @@ const memoryReviewSchema = z.enum([
 export type WorkbenchSessionWorkflowStarter = (
   config: AppConfig,
   user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
-  options?: { providerId?: WorkbenchProviderId; initialPrompt?: string },
+  options?: {
+    providerId?: WorkbenchProviderId;
+    initialPrompt?: string;
+    model?: string;
+    effort?: string;
+    permissionMode?: string;
+    account?: { id: string; displayName?: string };
+  },
 ) => Promise<WorkbenchSessionWorkflowStart>;
 
 export type WorkbenchSessionWorkflowArchiver = (
@@ -1002,6 +1018,10 @@ export function apiRouter(
         const workflow = await workbenchSessionWorkflowStarter(config, req.user!, {
           providerId,
           initialPrompt: body.initialPrompt,
+          model: body.model,
+          effort: body.effort,
+          permissionMode: body.permissionMode,
+          account: body.account,
         });
         const projection = await workbenchSessionStartProjection(
           workflowProjections,
@@ -1023,6 +1043,10 @@ export function apiRouter(
         user: req.user!,
         providerId,
         initialPrompt: body.initialPrompt,
+        model: body.model,
+        effort: body.effort,
+        permissionMode: body.permissionMode,
+        account: body.account,
       });
       controlPlane.ensureLegacySession(result.session);
       sessions.set(result.session.id, result.session);
@@ -1857,6 +1881,10 @@ export function runtimeWorkbenchRouter(
           user: userFromInternalToken(token),
           providerId,
           initialPrompt: body.initialPrompt,
+          model: body.model,
+          effort: body.effort,
+          permissionMode: body.permissionMode,
+          account: body.account,
         });
         controlPlane.ensureLegacySession(result.session);
         sessions.set(result.session.id, result.session);
@@ -2767,10 +2795,12 @@ async function reusableWorkspaceSession(
   launcher: SessionLauncher,
   user: AuthenticatedUser,
   providerId: WorkbenchProviderId | undefined,
+  account?: { id: string },
 ): Promise<CodeSession | undefined> {
   const session = [...sessions.values()]
     .filter(item => item.ownerEmail === user.email)
     .filter(item => (providerId ? item.providerId === providerId : true))
+    .filter(item => providerAccountMatches(item, account))
     .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   if (!session) {
     return undefined;
@@ -2794,18 +2824,27 @@ async function launchCodeSessionForUser(params: {
   user: AuthenticatedUser;
   providerId?: WorkbenchProviderId;
   initialPrompt?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  account?: { id: string; displayName?: string };
 }): Promise<{ session: CodeSession; channel: ChatChannel; existing: boolean }> {
   const existing = await reusableWorkspaceSession(
     params.sessions,
     params.launcher,
     params.user,
     params.providerId,
+    params.account,
   );
   const session =
     existing ??
     (await params.launcher.launch(params.user, {
       providerId: params.providerId,
       initialPrompt: params.initialPrompt,
+      model: params.model,
+      effort: params.effort,
+      permissionMode: params.permissionMode,
+      account: params.account,
     }));
   params.sessions.set(session.id, session);
   const channel = params.chat.ensureSessionChannel(session, params.user);
@@ -2825,6 +2864,13 @@ async function launchCodeSessionForUser(params: {
     channel: updatedChannel,
     existing: Boolean(existing),
   };
+}
+
+function providerAccountMatches(
+  session: CodeSession,
+  account: { id: string } | undefined,
+): boolean {
+  return (session.accountContext?.id ?? '') === (account?.id ?? '');
 }
 
 async function ensureOwnedSessionsRunning(

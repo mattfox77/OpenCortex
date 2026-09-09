@@ -43,6 +43,10 @@ export interface WorkbenchSessionInput {
   project?: string;
   providerId?: 'opencode' | 'claude-code' | 'codex';
   initialPrompt?: string;
+  model?: string;
+  effort?: string;
+  permissionMode?: string;
+  account?: { id: string; displayName?: string };
   runtimeBaseUrl?: string;
   monitorInterval?: Duration;
   maxProbeIterations?: number;
@@ -117,6 +121,10 @@ export async function workbenchSessionWorkflow(
       runId,
       providerId: input.providerId,
       initialPrompt: input.initialPrompt,
+      model: input.model,
+      effort: input.effort,
+      permissionMode: input.permissionMode,
+      account: input.account,
       traceContext: input.traceContext,
     });
     const session = started.session;
