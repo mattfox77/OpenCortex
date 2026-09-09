@@ -45,6 +45,8 @@ test("claude-code launch uses remote control with the rendered initial prompt", 
   assert.equal(plan.environment.HOME, "/home/owner");
   assert.equal(plan.environment.CLAUDE_CONFIG_DIR, "/home/owner/.claude");
   assert.ok(plan.runtimeDirs.includes("/home/owner/.claude/projects"));
+  assert.equal(plan.readiness, undefined);
+  assert.equal(plan.supportsOpenCodeThreads, false);
 });
 
 test("opencode launch remains loopback proxied behind OpenCortex auth", () => {
@@ -61,4 +63,10 @@ test("opencode launch remains loopback proxied behind OpenCortex auth", () => {
     "4873",
   ]);
   assert.equal(plan.urlPath, "/diwan/code/session/workspace-owner/");
+  assert.deepEqual(plan.readiness, {
+    type: "tcp-port",
+    port: 4873,
+    timeoutMs: 8000,
+  });
+  assert.equal(plan.supportsOpenCodeThreads, true);
 });

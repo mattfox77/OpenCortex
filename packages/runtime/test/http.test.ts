@@ -66,6 +66,7 @@ function testConfig(): AppConfig {
     OPENCORTEX_LINUX_USER_PREFIX: '',
     OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
     OPENCORTEX_EXEC_MODE: 'dry-run',
+    OPENCORTEX_WORKBENCH_PROVIDER: 'opencode',
     OPENCORTEX_WORKBENCH_PORT_BASE: 4100,
     OPENCORTEX_WORKBENCH_BIN: '/usr/local/bin/opencode',
     OPENCORTEX_WORKBENCH_SESSION_MODE: 'local',
@@ -1029,9 +1030,12 @@ describe('http app', () => {
         },
       }),
     ]);
-    const starts: Array<Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>> = [];
-    const starter: WorkbenchSessionWorkflowStarter = async (_config, user) => {
-      starts.push(user);
+    const starts: Array<{
+      user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>;
+      options?: { providerId?: string; initialPrompt?: string };
+    }> = [];
+    const starter: WorkbenchSessionWorkflowStarter = async (_config, user, options) => {
+      starts.push({ user, options });
       return {
         workflowId: 'workbench-session-owner-1',
         runId: 'run-workbench-1',
@@ -1046,12 +1050,30 @@ describe('http app', () => {
 
     const response = await fetch(`${base}/diwan/api/code/sessions`, {
       method: 'POST',
-      headers: { Authorization: 'Dev owner@acme.test' },
+      headers: {
+        Authorization: 'Dev owner@acme.test',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({
+        providerId: 'claude-code',
+        initialPrompt: 'Start OC-123.',
+      }),
     });
 
     expect(response.status).toBe(202);
     const body = await response.json();
-    expect(starts).toHaveLength(1);
+    expect(starts).toEqual([
+      {
+        user: expect.objectContaining({
+          email: 'owner@acme.test',
+          linuxUser: 'owner',
+        }),
+        options: {
+          providerId: 'claude-code',
+          initialPrompt: 'Start OC-123.',
+        },
+      },
+    ]);
     expect(body.workflow).toEqual({
       workflowId: 'workbench-session-owner-1',
       runId: 'run-workbench-1',
@@ -1148,6 +1170,49 @@ describe('http app', () => {
   it('requires auth to list code sessions', async () => {
     const response = await request('/diwan/api/code/sessions');
     expect(response.status).toBe(401);
+  });
+
+  it('lists workbench providers from the shared capability contract', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+
+    const response = await fetch(`${base}/diwan/api/code/providers`, {
+      headers: { Authorization: 'Dev owner@acme.test' },
+    });
+
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.defaultProviderId).toBe('opencode');
+    expect(body.providers.map((provider: { id: string }) => provider.id)).toEqual([
+      'opencode',
+      'claude-code',
+      'codex',
+    ]);
+    expect(body.providers[1].capabilities.supportsRemoteControl).toBe(true);
+    expect(body.providers[2].capabilities.supportsAcp).toBe(true);
+  });
+
+  it('launches a selected provider through the code-session API', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+
+    const response = await fetch(`${base}/diwan/api/code/sessions`, {
+      method: 'POST',
+      headers: {
+        Authorization: 'Dev owner@acme.test',
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify({ providerId: 'claude-code' }),
+    });
+
+    expect(response.status).toBe(201);
+    const body = await response.json();
+    expect(body.session.id).toBe('workspace-owner-claude-code');
+    expect(body.session.providerId).toBe('claude-code');
+    expect(body.session.urlPath).toBe('https://claude.ai/code');
+    expect(body.session.openCodeSessionId).toBeUndefined();
   });
 
   it('lets WorkbenchSessionWorkflow use the internal runtime session API', async () => {

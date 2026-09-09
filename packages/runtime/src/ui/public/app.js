@@ -203,6 +203,8 @@ let currentView = window.location.pathname.endsWith('/profile')
   : 'workspace';
 let channels = [];
 let sessions = [];
+let workbenchProviders = [];
+let defaultWorkbenchProviderId = 'opencode';
 let pairPrompts = [];
 let jiraLinks = [];
 let workSearchResults = [];
@@ -235,6 +237,7 @@ function setAuthenticated(user) {
   document.querySelector('#sign-out').hidden = !user;
   document.querySelector('#profile-link').hidden = !user;
   document.querySelector('#start-code').hidden = !user;
+  document.querySelector('#workbench-provider').hidden = !user;
   document.querySelector('#auth-status').textContent = user
     ? user.name || user.email
     : 'Signed out';
@@ -625,6 +628,43 @@ async function refreshChannels() {
 async function refreshSessions() {
   const data = await api('/code/sessions');
   sessions = data && Array.isArray(data.sessions) ? data.sessions : [];
+}
+
+async function refreshWorkbenchProviders() {
+  try {
+    const data = await api('/code/providers', { redirectOnUnauthorized: false });
+    workbenchProviders = Array.isArray(data?.providers) ? data.providers : [];
+    defaultWorkbenchProviderId = data?.defaultProviderId ?? 'opencode';
+  } catch {
+    workbenchProviders = [];
+    defaultWorkbenchProviderId = 'opencode';
+  }
+  renderWorkbenchProviderSelect();
+}
+
+function renderWorkbenchProviderSelect() {
+  const select = document.querySelector('#workbench-provider');
+  if (!select) return;
+  const previous = select.value;
+  const providers = workbenchProviders.length
+    ? workbenchProviders
+    : [{ id: 'opencode', version: 'default' }];
+  select.innerHTML = '';
+  for (const provider of providers) {
+    const option = document.createElement('option');
+    option.value = provider.id;
+    option.textContent = workbenchProviderLabel(provider);
+    select.append(option);
+  }
+  select.value = providers.some(provider => provider.id === previous)
+    ? previous
+    : defaultWorkbenchProviderId;
+}
+
+function workbenchProviderLabel(provider) {
+  if (provider.id === 'claude-code') return 'Claude Code';
+  if (provider.id === 'codex') return 'Codex';
+  return 'OpenCode';
 }
 
 async function refreshControlPlaneInventory() {
@@ -1745,7 +1785,13 @@ bindUiAction('#start-code', 'click', async event => {
   target.textContent = 'Opening OpenCortex Workbench...';
 
   try {
-    const data = await api('/code/sessions', { method: 'POST' });
+    const providerId =
+      document.querySelector('#workbench-provider')?.value ??
+      defaultWorkbenchProviderId;
+    const data = await api('/code/sessions', {
+      method: 'POST',
+      body: JSON.stringify({ providerId }),
+    });
     if (!data) return;
     sessions = [
       { ...data.session, role: 'owner', channel: data.channel },
@@ -1883,6 +1929,7 @@ handleCallback()
   })
   .then(async me => {
     if (!me) return;
+    await refreshWorkbenchProviders();
     await refreshChannels();
     await restoreSession();
     await refreshControlPlaneInventory();

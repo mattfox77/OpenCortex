@@ -66,6 +66,18 @@ header {
   white-space: nowrap;
 }
 
+.provider-select {
+  max-width: 160px;
+  border: 1px solid rgb(var(--border));
+  border-radius: 6px;
+  background: rgb(var(--surface));
+  color: rgb(var(--text));
+  font: inherit;
+  font-size: 13px;
+  font-weight: 700;
+  padding: 8px 10px;
+}
+
 .eyebrow {
   margin: 0 0 4px;
   color: rgb(var(--brand-primary));

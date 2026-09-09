@@ -536,6 +536,8 @@ export async function startRuntimeWorkbenchSession(params: {
   authorizationHeader?: string;
   workflowId?: string;
   runId?: string;
+  providerId?: 'opencode' | 'claude-code' | 'codex';
+  initialPrompt?: string;
   traceContext?: TraceContext;
 }): Promise<RuntimeWorkbenchSessionResult> {
   return withTraceSpan('opencortex.workbench.start_session', params.traceContext, {
@@ -544,6 +546,11 @@ export async function startRuntimeWorkbenchSession(params: {
   }, async () => {
     const payload = await runtimeJson(params, '/runtime/code/sessions', {
       method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...(params.providerId ? { providerId: params.providerId } : {}),
+        ...(params.initialPrompt ? { initialPrompt: params.initialPrompt } : {}),
+      }),
     }) as { session?: RuntimeWorkbenchSession; channel?: Record<string, unknown> };
     if (!payload.session?.id) {
       throw new Error('Runtime session start did not return a session id');

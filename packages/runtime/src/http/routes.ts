@@ -35,6 +35,12 @@ import {
   type OpenCodePromptClient,
 } from '../code/openCodePromptClient.js';
 import { oidcProviderMetadata, requireUser } from '../auth/oidc.js';
+import {
+  ClaudeCodeWorkbenchProvider,
+  CodexWorkbenchProvider,
+  OpenCodeWorkbenchProvider,
+  type WorkbenchProviderId,
+} from '@opencortex/workbench';
 import type { AuthenticatedUser } from '../auth/types.js';
 import {
   mintInternalToken,
@@ -100,6 +106,17 @@ const workflowListQuerySchema = z.object({
 
 const codeSessionRenameSchema = z.object({
   name: z.string().trim().min(1).max(120),
+});
+
+const workbenchProviderIdSchema = z.enum([
+  'opencode',
+  'claude-code',
+  'codex',
+]) satisfies z.ZodType<WorkbenchProviderId>;
+
+const createCodeSessionSchema = z.object({
+  providerId: workbenchProviderIdSchema.optional(),
+  initialPrompt: z.string().trim().min(1).max(8000).optional(),
 });
 
 const listLimitSchema = z.coerce.number().int().positive().max(200).optional();
@@ -263,6 +280,7 @@ const memoryReviewSchema = z.enum([
 export type WorkbenchSessionWorkflowStarter = (
   config: AppConfig,
   user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
+  options?: { providerId?: WorkbenchProviderId; initialPrompt?: string },
 ) => Promise<WorkbenchSessionWorkflowStart>;
 
 export type WorkbenchSessionWorkflowArchiver = (
@@ -960,10 +978,31 @@ export function apiRouter(
     },
   );
 
+  router.get('/code/providers', requireUser, (_req, res) => {
+    const providers = [
+      new OpenCodeWorkbenchProvider(),
+      new ClaudeCodeWorkbenchProvider(),
+      new CodexWorkbenchProvider(),
+    ];
+    res.json({
+      defaultProviderId: config.OPENCORTEX_WORKBENCH_PROVIDER,
+      providers: providers.map(provider => ({
+        id: provider.id,
+        version: provider.version,
+        capabilities: provider.capabilities(),
+      })),
+    });
+  });
+
   router.post('/code/sessions', requireUser, async (req, res, next) => {
     try {
+      const body = createCodeSessionSchema.parse(req.body ?? {});
+      const providerId = body.providerId ?? config.OPENCORTEX_WORKBENCH_PROVIDER;
       if (config.OPENCORTEX_WORKBENCH_SESSION_MODE === 'workflow') {
-        const workflow = await workbenchSessionWorkflowStarter(config, req.user!);
+        const workflow = await workbenchSessionWorkflowStarter(config, req.user!, {
+          providerId,
+          initialPrompt: body.initialPrompt,
+        });
         const projection = await workbenchSessionStartProjection(
           workflowProjections,
           workflow,
@@ -982,6 +1021,8 @@ export function apiRouter(
         events,
         launcher,
         user: req.user!,
+        providerId,
+        initialPrompt: body.initialPrompt,
       });
       controlPlane.ensureLegacySession(result.session);
       sessions.set(result.session.id, result.session);
@@ -1802,8 +1843,10 @@ export function runtimeWorkbenchRouter(
   router.post(
     '/code/sessions',
     requireInternalToken(config, ['session']),
-    async (_req, res, next) => {
+    async (req, res, next) => {
       try {
+        const body = createCodeSessionSchema.parse(req.body ?? {});
+        const providerId = body.providerId ?? config.OPENCORTEX_WORKBENCH_PROVIDER;
         const token = res.locals.internalToken as VerifiedInternalToken;
         const result = await launchCodeSessionForUser({
           sessions,
@@ -1812,6 +1855,8 @@ export function runtimeWorkbenchRouter(
           events,
           launcher,
           user: userFromInternalToken(token),
+          providerId,
+          initialPrompt: body.initialPrompt,
         });
         controlPlane.ensureLegacySession(result.session);
         sessions.set(result.session.id, result.session);
@@ -2721,8 +2766,12 @@ async function reusableWorkspaceSession(
   sessions: SessionStore,
   launcher: SessionLauncher,
   user: AuthenticatedUser,
+  providerId: WorkbenchProviderId | undefined,
 ): Promise<CodeSession | undefined> {
-  const session = sessions.findByOwnerEmail(user.email);
+  const session = [...sessions.values()]
+    .filter(item => item.ownerEmail === user.email)
+    .filter(item => (providerId ? item.providerId === providerId : true))
+    .sort((a, b) => b.createdAt.localeCompare(a.createdAt))[0];
   if (!session) {
     return undefined;
   }
@@ -2743,13 +2792,21 @@ async function launchCodeSessionForUser(params: {
   events: ChatEventHub;
   launcher: SessionLauncher;
   user: AuthenticatedUser;
+  providerId?: WorkbenchProviderId;
+  initialPrompt?: string;
 }): Promise<{ session: CodeSession; channel: ChatChannel; existing: boolean }> {
   const existing = await reusableWorkspaceSession(
     params.sessions,
     params.launcher,
     params.user,
+    params.providerId,
   );
-  const session = existing ?? (await params.launcher.launch(params.user));
+  const session =
+    existing ??
+    (await params.launcher.launch(params.user, {
+      providerId: params.providerId,
+      initialPrompt: params.initialPrompt,
+    }));
   params.sessions.set(session.id, session);
   const channel = params.chat.ensureSessionChannel(session, params.user);
   const updatedChannel = await ensureSlackSessionBinding(
@@ -2797,7 +2854,9 @@ async function relaunchSession(
   launcher: SessionLauncher,
   session: CodeSession,
 ): Promise<CodeSession> {
-  const relaunched = await launcher.launch(userFromSessionOwner(session));
+  const relaunched = await launcher.launch(userFromSessionOwner(session), {
+    providerId: session.providerId,
+  });
   const restored: CodeSession = {
     ...relaunched,
     createdAt: session.createdAt,

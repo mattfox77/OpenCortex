@@ -22,6 +22,7 @@ const config = {
   OPENCORTEX_PROVISIONING_TASK_QUEUE: 'cortex-tasks',
   OPENCORTEX_WORKSPACE_ROOT: '/srv/opencortex/workspaces',
   OPENCORTEX_WORKBENCH_SESSION_MODE: 'local',
+  OPENCORTEX_WORKBENCH_PROVIDER: 'opencode',
   OPENCORTEX_WORKBENCH_SESSION_TASK_QUEUE: 'cortex-tasks',
   OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL: 'http://127.0.0.1:8080/api',
   OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL: '30 seconds',
@@ -39,6 +40,12 @@ const config = {
 describe('SessionLauncher', () => {
   it('uses a stable per-user Code Workspace id', () => {
     expect(codeWorkspaceId({ linuxUser: 'mfox' })).toBe('workspace-mfox');
+    expect(codeWorkspaceId({ linuxUser: 'mfox' }, 'claude-code')).toBe(
+      'workspace-mfox-claude-code',
+    );
+    expect(codeWorkspaceId({ linuxUser: 'mfox' }, 'codex')).toBe(
+      'workspace-mfox-codex',
+    );
   });
 
   it('selects workbench providers from explicit runtime config values', () => {

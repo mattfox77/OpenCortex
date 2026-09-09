@@ -41,6 +41,8 @@ export const sendPairPromptSignal = defineSignal<[{ prompt: string; threadId?: s
 export interface WorkbenchSessionInput {
   ownerId: string;
   project?: string;
+  providerId?: 'opencode' | 'claude-code' | 'codex';
+  initialPrompt?: string;
   runtimeBaseUrl?: string;
   monitorInterval?: Duration;
   maxProbeIterations?: number;
@@ -113,6 +115,8 @@ export async function workbenchSessionWorkflow(
       runtimeBaseUrl: input.runtimeBaseUrl,
       workflowId,
       runId,
+      providerId: input.providerId,
+      initialPrompt: input.initialPrompt,
       traceContext: input.traceContext,
     });
     const session = started.session;

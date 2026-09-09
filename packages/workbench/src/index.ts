@@ -42,6 +42,12 @@ export interface WorkbenchLaunchPlan {
   command: string[];
   environment: Record<string, string>;
   runtimeDirs: string[];
+  readiness?: {
+    type: "tcp-port";
+    port: number;
+    timeoutMs: number;
+  };
+  supportsOpenCodeThreads: boolean;
 }
 
 export interface WorkbenchProvider {
@@ -90,6 +96,12 @@ export class OpenCodeWorkbenchProvider implements WorkbenchProvider {
       command,
       environment: opencodeRuntimeEnvironment(homeDir),
       runtimeDirs: opencodeRuntimeDirs(homeDir),
+      readiness: {
+        type: "tcp-port",
+        port: request.port,
+        timeoutMs: 8000,
+      },
+      supportsOpenCodeThreads: true,
     };
   }
 }
@@ -154,6 +166,12 @@ export class CodexWorkbenchProvider implements WorkbenchProvider {
       command,
       environment: codexRuntimeEnvironment(homeDir),
       runtimeDirs: codexRuntimeDirs(homeDir),
+      readiness: {
+        type: "tcp-port",
+        port: request.port,
+        timeoutMs: 8000,
+      },
+      supportsOpenCodeThreads: false,
     };
   }
 }
@@ -226,6 +244,7 @@ export class ClaudeCodeWorkbenchProvider implements WorkbenchProvider {
       command,
       environment: claudeCodeRuntimeEnvironment(homeDir),
       runtimeDirs: claudeCodeRuntimeDirs(homeDir),
+      supportsOpenCodeThreads: false,
     };
   }
 }

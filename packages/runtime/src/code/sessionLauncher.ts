@@ -71,11 +71,17 @@ export class SessionLauncher {
       new DirectProcessHostSessionDriver(),
   ) {}
 
-  async launch(user: AuthenticatedUser): Promise<CodeSession> {
-    const id = codeWorkspaceId(user);
+  async launch(
+    user: AuthenticatedUser,
+    options: { providerId?: WorkbenchProviderId; initialPrompt?: string } = {},
+  ): Promise<CodeSession> {
+    const workbenchProvider = options.providerId
+      ? selectWorkbenchProvider(options.providerId)
+      : this.workbenchProvider;
+    const id = codeWorkspaceId(user, workbenchProvider.id);
     const port =
       this.config.OPENCORTEX_WORKBENCH_PORT_BASE + Math.floor(Math.random() * 1000);
-    const launchPlan = this.workbenchProvider.planLaunch({
+    const launchPlan = workbenchProvider.planLaunch({
       user,
       sessionId: id,
       port,
@@ -83,6 +89,7 @@ export class SessionLauncher {
       dataDir: this.config.OPENCORTEX_DATA_DIR,
       binaryPath: this.config.OPENCORTEX_WORKBENCH_BIN,
       mode: this.config.OPENCORTEX_EXEC_MODE,
+      initialPrompt: options.initialPrompt,
       displayName: `OpenCortex Workbench for ${user.linuxUser}`,
     });
     const workspaceDir = launchPlan.workspaceDir;
@@ -139,11 +146,7 @@ export class SessionLauncher {
           cwd: this.config.OPENCORTEX_DATA_DIR,
           detached: true,
           outputPath: logPath,
-          readiness: {
-            type: 'tcp-port',
-            port,
-            timeoutMs: 8000,
-          },
+          readiness: launchPlan.readiness,
           unref: true,
         });
       } catch (error) {
@@ -154,11 +157,13 @@ export class SessionLauncher {
           ),
         );
       }
-      try {
-        openCodeSessionId = await createOpenCodeSession(port);
-      } catch {
-        // OpenCortex Workbench can still be opened in the iframe. Pair-prompt delivery
-        // will report a missing internal session id until OpenCode exposes one.
+      if (launchPlan.supportsOpenCodeThreads) {
+        try {
+          openCodeSessionId = await createOpenCodeSession(port);
+        } catch {
+          // OpenCortex Workbench can still be opened in the iframe. Pair-prompt delivery
+          // will report a missing internal session id until OpenCode exposes one.
+        }
       }
     }
 
@@ -255,8 +260,11 @@ export function activeCodeThread(session: CodeSession): CodeThread | undefined {
 
 export function codeWorkspaceId(
   user: Pick<AuthenticatedUser, 'linuxUser'>,
+  providerId: WorkbenchProviderId = 'opencode',
 ): string {
-  return `workspace-${user.linuxUser}`;
+  return providerId === 'opencode'
+    ? `workspace-${user.linuxUser}`
+    : `workspace-${user.linuxUser}-${providerId}`;
 }
 
 export function opencodeRuntimeEnvironment(
@@ -389,6 +397,7 @@ export function userProvisioningWorkflowInput(
 export async function startWorkbenchSessionWorkflow(
   config: WorkbenchSessionWorkflowConfig,
   user: Pick<AuthenticatedUser, 'email' | 'linuxUser' | 'sub'>,
+  options: { providerId?: WorkbenchProviderId; initialPrompt?: string } = {},
 ): Promise<WorkbenchSessionWorkflowStart> {
   const connection = await Connection.connect({
     address: config.TEMPORAL_ADDRESS,
@@ -407,6 +416,8 @@ export async function startWorkbenchSessionWorkflow(
         runtimeBaseUrl: config.OPENCORTEX_WORKBENCH_SESSION_RUNTIME_BASE_URL,
         monitorInterval: config.OPENCORTEX_WORKBENCH_SESSION_MONITOR_INTERVAL,
         maxProbeIterations: config.OPENCORTEX_WORKBENCH_SESSION_MAX_PROBES,
+        providerId: options.providerId,
+        initialPrompt: options.initialPrompt,
       }],
     });
     return {
