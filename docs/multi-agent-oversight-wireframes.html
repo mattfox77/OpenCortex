@@ -634,6 +634,7 @@
     <nav class="sidebar" aria-label="Primary navigation">
       <a class="nav-item active" href="#tasks" aria-current="page">Tasks <span>14</span></a>
       <a class="nav-item" href="#tasks">Board</a>
+      <a class="nav-item" href="#project-dynamics">Dynamics</a>
       <a class="nav-item" href="#agents-hosts">Agents <span>9</span></a>
       <a class="nav-item" href="#agents-hosts">Hosts <span>3</span></a>
       <a class="nav-item" href="#review-ledger">Review <span>4</span></a>
@@ -758,6 +759,7 @@
           <div class="metric"><div class="label">Review ready</div><div class="value">3</div></div>
           <div class="metric"><div class="label">Failed</div><div class="value">1</div></div>
           <div class="metric"><div class="label">Cost today</div><div class="value">$18.42</div></div>
+          <div class="metric"><div class="label">Forecast confidence</div><div class="value">68%</div></div>
         </div>
 
         <div class="attention-list" aria-labelledby="attention-heading">
@@ -793,7 +795,7 @@
           <div class="freshness" role="status">14 tasks. Updated 18 seconds ago. Live updates connected.</div>
           <div class="table-wrap">
             <table>
-              <caption class="sr-only">Tasks ordered by required attention, with orchestration, execution, human coordination, repo coordination, cost, and next-action status.</caption>
+              <caption class="sr-only">Tasks ordered by required attention, with orchestration, execution, human coordination, repo coordination, project dynamics, cost, and next-action status.</caption>
               <thead>
                 <tr>
                   <th scope="col">Orchestration</th>
@@ -803,6 +805,7 @@
                   <th scope="col">Work Ref</th>
                   <th scope="col">Agents</th>
                   <th scope="col">Repo</th>
+                  <th scope="col">Dynamics</th>
                   <th scope="col" class="num">Cost</th>
                   <th scope="col">Next Action</th>
                 </tr>
@@ -816,6 +819,7 @@
                   <td>JIRA-42, PR #31</td>
                   <td>Claude running<br>Codex idle</td>
                   <td>PR open<br>CI passed</td>
+                  <td>Low risk<br>basis strong</td>
                   <td class="num">$3.11</td>
                   <td><button>Review</button></td>
                 </tr>
@@ -827,6 +831,7 @@
                   <td>GH#118</td>
                   <td>Codex editing</td>
                   <td>PR open<br>CI failing</td>
+                  <td>Wide band<br>CI risk</td>
                   <td class="num">$7.80</td>
                   <td><button>Run tests</button></td>
                 </tr>
@@ -838,6 +843,7 @@
                   <td>Manual</td>
                   <td>OpenCode failed</td>
                   <td>No branch</td>
+                  <td>Blocked<br>no forecast</td>
                   <td class="num">$0.16</td>
                   <td><button>Relaunch</button></td>
                 </tr>
@@ -849,12 +855,66 @@
                   <td>OC-S-19</td>
                   <td>0</td>
                   <td>Artifact draft</td>
+                  <td>No basis</td>
                   <td class="num">$0.00</td>
                   <td><button>Generate context</button></td>
                 </tr>
               </tbody>
             </table>
           </div>
+        </div>
+      </section>
+
+      <section class="section" id="project-dynamics">
+        <div class="page-header">
+          <div>
+            <h2>Project Dynamics</h2>
+            <div class="subtitle">Evidence-backed forecasting for agentic work. Story points are not authoritative.</div>
+          </div>
+          <div class="actions">
+            <button>Compare scenarios</button>
+            <button class="primary">Open evidence</button>
+          </div>
+        </div>
+        <div class="split">
+          <section class="panel" aria-labelledby="dynamics-forecast-heading">
+            <div class="panel-header">
+              <div>
+                <h3 id="dynamics-forecast-heading">Runtime provider work</h3>
+                <div class="subtitle">Forecast: 3.5-6.0 work days. Basis: 24 similar tasks, 9 in the same package area.</div>
+              </div>
+              <span class="status review">68% confidence</span>
+            </div>
+            <div class="callout">Critical risks: CI instability, provider ACP variance, and human approval latency. Falsifiers: adapter tests pass twice, no policy exception, review under two requested changes.</div>
+            <div class="table-wrap" style="margin-top: 12px;">
+              <table>
+                <caption class="sr-only">Evidence used by Project Dynamics forecast.</caption>
+                <thead><tr><th scope="col">Signal</th><th scope="col">Observed Evidence</th><th scope="col">Source</th></tr></thead>
+                <tbody>
+                  <tr><td>Repo complexity</td><td>14 files, 4 packages, 2 APIs, 1 migration</td><td>Git diff and package graph</td></tr>
+                  <tr><td>Runtime evidence</td><td>3 failed launches, 2 retries, CI p95 11m</td><td>Ledger and CI</td></tr>
+                  <tr><td>Context readiness</td><td>82% covered, 3 missing decisions, 1 stale design note</td><td>Context pack</td></tr>
+                  <tr><td>Review load</td><td>4 pending approvals, median review latency 2.1h</td><td>Review ledger</td></tr>
+                  <tr><td>Cost trajectory</td><td>$18.42 today, forecast $42-$80 to merge</td><td>Usage projection</td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
+          <section class="panel" aria-labelledby="dynamics-scenarios-heading">
+            <h3 id="dynamics-scenarios-heading">Scenarios</h3>
+            <div class="table-wrap">
+              <table>
+                <caption class="sr-only">Forecast scenarios and assumptions.</caption>
+                <thead><tr><th scope="col">Scenario</th><th scope="col">Timeframe</th><th scope="col">Assumptions</th></tr></thead>
+                <tbody>
+                  <tr><td>Conservative</td><td>6.0 days</td><td>CI remains noisy, manual review required</td></tr>
+                  <tr><td>Expected</td><td>4.2 days</td><td>ACP happy path, one review cycle</td></tr>
+                  <tr><td>Accelerated</td><td>3.5 days</td><td>Tests stabilize, approval SLA under 1h</td></tr>
+                </tbody>
+              </table>
+            </div>
+            <div class="freshness" role="status" style="margin-top: 12px;">Forecast updated from ledger, repo, CI, review, cost, context, and provider events. Unsupported dates are labeled as guesses.</div>
+          </section>
         </div>
       </section>
 

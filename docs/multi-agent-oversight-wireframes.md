@@ -93,6 +93,7 @@ work.
 +---------------+--------------------------------------------------------------+
 | Tasks         | Environment: Local install        OIDC: Google         Live   |
 | Board         | View: My attention queue          Surface: Web/Desktop/Mobile |
+| Dynamics      | Forecasts from evidence           Story points: not authority |
 | Agents        | Host scope: All hosts             Tenant: tssoft              |
 | Hosts         +--------------------------------------------------------------+
 | Review        | Page content                                                 |
@@ -175,12 +176,12 @@ state, and data freshness above the table.
 | Saved: My attention queue  Mode: Table | Board | Backlog  Sort: Next action  |
 | Filters: Project v Owner v Provider v State v Work Ref v Host v Labels v     |
 +--------+------+-------------+----------+----------+---------+-------+---------+
-| Orch   | Exec | Task        | Human    | Repo     | Agents  | Cost  | Next    |
+| Orch   | Exec | Task        | Human    | Repo     | Dynamics| Cost  | Next    |
 +--------+------+-------------+----------+----------+---------+-------+---------+
-| Active | Run  | OIDC polish | Ready    | JIRA-42  | Claude  | $3.11 | Review  |
-| Wait   | Run  | ACP adapter | Plan due | PR open  | Codex   | $7.80 | Plan    |
-| Recover| ?    | Host agent  | n/a      | Manual   | OpenCode| $0.16 | Recover |
-| Draft  | n/a  | Skill import| None     | OC-S-19  | 0       | $0.00 | Context |
+| Active | Run  | OIDC polish | Ready    | PR green | Low risk| $3.11 | Review  |
+| Wait   | Run  | ACP adapter | Plan due | CI fail  | Wide CI | $7.80 | Plan    |
+| Recover| ?    | Host agent  | n/a      | No brnch | Blocked | $0.16 | Recover |
+| Draft  | n/a  | Skill import| None     | Artifact | No basis| $0.00 | Context |
 +--------+------+-------------+----------+----------+---------+-------+---------+
 ```
 
@@ -196,6 +197,44 @@ Row expansion:
 | Actions: Open task  Open provider  Request status  Hand off  Archive          |
 +------------------------------------------------------------------------------+
 ```
+
+## Project Dynamics
+
+Primary job: replace story points and velocity theater with defensible evidence
+about scope, uncertainty, risk, and forecasted timeframe.
+
+```text
++------------------------------------------------------------------------------+
+| Project Dynamics: Runtime provider work                    Confidence: 68%    |
++------------------------------------------------------------------------------+
+| Forecast: 3.5-6.0 work days   Basis: 24 similar tasks, 9 same package area    |
+| Critical risks: CI instability, provider ACP variance, human approval latency  |
+| Falsifiers: adapter tests pass twice, no policy exception, review < 2 changes  |
++------------------------------------------------------------------------------+
+| Evidence                                                                      |
+| Repo complexity: 14 files / 4 packages / 2 APIs / 1 migration                 |
+| Runtime evidence: 3 failed launches / 2 retries / CI p95 11m                  |
+| Context readiness: 82% covered / 3 missing decisions / 1 stale design note    |
+| Review load: 4 pending approvals / median review latency 2.1h                 |
+| Cost trajectory: $18.42 today / forecast $42-$80 to merge                     |
++------------------------------------------------------------------------------+
+| Scenario           | Timeframe     | Assumptions                              |
+| Conservative       | 6.0 days      | CI remains noisy, manual review required |
+| Expected           | 4.2 days      | ACP happy path, one review cycle         |
+| Accelerated        | 3.5 days      | tests stabilize, approval SLA under 1h   |
++------------------------------------------------------------------------------+
+```
+
+Design requirements:
+
+- never use story points as the authoritative measure of size or commitment;
+- show forecast basis, sample size, confidence band, assumptions, and falsifiers;
+- derive measurements from ledger events, repo facts, CI/test history, review
+  state, cost, dependency graph, context readiness, and provider/runtime events;
+- label unsupported date estimates as guesses instead of mixing them with
+  defensible forecasts;
+- let humans compare scenarios and tradeoffs without pretending the forecast is
+  a commitment.
 
 ## Task detail
 

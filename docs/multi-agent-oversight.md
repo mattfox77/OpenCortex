@@ -618,6 +618,16 @@ comments, references, review queues, and state transitions. It should not copy
 Jira's issue-centric assumptions. OpenCortex tasks are agent-execution records
 with live provider sessions, context packs, policy, repo evidence, and replay.
 
+OpenCortex should also avoid importing Scrum's story-point fiction as the core
+planning unit. Story points were a human team abstraction for negotiating
+uncertain labor. Agentic work produces much richer evidence: context size,
+dependency shape, repo complexity, files touched, test/runtime cost, review
+findings, failed attempts, provider/model behavior, CI duration, policy gates,
+human approval latency, and historical completion distributions for similar
+tasks. The product model should treat project planning as Project Dynamics:
+forecasting from observed, falsifiable signals rather than from unfalsifiable
+relative points.
+
 The default dashboard is an attention queue, not a wall of aggregate metrics.
 Failures, blocked launches, approvals, stale sessions, policy violations, and
 budget exceptions appear before healthy work and sort by urgency. Summary
@@ -675,6 +685,9 @@ Top-level views:
   reference provider.
 - **Board:** Jira-like lanes for backlog, planning, running, blocked, review,
   ready to merge, done, and archived, with agent state badges on each card.
+- **Dynamics:** evidence-backed project measurement, dependency flow, forecast
+  confidence, throughput, risk, blocked time, review load, and delivery scenarios
+  derived from ledger/repo/runtime data rather than story points.
 - **Agents:** every active provider session across all hosts.
 - **Hosts:** enrolled machines, health, capacity, provider readiness, active
   workbenches.
@@ -1039,6 +1052,48 @@ OpenCortex should track:
 Exact cost is preferable where a provider exposes it. Estimated cost is still
 useful if clearly labeled. The key is attribution: a PR should show which agent
 sessions and context packs contributed to it.
+
+## Project Dynamics
+
+Project Dynamics is the planning model that replaces story-point-driven Scrum
+inside OpenCortex. It keeps the useful human workflow shapes from agile tools,
+such as boards, queues, reviews, and prioritization, but rejects measurements
+that cannot be checked against evidence.
+
+Project Dynamics should measure task and project state with defensible facts:
+
+- observed elapsed time, active agent time, queue time, blocked time, review
+  time, and approval latency;
+- files, packages, services, APIs, schemas, tests, migrations, policies, and
+  external systems touched;
+- context pack size, knowledge graph coverage, dependency uncertainty, and
+  missing-input count;
+- CI duration, failure count, retry count, flaky-test evidence, and runtime
+  environment drift;
+- provider/model used, tool calls, turn count, token/cost usage, rate limits,
+  permission requests, and failed tool operations;
+- review findings, requested changes, security/policy exceptions, rework count,
+  reverted commits, and escaped defects;
+- historical distributions for similar work by repo, component, task type,
+  provider, model, policy, and reviewer path.
+
+Forecasts should be explicit projections over those signals. The UI should show
+the evidence basis, sample size, confidence band, assumptions, known unknowns,
+and the events that would falsify the forecast. A date estimate without a basis
+is not a Project Dynamics forecast; it is an unsupported guess and should be
+labeled as such or refused.
+
+This changes the role of "story" in the system. A story remains a useful unit of
+intent or user value, but it is not measured by points. OpenCortex should break
+stories into executable tasks, context requirements, dependency edges, review
+gates, and evidence checkpoints. Timeframe estimates come from the state and
+history of those executable parts.
+
+Human strengths still matter. People set priorities, decide acceptable risk,
+clarify ambiguity, evaluate value, approve policy exceptions, and choose tradeoff
+scenarios. Agents produce and update the measurable execution evidence. The UI
+should make those responsibilities visible instead of blending them into a
+single velocity number.
 
 ## Review and intervention
 

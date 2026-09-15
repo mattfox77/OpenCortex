@@ -124,6 +124,13 @@ architecture rationale.
   priorities, assignees, labels, comments, review queues, notifications, and
   state transitions while remaining centered on agentic execution state,
   context packs, policy, repo evidence, provider sessions, and replay.
+- Provide Project Dynamics as the project measurement and forecasting model.
+  Keep useful agile workflow shapes, but do not treat Scrum story points,
+  velocity, or commitment rituals as authoritative. Forecast scope and timeframe
+  from falsifiable evidence: ledger events, repo complexity, dependency graph,
+  context readiness, CI/test history, provider/model behavior, cost, review
+  findings, blocked time, approvals, retries, rework, and historical completion
+  distributions for similar tasks.
 - Treat the repository as the primary agent-to-agent coordination medium.
   Agents exchange durable technical state through branches, commits, PRs,
   review comments, CI results, task manifests, handoff notes, artifacts, and
@@ -714,6 +721,9 @@ Acceptance:
 - A human can view the same work as a backlog item, board card, or table row
   and see both human coordination state and repo-originated agent coordination
   signals.
+- A human can inspect Project Dynamics for a story or project and see why a
+  timeframe forecast exists, what evidence supports it, what assumptions could
+  invalidate it, and which tasks dominate delivery risk.
 - Every launch references an immutable context pack and exact skill bundle
   versions.
 - Oversized, untrusted, unauthorized, or secret-bearing context is visibly
@@ -754,6 +764,10 @@ Implementation:
 - Derive task, fleet, host, attention, graph, usage, and cost projections from
   ledger events. Do not make provider logs or Temporal history the business
   system of record.
+- Derive Project Dynamics measurements and forecasts from the same ledger,
+  repository, CI, review, policy, and knowledge-graph evidence. Forecasts must
+  expose basis, sample size, confidence band, assumptions, known unknowns, and
+  falsifying events. Unsupported estimates must be labeled as guesses or refused.
 - Record provider-reported usage and cost as authoritative only when documented
   as such. Label estimates with model, price source/version, currency, and
   estimation method. Never use undocumented private provider endpoints as a
