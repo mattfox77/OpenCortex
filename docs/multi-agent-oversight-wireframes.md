@@ -62,6 +62,10 @@ Design baseline:
 |  Task / objective -- Work references -- Context pack -- Skill bundle -- Policy|
 |        |              Jira, GitHub, docs     memory, repo    installable caps  |
 |        |                                                                      |
+|        +-- Human coordination: comments, priorities, approvals, handoffs       |
+|        |                                                                      |
+|        +-- Repo coordination: branches, commits, PRs, CI, manifests, artifacts |
+|        |                                                                      |
 |        v                                                                      |
 |  Workbench request                                                            |
 |        |                                                                      |
@@ -88,6 +92,7 @@ work.
 | OpenCortex        Search tasks, sessions, repos, issues...              mfox |
 +---------------+--------------------------------------------------------------+
 | Tasks         | Environment: Local install        OIDC: Google         Live   |
+| Board         | View: My attention queue          Surface: Web/Desktop/Mobile |
 | Agents        | Host scope: All hosts             Tenant: tssoft              |
 | Hosts         +--------------------------------------------------------------+
 | Review        | Page content                                                 |
@@ -106,21 +111,55 @@ Persistent header signals:
 - selected host scope;
 - global search across tasks, workbenches, work references, memories, and
   artifacts.
+- current saved view and surface posture: desktop monitoring, web workspace, or
+  mobile triage.
 
 Keyboard users receive a skip link into main content, stable focus order, and a
 high-contrast focus indicator. Navigation marks the current view
 programmatically as well as visually.
 
+## Human and Repo Coordination
+
+Primary job: keep human communication and agent-to-agent technical coordination
+clear enough that a reviewer knows what needs judgment versus what is evidence.
+
+```text
++------------------------------------------------------------------------------+
+| Task: ACP provider adapter                             Mode: Coordination     |
++------------------------------------------------------------------------------+
+| Human lane                              | Repo lane                            |
+| Priority: High  Assignee: mfox          | Branch: slice-3-temporal-authority   |
+| Status: Review required                 | PR: #118  CI: failing runtime check   |
+| Teacher/Reviewer note: clarify policy   | Agent handoff: docs/agent-note.md      |
+| Approval needed: permission request     | Commits: 3  Artifacts: 2  Events: 91   |
+|                                        |                                      |
+| [Comment] [Approve] [Request changes]  | [Open PR] [View diff] [Replay events] |
++------------------------------------------------------------------------------+
+```
+
+Design requirements:
+
+- human comments, approvals, handoffs, and notifications stay in the human lane;
+- branches, commits, PRs, CI, manifests, artifacts, and agent handoff notes stay
+  in the repo lane;
+- the task timeline merges both lanes chronologically but preserves source,
+  actor, confidence, and whether the item requires human action;
+- agents may read repo coordination artifacts and OpenCortex context packs, but
+  humans should not need to inspect raw repo files to understand what action is
+  needed.
+
 ## Tasks dashboard
 
 Primary job: know what work exists, where agents are active, and what needs
-attention.
+attention. This is intentionally Jira-like for humans without making Jira the
+domain model.
 
 The default saved view is **My attention queue**, sorted by required action and
-then urgency. The dashboard exposes Temporal orchestration state, provider
-execution state, and reviewer state as separate columns. It shows record count,
-active filters, default sort, live connection state, and data freshness above
-the table.
+then urgency. Users can switch the same query between backlog, board, and table
+modes. The dashboard exposes Temporal orchestration state, provider execution
+state, human review state, and repo-derived agent coordination state as separate
+signals. It shows record count, active filters, default sort, live connection
+state, and data freshness above the table.
 
 ```text
 +------------------------------------------------------------------------------+
@@ -133,13 +172,13 @@ the table.
 | Failed: Host agent / OpenCode port conflict                  View recovery    |
 | Approval: ACP adapter plan / due 11:30                       Review plan      |
 +------------------------------------------------------------------------------+
-| Saved: My attention queue  Sort: Next action  Columns v  Density: Compact    |
-| Filters: Project v  Owner v  Provider v  State v  Work Ref v  Host v         |
+| Saved: My attention queue  Mode: Table | Board | Backlog  Sort: Next action  |
+| Filters: Project v Owner v Provider v State v Work Ref v Host v Labels v     |
 +--------+------+-------------+----------+----------+---------+-------+---------+
-| Orch   | Exec | Task        | Review   | Work ref | Agents  | Cost  | Next    |
+| Orch   | Exec | Task        | Human    | Repo     | Agents  | Cost  | Next    |
 +--------+------+-------------+----------+----------+---------+-------+---------+
 | Active | Run  | OIDC polish | Ready    | JIRA-42  | Claude  | $3.11 | Review  |
-| Wait   | Run  | ACP adapter | Plan due | GH#118   | Codex   | $7.80 | Plan    |
+| Wait   | Run  | ACP adapter | Plan due | PR open  | Codex   | $7.80 | Plan    |
 | Recover| ?    | Host agent  | n/a      | Manual   | OpenCode| $0.16 | Recover |
 | Draft  | n/a  | Skill import| None     | OC-S-19  | 0       | $0.00 | Context |
 +--------+------+-------------+----------+----------+---------+-------+---------+

@@ -35,6 +35,39 @@ The thesis:
 > OpenCortex is the operations layer for agentic software work across people,
 > machines, providers, projects, and time.
 
+## Two coordination planes
+
+OpenCortex should make a clear product distinction between how agents coordinate
+with each other and how humans coordinate with agents.
+
+Agents should coordinate primarily through the repository and its adjacent
+delivery systems. The repo is the durable shared workspace agents can inspect,
+modify, test, review, and cite. Agent-to-agent coordination should therefore
+flow through branches, commits, pull requests, review comments, task manifests,
+context-pack references, generated artifacts, ledger events, and explicit
+handoff files or notes committed beside the work when appropriate. This keeps
+agent coordination close to the code and evidence it affects, makes it
+replayable, and avoids turning OpenCortex chat into a hidden side channel for
+technical truth.
+
+Humans should coordinate through the OpenCortex UI. The UI is the place where
+people monitor work, choose priorities, assign ownership, approve risky actions,
+review evidence, intervene, hand off sessions, and communicate intent to one or
+many agents. It should feel closer to Jira, Linear, GitHub Projects, and an
+operations console than to a provider chat window: dense, sortable, scoped,
+auditable, and optimized for human strengths such as judgment, prioritization,
+exception handling, ambiguity resolution, teaching, and final accountability.
+
+This means the product has two complementary communication contracts:
+
+| Plane | Primary users | Durable medium | Main jobs |
+|---|---|---|---|
+| Repo coordination | Agents, reviewers, CI | Branches, commits, PRs, task manifests, artifacts, ledger events | Divide work, exchange machine-readable state, preserve evidence, make changes reviewable |
+| Human coordination | Humans and agents | OpenCortex web/mobile/desktop UI, review requests, chat, notifications | Monitor, prioritize, clarify, approve, redirect, teach, hand off, audit |
+
+Provider-native UIs remain useful for provider-specific conversation detail, but
+OpenCortex should be the cross-provider human work interface.
+
 ## Goals
 
 OpenCortex should let a user or team answer these questions from one web UI:
@@ -50,6 +83,9 @@ OpenCortex should let a user or team answer these questions from one web UI:
 - Which commits, PRs, artifacts, memories, and decisions came from the session?
 - Which provider UI should I open to inspect or steer it?
 - Can I pause, resume, stop, hand off, relaunch, or archive it?
+- What should I personally decide, review, clarify, or delegate next?
+- What did agents communicate through the repo, and what human action is
+  required in OpenCortex?
 
 This is deliberately broader than "open a workbench". A workbench is one runtime
 instance. Oversight is the inventory, control, and audit surface above all
@@ -553,17 +589,34 @@ Provider stance:
 Do not block the task/work-reference migration on ACP. The generic task model is
 valuable immediately, and ACP can enrich provider telemetry adapter by adapter.
 
-## Web-first dashboard
+## Human work interface
 
-The primary OpenCortex UI should be an operations console, not a single embedded
-workbench.
+The primary OpenCortex UI should be a human work interface for agentic software
+delivery, not a single embedded workbench. It should be available as:
+
+- a responsive web app for the canonical control plane;
+- an installable desktop shell for sustained multi-agent monitoring, native
+  notifications, deep links, and local host affordances;
+- a mobile web/app surface for triage, approvals, status checks, escalation,
+  handoff review, and classroom oversight while away from the desk.
+
+All three surfaces should share the same task, review, ledger, policy, and
+notification APIs. Desktop and mobile are form factors over the same control
+plane, not separate domain models.
 
 ### UX operating standard
 
-The console is optimized for five expert-user jobs: monitor distributed work,
-triage exceptions, review evidence, intervene safely, and reconstruct what
+The interface is optimized for expert human jobs: monitor distributed work,
+triage exceptions, prioritize queues, review evidence, clarify ambiguity,
+approve or deny risk, intervene safely, teach, delegate, and reconstruct what
 happened. Visual simplicity must not hide status, provenance, policy, cost, or
 the next required action.
+
+The interaction model should be Jira-like where that helps humans: task lists,
+saved views, backlog/board/table modes, priorities, assignees, due dates, labels,
+comments, references, review queues, and state transitions. It should not copy
+Jira's issue-centric assumptions. OpenCortex tasks are agent-execution records
+with live provider sessions, context packs, policy, repo evidence, and replay.
 
 The default dashboard is an attention queue, not a wall of aggregate metrics.
 Failures, blocked launches, approvals, stale sessions, policy violations, and
@@ -587,6 +640,12 @@ Required interaction patterns:
   sticky headers, row expansion, and compact density on large operational tables;
 - show source, observed-at time, confidence or estimation basis, and reviewer
   history for values used in approvals, policy, memory, and cost decisions.
+- show repo-originated coordination signals such as branch updates, PR comments,
+  failing CI, agent handoff notes, generated artifacts, and task manifests as
+  first-class evidence beside human comments and approvals;
+- distinguish human-directed messages from repo-derived agent coordination so a
+  reviewer can tell whether they are giving an instruction, reading evidence, or
+  approving a durable state change.
 
 Accessibility baseline is WCAG 2.2 AA. Every control requires an accessible
 name, every field a persistent label, every status a text equivalent, and every
@@ -614,6 +673,8 @@ Top-level views:
 
 - **Tasks:** grouped by project, owner, state, priority, due date, and work
   reference provider.
+- **Board:** Jira-like lanes for backlog, planning, running, blocked, review,
+  ready to merge, done, and archived, with agent state badges on each card.
 - **Agents:** every active provider session across all hosts.
 - **Hosts:** enrolled machines, health, capacity, provider readiness, active
   workbenches.
@@ -624,6 +685,14 @@ Top-level views:
 - **Memory:** task-linked findings, decisions, summaries, and reusable context.
 - **Skills:** installable agent capabilities, brain imports, provider
   compatibility, host/user installation state, and validation results.
+
+Platform posture:
+
+| Surface | Best jobs | Constraints |
+|---|---|---|
+| Web | canonical task/agent/review console, provider launch, replay, settings | must work over local and Tailscale URLs with OIDC |
+| Desktop | all-day monitoring, dense tables, side-by-side provider/repo/review panes, local notifications | must not bypass OpenCortex auth or provider credential boundaries |
+| Mobile | approvals, alerts, status requests, comments, handoffs, classroom roster triage | no dense diff editing or terminal-heavy workflows by default |
 
 Agent/session list columns:
 

@@ -633,6 +633,7 @@
 
     <nav class="sidebar" aria-label="Primary navigation">
       <a class="nav-item active" href="#tasks" aria-current="page">Tasks <span>14</span></a>
+      <a class="nav-item" href="#tasks">Board</a>
       <a class="nav-item" href="#agents-hosts">Agents <span>9</span></a>
       <a class="nav-item" href="#agents-hosts">Hosts <span>3</span></a>
       <a class="nav-item" href="#review-ledger">Review <span>4</span></a>
@@ -669,13 +670,73 @@
             Jira/GitHub/docs, reviewed memory, repo instructions, skill bundles, and policy.
           </div>
           <div class="flow-step">
-            <strong>4. Workbench launch</strong>
+            <strong>4. Human and repo coordination</strong>
+            Humans use OpenCortex comments, approvals, handoffs, and alerts. Agents coordinate through branches, commits, PRs, CI, manifests, and artifacts.
+          </div>
+          <div class="flow-step">
+            <strong>5. Workbench launch</strong>
             Temporal child workflow, host selection, user provisioning, worktree, provider process.
           </div>
           <div class="flow-step">
-            <strong>5. Oversight loop</strong>
+            <strong>6. Oversight loop</strong>
             Events, approvals, diffs, tests, commits, PRs, skill versions, ledger, replay.
           </div>
+        </div>
+      </section>
+
+      <section class="section" id="coordination">
+        <div class="page-header">
+          <div>
+            <h2>Human and Repo Coordination</h2>
+            <div class="subtitle">OpenCortex is the human work surface; the repo is the durable agent coordination surface.</div>
+          </div>
+          <div class="actions">
+            <button>Comment</button>
+            <button class="primary">Request changes</button>
+          </div>
+        </div>
+        <div class="split">
+          <section class="panel" aria-labelledby="human-lane-heading">
+            <h3 id="human-lane-heading">Human lane</h3>
+            <div class="toolbar" aria-label="Human coordination fields">
+              <span class="filter">Priority: High</span>
+              <span class="filter">Assignee: mfox</span>
+              <span class="filter">Review: Required</span>
+              <span class="filter">Labels: ACP, runtime</span>
+            </div>
+            <div class="attention-list">
+              <div class="attention-item">
+                <span class="status warn">Approval required</span>
+                <span>Claude requests permission to apply generated diff.</span>
+                <button>Review</button>
+              </div>
+              <div class="attention-item">
+                <span class="status review">Clarify</span>
+                <span>Codex asks whether OpenCode should stay compatibility-only.</span>
+                <button>Reply</button>
+              </div>
+            </div>
+          </section>
+          <section class="panel" aria-labelledby="repo-lane-heading">
+            <h3 id="repo-lane-heading">Repo lane</h3>
+            <div class="toolbar" aria-label="Repo coordination fields">
+              <span class="filter">Branch: slice-3-temporal-authority</span>
+              <span class="filter">PR: #118</span>
+              <span class="filter">CI: Failing</span>
+              <span class="filter">Artifacts: 2</span>
+            </div>
+            <div class="table-wrap">
+              <table>
+                <caption class="sr-only">Repo-originated agent coordination signals.</caption>
+                <thead><tr><th scope="col">Signal</th><th scope="col">Source</th><th scope="col">Action</th></tr></thead>
+                <tbody>
+                  <tr><td>Runtime test failure</td><td>CI check</td><td><button>Open log</button></td></tr>
+                  <tr><td>Handoff note updated</td><td>docs/agent-note.md</td><td><button>Review note</button></td></tr>
+                  <tr><td>Provider adapter commits</td><td>Git history</td><td><button>View diff</button></td></tr>
+                </tbody>
+              </table>
+            </div>
+          </section>
         </div>
       </section>
 
@@ -717,12 +778,14 @@
         <div class="panel" style="margin-top: 12px;">
           <div class="toolbar" aria-label="Task filters">
             <span class="filter">Saved view: My attention queue</span>
+            <span class="filter">Mode: Table</span>
             <span class="filter">Project: All</span>
             <span class="filter">Owner: All</span>
             <span class="filter">Provider: All</span>
             <span class="filter">State: Attention first</span>
             <span class="filter">Work ref: Any</span>
             <span class="filter">Host: All</span>
+            <span class="filter">Labels</span>
             <span class="filter">Sort: Next action</span>
             <span class="filter">Columns</span>
             <span class="filter">Density: Compact</span>
@@ -730,13 +793,13 @@
           <div class="freshness" role="status">14 tasks. Updated 18 seconds ago. Live updates connected.</div>
           <div class="table-wrap">
             <table>
-              <caption class="sr-only">Tasks ordered by required attention, with orchestration, execution, reviewer, cost, and next-action status.</caption>
+              <caption class="sr-only">Tasks ordered by required attention, with orchestration, execution, human coordination, repo coordination, cost, and next-action status.</caption>
               <thead>
                 <tr>
                   <th scope="col">Orchestration</th>
                   <th scope="col">Execution</th>
                   <th scope="col">Task</th>
-                  <th scope="col">Review</th>
+                  <th scope="col">Human</th>
                   <th scope="col">Work Ref</th>
                   <th scope="col">Agents</th>
                   <th scope="col">Repo</th>
@@ -752,7 +815,7 @@
                   <td><span class="status review">Ready</span></td>
                   <td>JIRA-42, PR #31</td>
                   <td>Claude running<br>Codex idle</td>
-                  <td>runtime</td>
+                  <td>PR open<br>CI passed</td>
                   <td class="num">$3.11</td>
                   <td><button>Review</button></td>
                 </tr>
@@ -763,7 +826,7 @@
                   <td><span class="status warn">Plan due</span></td>
                   <td>GH#118</td>
                   <td>Codex editing</td>
-                  <td>workbench</td>
+                  <td>PR open<br>CI failing</td>
                   <td class="num">$7.80</td>
                   <td><button>Run tests</button></td>
                 </tr>
@@ -774,7 +837,7 @@
                   <td>Not started</td>
                   <td>Manual</td>
                   <td>OpenCode failed</td>
-                  <td>deploy</td>
+                  <td>No branch</td>
                   <td class="num">$0.16</td>
                   <td><button>Relaunch</button></td>
                 </tr>
@@ -785,7 +848,7 @@
                   <td>Not requested</td>
                   <td>OC-S-19</td>
                   <td>0</td>
-                  <td>skills</td>
+                  <td>Artifact draft</td>
                   <td class="num">$0.00</td>
                   <td><button>Generate context</button></td>
                 </tr>

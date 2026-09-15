@@ -119,6 +119,17 @@ architecture rationale.
   Feedback, with task/resource applicability and provider/model overrides.
 - Provide task, fleet, host, review, skills, ledger, and replay views plus a
   live Agent Graph and worktree change review.
+- Provide a Jira-like human work interface across web, desktop, and mobile
+  form factors. It must support saved views, backlog/board/table modes,
+  priorities, assignees, labels, comments, review queues, notifications, and
+  state transitions while remaining centered on agentic execution state,
+  context packs, policy, repo evidence, provider sessions, and replay.
+- Treat the repository as the primary agent-to-agent coordination medium.
+  Agents exchange durable technical state through branches, commits, PRs,
+  review comments, CI results, task manifests, handoff notes, artifacts, and
+  ledger events. OpenCortex UI is the primary human-to-agent coordination
+  surface for intent, clarification, approval, intervention, teaching, and
+  accountability.
 - Provide a durable knowledge graph over reviewed memory, tasks, work
   references, artifacts, decisions, repositories, people, and skills. Keep it
   distinct from the Agent Graph, which represents execution activity.
@@ -666,6 +677,10 @@ Implementation:
   provider launch. Record exact package versions in the context pack and
   provider session.
 - Add task resource, Action, context preview, and Skill Library views to the UI.
+- Add the first human work interface shell: saved task views, board/table
+  toggles, priority/assignee/label fields, repo coordination signals, and
+  human comment/review affordances. Jira remains one work-reference adapter,
+  not the product's center.
 
 Tests:
 
@@ -696,6 +711,9 @@ Acceptance:
 - Jira behavior survives through generic task/resource APIs and UI.
 - The same Action can run against a manual task, Jira issue, or GitHub PR
   without provider-specific orchestration code.
+- A human can view the same work as a backlog item, board card, or table row
+  and see both human coordination state and repo-originated agent coordination
+  signals.
 - Every launch references an immutable context pack and exact skill bundle
   versions.
 - Oversized, untrusted, unauthorized, or secret-bearing context is visibly
@@ -860,6 +878,10 @@ Implementation:
 - Build task detail around resources, workbenches, terminals, worktrees,
   context, reviews, chat, memory, artifacts, and activity. Permit side-by-side
   inspection of several sessions without requiring raw terminal embedding.
+- Build the cross-platform human coordination surface: desktop-sized dense
+  monitoring layouts, responsive web views, and mobile triage/approval screens
+  over the same APIs. Show human-directed comments, review requests, and
+  notifications separately from repo-derived agent coordination signals.
 - Show Herdr-discovered external sessions in an Unscoped section with host,
   Linux user, provider, cwd, state source, and observed time. Claiming one must
   attach it to an authorized task/workbench without pretending OpenCortex
@@ -912,6 +934,9 @@ Acceptance:
 - An operator can find the highest-priority human intervention, inspect its
   evidence, act, and verify the resulting state without opening Temporal UI or
   logging into the host.
+- A user can coordinate with agents from a Jira-like OpenCortex task interface,
+  while agents coordinate with each other through repo-native durable artifacts
+  that remain inspectable from that interface.
 - The same task can show agents on multiple hosts and providers without losing
   tenant, user, worktree, or state-source distinctions.
 - Live Agent Graph and chronological replay agree because both derive from the
