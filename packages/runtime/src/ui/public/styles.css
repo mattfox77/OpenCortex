@@ -823,6 +823,47 @@ button.secondary {
   white-space: nowrap;
 }
 
+.inventory-task {
+  align-items: start;
+}
+
+.inventory-dynamics {
+  display: flex;
+  grid-column: 2 / -1;
+  min-width: 0;
+  flex-wrap: wrap;
+  gap: 5px;
+}
+
+.dynamics-chip {
+  display: inline-flex;
+  max-width: 100%;
+  min-height: 22px;
+  align-items: center;
+  overflow: hidden;
+  border: 1px solid #d7dee8;
+  border-radius: 999px;
+  background: white;
+  color: rgb(var(--text-muted));
+  padding: 0 8px;
+  font-size: 11px;
+  font-weight: 750;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dynamics-chip.ok {
+  border-color: #b8dbc5;
+  background: #effaf3;
+  color: #17623a;
+}
+
+.dynamics-chip.warn {
+  border-color: #ead0a3;
+  background: #fff8e8;
+  color: #805600;
+}
+
 .observability-heading {
   display: flex;
   align-items: center;

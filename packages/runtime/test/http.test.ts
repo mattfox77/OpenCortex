@@ -3123,6 +3123,101 @@ describe('http app', () => {
     expect(listedForOtherBody.tasks).toEqual([]);
   });
 
+  it('records and reads Project Dynamics through the control-plane API', async () => {
+    const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
+    const { listener, base } = startApp(config);
+    server = listener;
+    const ownerAuth = {
+      Authorization: 'Dev owner@acme.test',
+      'Content-Type': 'application/json',
+    };
+
+    const createdTask = await fetch(`${base}/diwan/api/tasks`, {
+      method: 'POST',
+      headers: ownerAuth,
+      body: JSON.stringify({ title: 'Forecast runtime work' }),
+    });
+    const createdTaskBody = await createdTask.json();
+    const taskId = createdTaskBody.task.id;
+
+    const observationResponse = await fetch(
+      `${base}/diwan/api/tasks/${taskId}/dynamics/observations`,
+      {
+        method: 'POST',
+        headers: ownerAuth,
+        body: JSON.stringify({
+          kind: 'ci_test',
+          source: 'ci',
+          summary: 'Runtime check failed twice before passing',
+          evidence: { failedRuns: 2, p95Minutes: 11 },
+        }),
+      },
+    );
+    expect(observationResponse.status).toBe(201);
+    const observationBody = await observationResponse.json();
+    expect(observationBody.observation).toMatchObject({
+      taskId,
+      kind: 'ci_test',
+      confidence: 'observed',
+      evidence: { failedRuns: 2, p95Minutes: 11 },
+    });
+
+    const unsupportedForecast = await fetch(
+      `${base}/diwan/api/tasks/${taskId}/dynamics/forecasts`,
+      {
+        method: 'POST',
+        headers: ownerAuth,
+        body: JSON.stringify({
+          forecastMinHours: 8,
+          forecastMaxHours: 16,
+          confidence: 0.2,
+          basisSampleSize: 0,
+        }),
+      },
+    );
+    expect(unsupportedForecast.status).toBe(400);
+
+    const forecastResponse = await fetch(
+      `${base}/diwan/api/tasks/${taskId}/dynamics/forecasts`,
+      {
+        method: 'POST',
+        headers: ownerAuth,
+        body: JSON.stringify({
+          forecastMinHours: 20,
+          forecastMaxHours: 36,
+          confidence: 0.74,
+          basisSampleSize: 31,
+          basis: { similarTasks: 31 },
+          risks: ['CI instability'],
+          falsifiers: ['adapter tests pass twice'],
+        }),
+      },
+    );
+    expect(forecastResponse.status).toBe(201);
+
+    const dynamicsResponse = await fetch(
+      `${base}/diwan/api/tasks/${taskId}/dynamics`,
+      { headers: { Authorization: 'Dev owner@acme.test' } },
+    );
+    expect(dynamicsResponse.status).toBe(200);
+    const dynamicsBody = await dynamicsResponse.json();
+    expect(dynamicsBody.dynamics).toMatchObject({
+      observations: [expect.objectContaining({ id: observationBody.observation.id })],
+      currentForecast: {
+        forecastMinHours: 20,
+        forecastMaxHours: 36,
+        confidence: 0.74,
+        basisSampleSize: 31,
+      },
+    });
+
+    const otherResponse = await fetch(
+      `${base}/diwan/api/tasks/${taskId}/dynamics`,
+      { headers: { Authorization: 'Dev other@acme.test' } },
+    );
+    expect(otherResponse.status).toBe(404);
+  });
+
   it('registers hosts, user capabilities, and worktrees through the control-plane API', async () => {
     const config: AppConfig = { ...testConfig(), NODE_ENV: 'development' };
     const app = createApp(config);

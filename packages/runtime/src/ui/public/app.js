@@ -730,8 +730,24 @@ async function refreshControlPlaneInventory() {
       api('/hosts', { redirectOnUnauthorized: false }),
       api('/worktrees', { redirectOnUnauthorized: false }),
     ]);
+    const tasks = Array.isArray(tasksData?.tasks) ? tasksData.tasks : [];
+    const dynamicsEntries = await Promise.all(
+      tasks.map(async task => {
+        try {
+          const data = await api(`/tasks/${encodeURIComponent(task.id)}/dynamics`, {
+            redirectOnUnauthorized: false,
+          });
+          return [task.id, data?.dynamics];
+        } catch {
+          return [task.id, { error: 'Dynamics unavailable' }];
+        }
+      }),
+    );
     controlPlaneInventory = {
-      tasks: Array.isArray(tasksData?.tasks) ? tasksData.tasks : [],
+      tasks,
+      dynamicsByTaskId: Object.fromEntries(
+        dynamicsEntries.filter(([, dynamics]) => dynamics),
+      ),
       workbenches: Array.isArray(workbenchesData?.workbenches)
         ? workbenchesData.workbenches
         : [],
@@ -1523,7 +1539,12 @@ function renderControlPlaneInventory() {
   const list = document.createElement('div');
   list.className = 'inventory-list';
   for (const task of tasks.slice(0, 3)) {
-    list.append(inventoryItem('Task', task.title, task.id, task.status));
+    list.append(
+      inventoryTaskItem(
+        task,
+        controlPlaneInventory.dynamicsByTaskId?.[task.id],
+      ),
+    );
   }
   for (const workbench of workbenches.slice(0, 3)) {
     list.append(
@@ -1560,6 +1581,13 @@ function renderControlPlaneInventory() {
   panel.append(list);
 }
 
+function inventoryTaskItem(task, dynamics) {
+  const row = inventoryItem('Task', task.title, task.id, task.status);
+  row.classList.add('inventory-task');
+  row.append(projectDynamicsSummary(dynamics));
+  return row;
+}
+
 function inventoryItem(kind, title, id, status) {
   const row = document.createElement('div');
   row.className = 'inventory-item';
@@ -1571,6 +1599,75 @@ function inventoryItem(kind, title, id, status) {
   meta.textContent = [status, id].filter(Boolean).join(' · ');
   row.append(label, body, meta);
   return row;
+}
+
+function projectDynamicsSummary(dynamics) {
+  const summary = document.createElement('div');
+  summary.className = 'inventory-dynamics';
+  if (dynamics?.error) {
+    summary.append(dynamicsChip('Dynamics', dynamics.error, 'warn'));
+    return summary;
+  }
+  const observations = Array.isArray(dynamics?.observations)
+    ? dynamics.observations
+    : [];
+  const forecast = dynamics?.currentForecast;
+  if (!forecast) {
+    summary.append(
+      dynamicsChip('Dynamics', `${observations.length} observations · no forecast`, 'muted'),
+    );
+    return summary;
+  }
+  summary.append(
+    dynamicsChip(
+      'Forecast',
+      forecast.unsupportedGuess
+        ? 'unsupported guess'
+        : forecastRangeLabel(forecast),
+      forecast.unsupportedGuess ? 'warn' : 'ok',
+    ),
+    dynamicsChip('Confidence', percentLabel(forecast.confidence), 'muted'),
+    dynamicsChip(
+      'Basis',
+      `${forecast.basisSampleSize ?? 0} samples · ${observations.length} obs`,
+      'muted',
+    ),
+  );
+  if (Array.isArray(forecast.risks) && forecast.risks.length > 0) {
+    summary.append(dynamicsChip('Risk', forecast.risks[0], 'warn'));
+  }
+  return summary;
+}
+
+function dynamicsChip(label, value, tone) {
+  const chip = document.createElement('span');
+  chip.className = ['dynamics-chip', tone].filter(Boolean).join(' ');
+  chip.textContent = `${label}: ${value}`;
+  return chip;
+}
+
+function forecastRangeLabel(forecast) {
+  const min = Number(forecast.forecastMinHours);
+  const max = Number(forecast.forecastMaxHours);
+  if (Number.isFinite(min) && Number.isFinite(max)) {
+    return `${hoursLabel(min)}-${hoursLabel(max)}`;
+  }
+  if (Number.isFinite(min)) return `from ${hoursLabel(min)}`;
+  if (Number.isFinite(max)) return `up to ${hoursLabel(max)}`;
+  return 'range missing';
+}
+
+function hoursLabel(hours) {
+  if (hours >= 24) {
+    const days = hours / 24;
+    return `${days >= 10 ? Math.round(days) : days.toFixed(1)}d`;
+  }
+  return `${hours >= 10 ? Math.round(hours) : hours.toFixed(1)}h`;
+}
+
+function percentLabel(value) {
+  const numeric = Number(value);
+  return Number.isFinite(numeric) ? `${Math.round(numeric * 100)}%` : 'n/a';
 }
 
 function inventoryEmpty(text) {
