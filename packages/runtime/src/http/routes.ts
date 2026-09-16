@@ -74,6 +74,8 @@ import {
 import {
   ControlPlaneStore,
   type HostRecord,
+  type ProjectDynamicsConfidence,
+  type ProjectDynamicsObservationKind,
   type ShareMode,
   type WorkReference,
   type Worktree,
@@ -156,6 +158,61 @@ const createWorkReferenceSchema = z.object({
   title: z.string().trim().min(1).max(240).optional(),
   metadata: z.record(z.string(), z.unknown()).optional(),
 });
+
+const projectDynamicsObservationKindSchema = z.enum([
+  'repo_complexity',
+  'context_readiness',
+  'ci_test',
+  'runtime',
+  'review',
+  'cost',
+  'dependency',
+  'policy',
+  'human_latency',
+  'rework',
+  'forecast_falsifier',
+  'other',
+]) satisfies z.ZodType<ProjectDynamicsObservationKind>;
+
+const projectDynamicsConfidenceSchema = z.enum([
+  'observed',
+  'inferred',
+  'estimated',
+  'missing',
+]) satisfies z.ZodType<ProjectDynamicsConfidence>;
+
+const projectDynamicsObservationSchema = z.object({
+  kind: projectDynamicsObservationKindSchema,
+  source: z.string().trim().min(1).max(160),
+  summary: z.string().trim().min(1).max(1000),
+  evidence: z.record(z.string(), z.unknown()).optional(),
+  confidence: projectDynamicsConfidenceSchema.optional(),
+  observedAt: z.string().datetime().optional(),
+  metadata: z.record(z.string(), z.unknown()).optional(),
+});
+
+const projectDynamicsForecastSchema = z
+  .object({
+    forecastMinHours: z.number().nonnegative().optional(),
+    forecastMaxHours: z.number().nonnegative().optional(),
+    confidence: z.number().min(0).max(1),
+    basisSampleSize: z.number().int().nonnegative(),
+    basis: z.record(z.string(), z.unknown()).optional(),
+    assumptions: z.array(z.string().trim().min(1)).optional(),
+    falsifiers: z.array(z.string().trim().min(1)).optional(),
+    risks: z.array(z.string().trim().min(1)).optional(),
+    scenarios: z.array(z.record(z.string(), z.unknown())).optional(),
+    unsupportedGuess: z.boolean().optional(),
+    source: z.string().trim().min(1).max(160).optional(),
+    metadata: z.record(z.string(), z.unknown()).optional(),
+  })
+  .refine(
+    (value) =>
+      value.forecastMinHours === undefined ||
+      value.forecastMaxHours === undefined ||
+      value.forecastMinHours <= value.forecastMaxHours,
+    'forecastMinHours cannot exceed forecastMaxHours',
+  );
 
 const createWorkbenchSchema = z.object({
   taskId: z.string().trim().min(1),
@@ -545,6 +602,68 @@ export function apiRouter(
       return res.status(404).json({ error: 'task_not_found' });
     }
     return res.json({ resources });
+  });
+
+  router.get('/tasks/:id/dynamics', requireUser, (req, res) => {
+    const dynamics = controlPlane.getProjectDynamics(
+      req.user!,
+      String(req.params.id),
+    );
+    if (!dynamics) {
+      return res.status(404).json({ error: 'task_not_found' });
+    }
+    return res.json({ dynamics });
+  });
+
+  router.post('/tasks/:id/dynamics/observations', requireUser, (req, res, next) => {
+    try {
+      const body = projectDynamicsObservationSchema.parse(req.body);
+      const observation = controlPlane.recordProjectDynamicsObservation({
+        user: req.user!,
+        taskId: String(req.params.id),
+        kind: body.kind,
+        source: body.source,
+        summary: body.summary,
+        evidence: body.evidence,
+        confidence: body.confidence,
+        observedAt: body.observedAt,
+        metadata: body.metadata,
+      });
+      if (!observation) {
+        return res.status(404).json({ error: 'task_not_found' });
+      }
+      return res.status(201).json({ observation });
+    } catch (error) {
+      return next(error);
+    }
+  });
+
+  router.post('/tasks/:id/dynamics/forecasts', requireUser, (req, res, next) => {
+    try {
+      const body = projectDynamicsForecastSchema.parse(req.body);
+      const forecast = controlPlane.publishProjectDynamicsForecast({
+        user: req.user!,
+        taskId: String(req.params.id),
+        forecastMinHours: body.forecastMinHours,
+        forecastMaxHours: body.forecastMaxHours,
+        confidence: body.confidence,
+        basisSampleSize: body.basisSampleSize,
+        basis: body.basis,
+        assumptions: body.assumptions,
+        falsifiers: body.falsifiers,
+        risks: body.risks,
+        scenarios: body.scenarios,
+        unsupportedGuess: body.unsupportedGuess,
+        source: body.source,
+        metadata: body.metadata,
+      });
+      if (!forecast) {
+        return res.status(404).json({ error: 'task_not_found' });
+      }
+      return res.status(201).json({ forecast });
+    } catch (error) {
+      return next(error);
+    }
   });
 
   router.post('/workbenches', requireUser, (req, res, next) => {

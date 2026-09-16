@@ -193,6 +193,100 @@ describe('ControlPlaneStore', () => {
     );
   });
 
+  it('records Project Dynamics evidence and supersedes active forecasts', () => {
+    const controlPlane = store();
+    const owner = user();
+    const task = controlPlane.createTask({
+      user: owner,
+      title: 'Runtime provider work',
+    });
+
+    const observation = controlPlane.recordProjectDynamicsObservation({
+      user: owner,
+      taskId: task.id,
+      kind: 'ci_test',
+      source: 'ci',
+      summary: 'Runtime check failed twice before passing',
+      evidence: { failedRuns: 2, p95Minutes: 11 },
+      confidence: 'observed',
+    });
+    const firstForecast = controlPlane.publishProjectDynamicsForecast({
+      user: owner,
+      taskId: task.id,
+      forecastMinHours: 28,
+      forecastMaxHours: 48,
+      confidence: 0.68,
+      basisSampleSize: 24,
+      basis: { similarTasks: 24, samePackageArea: 9 },
+      assumptions: ['one review cycle'],
+      falsifiers: ['adapter tests pass twice'],
+      risks: ['CI instability'],
+    });
+    const secondForecast = controlPlane.publishProjectDynamicsForecast({
+      user: owner,
+      taskId: task.id,
+      forecastMinHours: 20,
+      forecastMaxHours: 36,
+      confidence: 0.74,
+      basisSampleSize: 31,
+      basis: { similarTasks: 31 },
+      assumptions: ['tests stabilized'],
+    });
+
+    expect(observation).toMatchObject({
+      kind: 'ci_test',
+      source: 'ci',
+      evidence: { failedRuns: 2, p95Minutes: 11 },
+    });
+    expect(firstForecast?.status).toBe('superseded');
+    expect(firstForecast?.supersededAt).toBeDefined();
+    expect(secondForecast).toMatchObject({
+      status: 'active',
+      forecastMinHours: 20,
+      forecastMaxHours: 36,
+      unsupportedGuess: false,
+    });
+    expect(controlPlane.getProjectDynamics(owner, task.id)).toMatchObject({
+      observations: [expect.objectContaining({ id: observation?.id })],
+      currentForecast: { id: secondForecast?.id, status: 'active' },
+    });
+    expect(
+      controlPlane.getProjectDynamics(user('other@acme.test'), task.id),
+    ).toBeUndefined();
+  });
+
+  it('rejects Project Dynamics forecasts without evidence unless labeled as a guess', () => {
+    const controlPlane = store();
+    const owner = user();
+    const task = controlPlane.createTask({
+      user: owner,
+      title: 'Unsupported estimate',
+    });
+
+    expect(() =>
+      controlPlane.publishProjectDynamicsForecast({
+        user: owner,
+        taskId: task.id,
+        forecastMinHours: 4,
+        forecastMaxHours: 8,
+        confidence: 0.2,
+        basisSampleSize: 0,
+      }),
+    ).toThrow(/require evidence/);
+
+    expect(
+      controlPlane.publishProjectDynamicsForecast({
+        user: owner,
+        taskId: task.id,
+        forecastMinHours: 4,
+        forecastMaxHours: 8,
+        confidence: 0.2,
+        basisSampleSize: 0,
+        unsupportedGuess: true,
+      }),
+    ).toMatchObject({ unsupportedGuess: true });
+  });
+
   it('tracks host capabilities and refuses worktrees outside host roots', () => {
     const controlPlane = store();
     const owner = user('owner@acme.test');

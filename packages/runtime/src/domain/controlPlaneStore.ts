@@ -317,6 +317,69 @@ export interface SessionShareGrant {
   expiresAt?: string;
 }
 
+export type ProjectDynamicsObservationKind =
+  | "repo_complexity"
+  | "context_readiness"
+  | "ci_test"
+  | "runtime"
+  | "review"
+  | "cost"
+  | "dependency"
+  | "policy"
+  | "human_latency"
+  | "rework"
+  | "forecast_falsifier"
+  | "other";
+
+export type ProjectDynamicsConfidence =
+  | "observed"
+  | "inferred"
+  | "estimated"
+  | "missing";
+
+export interface ProjectDynamicsObservation {
+  id: string;
+  tenantId: string;
+  taskId: string;
+  kind: ProjectDynamicsObservationKind;
+  source: string;
+  summary: string;
+  evidence: Record<string, unknown>;
+  confidence: ProjectDynamicsConfidence;
+  observedAt: string;
+  createdBy: string;
+  createdAt: string;
+}
+
+export interface ProjectDynamicsForecast {
+  id: string;
+  tenantId: string;
+  taskId: string;
+  status: "active" | "superseded" | "withdrawn";
+  forecastMinHours?: number;
+  forecastMaxHours?: number;
+  confidence: number;
+  basisSampleSize: number;
+  basis: Record<string, unknown>;
+  assumptions: string[];
+  falsifiers: string[];
+  risks: string[];
+  scenarios: Array<Record<string, unknown>>;
+  unsupportedGuess: boolean;
+  source: string;
+  metadata: Record<string, unknown>;
+  createdBy: string;
+  createdAt: string;
+  updatedAt: string;
+  supersededAt?: string;
+}
+
+export interface ProjectDynamicsSnapshot {
+  observations: ProjectDynamicsObservation[];
+  forecasts: ProjectDynamicsForecast[];
+  currentForecast?: ProjectDynamicsForecast;
+}
+
 interface ControlPlaneState {
   tenants: Tenant[];
   memberships: TenantMembership[];
@@ -332,6 +395,8 @@ interface ControlPlaneState {
   assignmentTemplates: AssignmentTemplate[];
   assignmentInstances: AssignmentInstance[];
   sessionShareGrants: SessionShareGrant[];
+  projectDynamicsObservations: ProjectDynamicsObservation[];
+  projectDynamicsForecasts: ProjectDynamicsForecast[];
 }
 
 export interface LegacyControlPlaneIds {
@@ -1170,6 +1235,144 @@ export class ControlPlaneStore {
       .sort((a, b) => b.createdAt.localeCompare(a.createdAt));
   }
 
+  recordProjectDynamicsObservation(input: {
+    user: AuthenticatedUser;
+    taskId: string;
+    kind: ProjectDynamicsObservationKind;
+    source: string;
+    summary: string;
+    evidence?: Record<string, unknown>;
+    confidence?: ProjectDynamicsConfidence;
+    observedAt?: string;
+    metadata?: Record<string, unknown>;
+  }): ProjectDynamicsObservation | undefined {
+    const task = this.getTask(input.user, input.taskId);
+    if (!task || !this.canOperate(input.user, task.ownerEmail)) {
+      return undefined;
+    }
+    const now = new Date().toISOString();
+    const observation: ProjectDynamicsObservation = {
+      id: `dyn_obs_${nanoid(12)}`,
+      tenantId: task.tenantId,
+      taskId: task.id,
+      kind: input.kind,
+      source: input.source,
+      summary: input.summary,
+      evidence: {
+        ...(input.evidence ?? {}),
+        ...(input.metadata ? { metadata: input.metadata } : {}),
+      },
+      confidence: input.confidence ?? "observed",
+      observedAt: input.observedAt ?? now,
+      createdBy: input.user.sub,
+      createdAt: now,
+    };
+    this.state.projectDynamicsObservations.push(observation);
+    this.persist();
+    return observation;
+  }
+
+  publishProjectDynamicsForecast(input: {
+    user: AuthenticatedUser;
+    taskId: string;
+    forecastMinHours?: number;
+    forecastMaxHours?: number;
+    confidence: number;
+    basisSampleSize: number;
+    basis?: Record<string, unknown>;
+    assumptions?: string[];
+    falsifiers?: string[];
+    risks?: string[];
+    scenarios?: Array<Record<string, unknown>>;
+    unsupportedGuess?: boolean;
+    source?: string;
+    metadata?: Record<string, unknown>;
+  }): ProjectDynamicsForecast | undefined {
+    const task = this.getTask(input.user, input.taskId);
+    if (!task || !this.canOperate(input.user, task.ownerEmail)) {
+      return undefined;
+    }
+    if (
+      input.forecastMinHours !== undefined &&
+      input.forecastMaxHours !== undefined &&
+      input.forecastMinHours > input.forecastMaxHours
+    ) {
+      throw new Error("forecastMinHours cannot exceed forecastMaxHours");
+    }
+    const basis = input.basis ?? {};
+    const unsupportedGuess = input.unsupportedGuess ?? false;
+    if (
+      !unsupportedGuess &&
+      input.basisSampleSize <= 0 &&
+      Object.keys(basis).length === 0
+    ) {
+      throw new Error(
+        "Project Dynamics forecasts require evidence or unsupportedGuess=true",
+      );
+    }
+    const now = new Date().toISOString();
+    for (const forecast of this.state.projectDynamicsForecasts) {
+      if (
+        forecast.tenantId === task.tenantId &&
+        forecast.taskId === task.id &&
+        forecast.status === "active"
+      ) {
+        forecast.status = "superseded";
+        forecast.supersededAt = now;
+        forecast.updatedAt = now;
+      }
+    }
+    const forecast: ProjectDynamicsForecast = {
+      id: `dyn_fcst_${nanoid(12)}`,
+      tenantId: task.tenantId,
+      taskId: task.id,
+      status: "active",
+      forecastMinHours: input.forecastMinHours,
+      forecastMaxHours: input.forecastMaxHours,
+      confidence: Math.max(0, Math.min(1, input.confidence)),
+      basisSampleSize: Math.max(0, Math.trunc(input.basisSampleSize)),
+      basis,
+      assumptions: input.assumptions ?? [],
+      falsifiers: input.falsifiers ?? [],
+      risks: input.risks ?? [],
+      scenarios: input.scenarios ?? [],
+      unsupportedGuess,
+      source: input.source ?? "opencortex",
+      metadata: input.metadata ?? {},
+      createdBy: input.user.sub,
+      createdAt: now,
+      updatedAt: now,
+    };
+    this.state.projectDynamicsForecasts.push(forecast);
+    this.persist();
+    return forecast;
+  }
+
+  getProjectDynamics(
+    user: AuthenticatedUser,
+    taskId: string,
+  ): ProjectDynamicsSnapshot | undefined {
+    const task = this.getTask(user, taskId);
+    if (!task) {
+      return undefined;
+    }
+    const observations = this.state.projectDynamicsObservations
+      .filter(
+        (item) => item.tenantId === task.tenantId && item.taskId === task.id,
+      )
+      .sort((a, b) => b.observedAt.localeCompare(a.observedAt));
+    const forecasts = this.state.projectDynamicsForecasts
+      .filter(
+        (item) => item.tenantId === task.tenantId && item.taskId === task.id,
+      )
+      .sort((a, b) => b.updatedAt.localeCompare(a.updatedAt));
+    return {
+      observations,
+      forecasts,
+      currentForecast: forecasts.find((item) => item.status === "active"),
+    };
+  }
+
   private canReadTask(user: AuthenticatedUser, task: AgentTask): boolean {
     return user.isSuperAdmin === true || task.ownerEmail === user.email;
   }
@@ -1376,6 +1579,8 @@ export class ControlPlaneStore {
         assignmentTemplates: parsed.assignmentTemplates ?? [],
         assignmentInstances: parsed.assignmentInstances ?? [],
         sessionShareGrants: parsed.sessionShareGrants ?? [],
+        projectDynamicsObservations: parsed.projectDynamicsObservations ?? [],
+        projectDynamicsForecasts: parsed.projectDynamicsForecasts ?? [],
       };
     } catch {
       return {
@@ -1393,6 +1598,8 @@ export class ControlPlaneStore {
         assignmentTemplates: [],
         assignmentInstances: [],
         sessionShareGrants: [],
+        projectDynamicsObservations: [],
+        projectDynamicsForecasts: [],
       };
     }
   }
